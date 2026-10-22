@@ -7,6 +7,11 @@ set(CMAKE_INCLUDE_CURRENT_DIR 1)
 option(OSSIA_MAX_TEST "Run automatic test for C74 Max" OFF)
 set(MAXSDK_PATH "${OSSIA_3RDPARTY_FOLDER}/max-sdk" CACHE PATH "Path to Max SDK folder")
 
+# Version of the Max package, and name of the script-driven node object.
+# Both are defined here only; the sources read them as compile definitions.
+set(OSSIA_MAX_PACKAGE_VERSION "2.1.0+prism.1")
+set(OSSIA_V8CONNECTOR_NAME "ossia.v8connector")
+
 include(GenerateExportHeader)
 if(APPLE)
     set(CMAKE_INSTALL_RPATH "@loader_path/../../../../support;@loader_path")
@@ -87,6 +92,10 @@ set(PROJECT_SRCS
     src/utils.cpp
     src/view.hpp
     src/view.cpp
+    src/v8connector.hpp
+    src/v8connector.cpp
+    src/v8connector_branch.hpp
+    src/v8connector_branch.cpp
     src/ZeroconfMinuitListener.cpp
     src/ZeroconfMinuitListener.hpp
     src/ZeroconfOscqueryListener.cpp
@@ -98,6 +107,9 @@ set(PROJECT_SRCS
 add_library(${PROJECT_NAME} SHARED ${PROJECT_SRCS})
 target_compile_options(${PROJECT_NAME} PRIVATE ${OSSIA_COMPILE_OPTIONS})
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+    OSSIA_MAX_PACKAGE_VERSION="${OSSIA_MAX_PACKAGE_VERSION}"
+    OSSIA_V8CONNECTOR_NAME="${OSSIA_V8CONNECTOR_NAME}")
 
 use_gold(${PROJECT_NAME})
 add_linker_warnings_external(${PROJECT_NAME})
@@ -165,6 +177,7 @@ set(OSSIA_EXT_LIST
     ossia.assert
     ossia.equals
     ossia.cue
+    ${OSSIA_V8CONNECTOR_NAME}
 )
 set(OSSIA_MAX_SYMBOLS "")
 foreach(ossiaExt ${OSSIA_EXT_LIST})
