@@ -28,7 +28,7 @@
 	}
 ,
 	"tags" : ["framework", "interactive", "Score", "network", "mapping", "OSCQuery"],
-	"version" : "@GIT_SHA@",
+	"version" : "@OSSIA_MAX_PACKAGE_VERSION@",
 	"website" : "https://ossia.io",
 	"filelist" : 	{
 		"examples" : [],
