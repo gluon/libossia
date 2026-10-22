@@ -282,3 +282,147 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
     REQUIRE(b1.set("gain", {-3}).empty());
   }
 }
+
+TEST_CASE("v8connector_bind", "v8connector_bind")
+{
+  auto proto = std::make_unique<ossia::net::multiplex_protocol>();
+  ossia::net::generic_device dev{std::move(proto), "v8_bind"};
+  auto& root = dev.get_root_node();
+
+  // A parameter created by hand, as ossia.parameter does
+  {
+    auto& n = ossia::net::create_node(root, "/manual/gain");
+    auto* p = ossia::try_setup_parameter("float", n);
+    p->set_domain(ossia::make_domain(0.f, 1.f));
+    p->push_value(0.25f);
+  }
+
+  // Instance A declares, instance B follows. Both resolve like an ossia.remote
+  // placed in a patcher whose device is dev.
+  auto& bn_a = ossia::net::create_node(root, "/synth");
+  auto& bn_b = ossia::net::create_node(root, "/mirror");
+  branch a, b;
+  a.attach(bn_a);
+  b.attach(bn_b);
+  std::vector<std::pair<std::string, std::size_t>> changes;
+  b.set_binding_changed_callback(
+      [&](const std::string& addr, std::size_t n) { changes.emplace_back(addr, n); });
+  a.set_resolution_context({&root}, {&dev});
+  b.set_resolution_context({&root}, {&dev});
+
+  const auto gain = spec_of(
+      "gain", attrs({{"type", {S("float")}}, {"min", {-60}}, {"max", {6}}, {"default", {-12}}, {"clip", {S("both")}}}));
+  REQUIRE(a.add(gain).empty());
+  REQUIRE(a.add(spec_of("voices", attrs({{"type", {S("int")}}, {"min", {1}}, {"max", {16}}}))).empty());
+
+  SECTION("bind follows an existing parameter, set goes both ways, no echo")
+  {
+    REQUIRE(b.bind("synth/gain").empty());
+    REQUIRE(b.bound_count("synth/gain") == 1);
+    REQUIRE(changes.back() == std::make_pair(std::string("synth/gain"), std::size_t(1)));
+    REQUIRE(!b.bind("synth/gain").empty()); // twice
+    REQUIRE(ossia::net::find_node(root, "/mirror/synth") == nullptr); // nothing created
+
+    // the current value is delivered on bind
+    auto in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/gain");
+    REQUIRE(in[0].value == ossia::value(-12.f));
+    a.drain();
+
+    // B sets: A receives, B does not
+    REQUIRE(b.set("synth/gain", {-20}).empty());
+    in = a.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "gain");
+    REQUIRE(in[0].value == ossia::value(-20.f));
+    REQUIRE(b.drain().empty());
+
+    // A sets: B receives under the bound address, A does not
+    REQUIRE(a.set("gain", {-10}).empty());
+    in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/gain");
+    REQUIRE(in[0].value == ossia::value(-10.f));
+    REQUIRE(a.drain().empty());
+
+    // the owner's type and range apply to the follower's pushes
+    REQUIRE(b.set("synth/gain", {100}).empty());
+    REQUIRE(ossia::net::find_node(root, "/synth/gain")->get_parameter()->value() == ossia::value(6.f));
+    REQUIRE(!b.set("synth/gain", {S("loud")}).empty());
+
+    // unbind: nothing flows any more, the parameter is untouched
+    REQUIRE(b.unbind("synth/gain"));
+    REQUIRE(!b.unbind("synth/gain"));
+    REQUIRE(a.set("gain", {0}).empty());
+    REQUIRE(b.drain().empty());
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") != nullptr);
+  }
+
+  SECTION("the followed parameter disappears and comes back")
+  {
+    REQUIRE(b.bind("synth/gain").empty());
+    b.drain();
+    REQUIRE(a.remove("gain"));
+    REQUIRE(b.bound_count("synth/gain") == 0);
+    REQUIRE(changes.back() == std::make_pair(std::string("synth/gain"), std::size_t(0)));
+    REQUIRE(!b.set("synth/gain", {1}).empty());
+
+    REQUIRE(a.add(gain).empty());
+    REQUIRE(b.bound_count("synth/gain") == 1);
+    // the owner's default reaches the follower
+    auto in = b.drain();
+    REQUIRE(!in.empty());
+    REQUIRE(in.back().address == "synth/gain");
+    REQUIRE(in.back().value == ossia::value(-12.f));
+    REQUIRE(b.set("synth/gain", {-30}).empty());
+    in = a.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].value == ossia::value(-30.f));
+
+    // the whole owner node disappears (its model registers again) and comes back
+    root.remove_child(bn_a);
+    REQUIRE(b.bound_count("synth/gain") == 0);
+    auto& bn_a2 = ossia::net::create_node(root, "/synth");
+    a.attach(bn_a2);
+    REQUIRE(b.bound_count("synth/gain") == 1);
+    REQUIRE(b.set("synth/gain", {-40}).empty());
+    REQUIRE(ossia::net::find_node(root, "/synth/gain")->get_parameter()->value() == ossia::value(-40.f));
+  }
+
+  SECTION("a bind to a parameter that does not exist yet waits for it")
+  {
+    REQUIRE(b.bind("later/x").empty());
+    REQUIRE(b.bound_count("later/x") == 0);
+    auto& n = ossia::net::create_node(root, "/later/x");
+    ossia::try_setup_parameter("int", n);
+    REQUIRE(b.bound_count("later/x") == 1);
+  }
+
+  SECTION("absolute, global and pattern addresses, as ossia.remote")
+  {
+    REQUIRE(b.bind("/manual/gain").empty());
+    REQUIRE(b.bound_count("/manual/gain") == 1);
+    REQUIRE(b.bind("v8_bind:/manual/gain").empty());
+    REQUIRE(b.bound_count("v8_bind:/manual/gain") == 1);
+    REQUIRE(b.bind("synth/*").empty());
+    REQUIRE(b.bound_count("synth/*") == 2);
+    b.drain();
+    REQUIRE(a.set("voices", {8}).empty());
+    auto in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/voices");
+    REQUIRE(in[0].value == ossia::value(8));
+    // a new match of the pattern is followed when it appears
+    REQUIRE(a.add(spec_of("cutoff", attrs({{"type", {S("float")}}, {"range", {20, 20000}}}))).empty());
+    REQUIRE(b.bound_count("synth/*") == 3);
+  }
+
+  SECTION("bind and add do not share an address inside one instance")
+  {
+    REQUIRE(!b.bind("").empty());
+    REQUIRE(a.bind("manual/gain").empty());
+    REQUIRE(!a.bind("gain").empty());  // declared by add in a
+    REQUIRE(!a.add(spec_of("manual/gain", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}}))).empty());
+  }
+}

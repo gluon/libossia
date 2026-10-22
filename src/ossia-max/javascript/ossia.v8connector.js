@@ -14,6 +14,17 @@
 //   synth.set("gain", -6);
 //   synth.remove("voices");
 //
+// bind subscribes to a parameter that exists elsewhere, declared by another
+// instance or by an ossia.parameter, without creating anything. The address
+// follows the rules of ossia.remote: relative to the enclosing model or
+// device, absolute with a leading slash, or device:/address.
+//
+//   const mirror = new OssiaConnector("mirror");
+//   mirror.bind("synth/gain");
+//   mirror.on("synth/gain", (v) => { gain = v; });
+//   mirror.set("synth/gain", -6);                 // pushes to the owner's parameter
+//   mirror.unbind("synth/gain");
+//
 // Values that change by another source (a remote client, another ossia object,
 // another script) leave the object's left outlet as "<address> <values...>".
 // Patch that outlet into the script's inlet and forward them from anything():
@@ -120,6 +131,15 @@ OssiaConnector.prototype.remove = function (address) {
 
 OssiaConnector.prototype.clear = function () {
   this.send(["clear"]);
+};
+
+// bind(address): follow a parameter that exists elsewhere; set and on work on it.
+OssiaConnector.prototype.bind = function (address) {
+  this.send(["bind", address]);
+};
+
+OssiaConnector.prototype.unbind = function (address) {
+  this.send(["unbind", address]);
 };
 
 // on(address, handler): handler(values...) runs when the value changes by another source.

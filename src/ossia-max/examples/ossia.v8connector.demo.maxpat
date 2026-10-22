@@ -192,10 +192,10 @@
 					"patching_rect": [
 						20.0,
 						255.0,
-						440.0,
+						900.0,
 						48.0
 					],
-					"text": "2. two v8ui, each with its own ossia.v8connector. Both connectors are named ui, so the second one becomes ui.1 (as two ossia.model would): the scripts declare the same relative addresses gain, cutoff and voices under two distinct nodes.",
+					"text": "2. two v8ui, each with its own ossia.v8connector, one parameter set. The left script declares gain, cutoff and voices under the node ui (add). The right script creates nothing: it binds to ui/gain, ui/cutoff and ui/voices, the parameters of the left one, and mirrors them.",
 					"fontname": "Lato Regular",
 					"fontsize": 12.0,
 					"linecount": 3
@@ -210,12 +210,13 @@
 					"patching_rect": [
 						20.0,
 						310.0,
-						300.0,
-						21.0
+						440.0,
+						35.0
 					],
-					"text": "scripting name ui_a: the script finds it by that name, no cord to the object",
+					"text": "scripting name ui_a, add mode: the script finds the object by that name, no cord to it",
 					"fontname": "Lato Regular",
-					"fontsize": 12.0
+					"fontsize": 12.0,
+					"linecount": 2
 				}
 			},
 			{
@@ -226,8 +227,8 @@
 					"numoutlets": 2,
 					"patching_rect": [
 						20.0,
-						335.0,
-						170.0,
+						350.0,
+						180.0,
 						22.0
 					],
 					"outlettype": [
@@ -261,8 +262,8 @@
 					"numinlets": 1,
 					"numoutlets": 0,
 					"patching_rect": [
-						210.0,
-						335.0,
+						220.0,
+						350.0,
 						90.0,
 						22.0
 					],
@@ -277,7 +278,7 @@
 					"numoutlets": 1,
 					"patching_rect": [
 						20.0,
-						370.0,
+						385.0,
 						300.0,
 						120.0
 					],
@@ -300,12 +301,13 @@
 					"patching_rect": [
 						480.0,
 						310.0,
-						300.0,
-						21.0
+						440.0,
+						35.0
 					],
-					"text": "scripting name ui_b: same script, same relative addresses, node ui.1",
+					"text": "scripting name ui_b, bind mode: drag here, the left v8ui and the remotes follow; drag there, this one follows. Remove the left connector: this one waits and rebinds when it comes back.",
 					"fontname": "Lato Regular",
-					"fontsize": 12.0
+					"fontsize": 12.0,
+					"linecount": 2
 				}
 			},
 			{
@@ -316,15 +318,15 @@
 					"numoutlets": 2,
 					"patching_rect": [
 						480.0,
-						335.0,
-						170.0,
+						350.0,
+						180.0,
 						22.0
 					],
 					"outlettype": [
 						"",
 						""
 					],
-					"text": "ossia.v8connector ui",
+					"text": "ossia.v8connector mirror",
 					"varname": "ui_b",
 					"color": [
 						0.0,
@@ -351,8 +353,8 @@
 					"numinlets": 1,
 					"numoutlets": 0,
 					"patching_rect": [
-						670.0,
-						335.0,
+						680.0,
+						350.0,
 						90.0,
 						22.0
 					],
@@ -367,7 +369,7 @@
 					"numoutlets": 1,
 					"patching_rect": [
 						480.0,
-						370.0,
+						385.0,
 						300.0,
 						120.0
 					],
@@ -377,7 +379,9 @@
 					"border": 0,
 					"filename": "ossia.v8connector.demo.js",
 					"jsarguments": [
-						"ui_b"
+						"ui_b",
+						"bind",
+						"ui"
 					]
 				}
 			},
@@ -389,11 +393,11 @@
 					"numoutlets": 0,
 					"patching_rect": [
 						20.0,
-						510.0,
+						515.0,
 						900.0,
 						35.0
 					],
-					"text": "3. other ossia objects listening to the declared addresses. Drag a slider in a v8ui: the matching remote follows. Type a value here: the v8ui follows (the values come back through the connector's left outlet).",
+					"text": "3. other ossia objects listening to the same addresses. Drag a slider in either v8ui: the matching remote follows. Type a value here: both v8ui follow (the values come back through the connectors' left outlets).",
 					"fontname": "Lato Regular",
 					"fontsize": 12.0,
 					"linecount": 2
@@ -522,7 +526,7 @@
 					"numinlets": 1,
 					"numoutlets": 2,
 					"patching_rect": [
-						480.0,
+						580.0,
 						555.0,
 						60.0,
 						22.0
@@ -541,7 +545,7 @@
 					"numinlets": 1,
 					"numoutlets": 3,
 					"patching_rect": [
-						480.0,
+						580.0,
 						585.0,
 						190.0,
 						22.0
@@ -551,7 +555,7 @@
 						"",
 						""
 					],
-					"text": "ossia.remote ui.1/gain"
+					"text": "ossia.remote ui/voices"
 				}
 			},
 			{
@@ -561,7 +565,7 @@
 					"numinlets": 1,
 					"numoutlets": 2,
 					"patching_rect": [
-						480.0,
+						580.0,
 						615.0,
 						60.0,
 						22.0
@@ -576,64 +580,6 @@
 			{
 				"box": {
 					"id": "obj-29",
-					"maxclass": "flonum",
-					"numinlets": 1,
-					"numoutlets": 2,
-					"patching_rect": [
-						760.0,
-						555.0,
-						60.0,
-						22.0
-					],
-					"outlettype": [
-						"",
-						"bang"
-					],
-					"parameter_enable": 0
-				}
-			},
-			{
-				"box": {
-					"id": "obj-30",
-					"maxclass": "newobj",
-					"numinlets": 1,
-					"numoutlets": 3,
-					"patching_rect": [
-						760.0,
-						585.0,
-						190.0,
-						22.0
-					],
-					"outlettype": [
-						"",
-						"",
-						""
-					],
-					"text": "ossia.remote ui.1/voices"
-				}
-			},
-			{
-				"box": {
-					"id": "obj-31",
-					"maxclass": "flonum",
-					"numinlets": 1,
-					"numoutlets": 2,
-					"patching_rect": [
-						760.0,
-						615.0,
-						60.0,
-						22.0
-					],
-					"outlettype": [
-						"",
-						"bang"
-					],
-					"parameter_enable": 0
-				}
-			},
-			{
-				"box": {
-					"id": "obj-32",
 					"maxclass": "comment",
 					"numinlets": 1,
 					"numoutlets": 0,
@@ -643,7 +589,7 @@
 						900.0,
 						35.0
 					],
-					"text": "The script's own set does not come back to it; it reaches the network, the remotes above and the other scripts. A declaration without @min and @max for a numeric type is refused (see the Max console).",
+					"text": "A script's own set never comes back to it; it reaches the network, the remotes above and the other script. A declaration without @min and @max for a numeric type is refused (see the Max console).",
 					"fontname": "Lato Regular",
 					"fontsize": 12.0,
 					"linecount": 2
@@ -815,30 +761,6 @@
 					],
 					"source": [
 						"obj-27",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-30",
-						0
-					],
-					"source": [
-						"obj-29",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-31",
-						0
-					],
-					"source": [
-						"obj-30",
 						0
 					]
 				}

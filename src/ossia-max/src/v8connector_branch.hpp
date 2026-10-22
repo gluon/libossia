@@ -7,7 +7,12 @@
 // device tree, attaches the branch to it and detaches it before the node
 // disappears. The declarations are kept, so that attaching the branch to a new
 // node recreates every leaf.
+//
+// A branch can also follow parameters that exist elsewhere (bind), the way
+// ossia.remote does: nothing is created, the subscription follows the
+// parameter when it disappears and comes back, and set pushes to it.
 
+#include <ossia/network/base/device.hpp>
 #include <ossia/network/base/node.hpp>
 #include <ossia/network/base/parameter.hpp>
 #include <ossia/network/value/value.hpp>
@@ -105,9 +110,35 @@ public:
   bool remove(std::string_view address);
   // Remove every leaf of this branch.
   void clear();
-  // Push a value from the host. The value is clipped to the declared range.
-  // The host's own callback is not fired for this push.
+  // Push a value from the host, to a declared leaf or to a bound address. The
+  // value is clipped to the parameter's range. The host's own callback is not
+  // fired for this push.
   std::string set(std::string_view address, const scalars& values);
+
+  // Follow a parameter that exists elsewhere. The address follows the rules of
+  // ossia.remote: relative to the parents given by set_resolution_context,
+  // absolute ("/a/b") in the parents' device, or global ("device:/a/b");
+  // patterns are accepted. Refused if the address is empty, already bound, or
+  // declared as a leaf of this branch. A bind to a parameter that does not
+  // exist yet is kept and resolved when the parameter appears.
+  std::string bind(std::string_view address);
+  // Drop a subscription. Returns false if the address is not bound.
+  bool unbind(std::string_view address);
+  // Number of parameters currently followed by a bound address.
+  std::size_t bound_count(std::string_view address) const;
+
+  // Where relative and absolute bound addresses are resolved: the nodes an
+  // ossia.remote placed next to the host would register under, and the devices
+  // known to the host. Resolves the pending bindings, and listens to parameter
+  // creation on these devices to resolve them later.
+  void set_resolution_context(
+      std::vector<ossia::net::node_base*> parents,
+      std::vector<ossia::net::device_base*> devices);
+  // Forget a device before it is destroyed.
+  void drop_device(ossia::net::device_base* dev);
+  // Called when the number of parameters followed by a bound address changes.
+  void set_binding_changed_callback(
+      std::function<void(const std::string& address, std::size_t count)> cb);
 
   std::vector<std::string> addresses() const;
   std::size_t size() const { return m_leaves.size(); }
@@ -131,14 +162,37 @@ private:
     ossia::net::parameter_base* param{};
   };
 
+  struct target
+  {
+    ossia::net::node_base* node{};
+    ossia::net::parameter_base* param{};
+    ossia::net::parameter_base::callback_index callback{};
+    std::string out_address;
+  };
+
+  struct binding
+  {
+    std::string address;
+    std::vector<target> targets;
+  };
+
   leaf* find(std::string_view address);
+  binding* find_binding(std::string_view address);
   std::string create(leaf& l);
   void destroy(leaf& l);
+  void resolve(binding& b, bool emit_current);
+  void resolve_bindings(bool emit_current);
+  void release(binding& b);
   void on_value(const std::string& address, const ossia::value& v);
   void on_node_removing(const ossia::net::node_base& n);
+  void on_parameter_created(const ossia::net::parameter_base& p);
 
   ossia::net::node_base* m_node{};
   std::vector<leaf> m_leaves;
+  std::vector<binding> m_bindings;
+  std::vector<ossia::net::node_base*> m_parents;
+  std::vector<ossia::net::device_base*> m_devices;
+  std::function<void(const std::string&, std::size_t)> m_binding_changed;
 
   std::mutex m_queue_mutex;
   std::vector<inbound> m_queue;

@@ -48,6 +48,8 @@ extern "C" void ossia_v8connector_setup()
   class_addmethod(c, (method)v8connector::remove, "remove", A_GIMME, 0);
   class_addmethod(c, (method)v8connector::clear, "clear", A_NOTHING, 0);
   class_addmethod(c, (method)v8connector::set, "set", A_GIMME, 0);
+  class_addmethod(c, (method)v8connector::bind, "bind", A_SYM, 0);
+  class_addmethod(c, (method)v8connector::unbind, "unbind", A_SYM, 0);
   class_addmethod(c, (method)v8connector::address, "address", A_SYM, 0);
   class_addmethod(c, (method)node_base::get_namespace, "namespace", A_GIMME, 0);
   class_addmethod(c, (method)object_base::get_mess_cb, "get", A_SYM, 0);
@@ -127,8 +129,17 @@ void* v8connector::create(t_symbol*, long argc, t_atom* argv)
   void* queue = x->m_queue_qelem;
   x->m_branch.set_wake_callback([queue] { qelem_set(queue); });
   x->m_branch.set_node_lost_callback([x] { x->schedule_registration(); });
+  x->m_branch.set_binding_changed_callback([x](const std::string& address, std::size_t n) {
+    if(x->m_dead)
+      return;
+    t_atom a[2];
+    A_SETSYM(a, gensym(address.c_str()));
+    A_SETLONG(a + 1, static_cast<long>(n));
+    outlet_anything(x->m_dumpout, gensym("bind"), 2, a);
+  });
 
   device_base::on_device_created.connect<&v8connector::on_device_created>(x);
+  device_base::on_device_removing.connect<&v8connector::on_device_removing>(x);
 
   // Receive notifications when an attribute changes
   object_attach_byptr_register(x, x, CLASS_BOX);
@@ -145,9 +156,11 @@ void v8connector::destroy(v8connector* x)
   x->m_dead = true;
 
   device_base::on_device_created.disconnect<&v8connector::on_device_created>(x);
+  device_base::on_device_removing.disconnect<&v8connector::on_device_removing>(x);
 
   x->m_branch.set_wake_callback({});
   x->m_branch.set_node_lost_callback({});
+  x->m_branch.set_binding_changed_callback({});
   x->unregister();
 
   if(x->m_register_qelem)
@@ -165,7 +178,7 @@ void v8connector::assist(v8connector*, void*, long m, long a, char* s)
 {
   if(m == ASSIST_INLET)
   {
-    sprintf(s, "add, remove, clear, set <address> <values...>");
+    sprintf(s, "add, remove, clear, bind, unbind, set <address> <values...>");
   }
   else if(a == 0)
   {
@@ -276,8 +289,45 @@ void v8connector::do_registration()
     }
   }
 
+  update_resolution_context();
+
   m_registered = true;
   m_registering = false;
+}
+
+// Bound addresses resolve like an ossia.remote placed next to this object:
+// relative to the nodes of the enclosing model or view, or to the root of the
+// enclosing device, or to the global device.
+void v8connector::update_resolution_context()
+{
+  std::vector<ossia::net::node_base*> parents;
+  if(auto* parent = find_parent_object())
+  {
+    switch(parent->m_otype)
+    {
+      case object_class::device:
+      case object_class::client:
+        if(auto dev = static_cast<device_base*>(parent)->m_device)
+          parents.push_back(&dev->get_root_node());
+        break;
+      case object_class::model:
+      case object_class::view:
+        for(const auto& m : parent->m_matchers)
+          if(auto n = m->get_node(); n && !m->is_dead() && !m->is_zombie())
+            parents.push_back(n);
+        break;
+      default:
+        break;
+    }
+  }
+  if(parents.empty())
+    parents.push_back(&ossia_max::instance().get_default_device()->get_root_node());
+
+  std::vector<ossia::net::device_base*> devices;
+  for(auto dev : get_all_devices())
+    devices.push_back(dev);
+
+  m_branch.set_resolution_context(std::move(parents), std::move(devices));
 }
 
 void v8connector::unregister()
@@ -324,6 +374,33 @@ void v8connector::on_device_created(device_base* dev)
   if(std::find(m_patcher_hierarchy.begin(), m_patcher_hierarchy.end(), dev->m_patcher)
      != m_patcher_hierarchy.end())
     schedule_registration();
+}
+
+void v8connector::on_device_removing(device_base* dev)
+{
+  if(dev && dev->m_device)
+    m_branch.drop_device(dev->m_device.get());
+}
+
+void v8connector::bind(v8connector* x, t_symbol* s)
+{
+  if(!s || s == _sym_nothing)
+  {
+    x->report_error("bind expects an address");
+    return;
+  }
+  if(auto err = x->m_branch.bind(s->s_name); !err.empty())
+    x->report_error("bind refused: " + err);
+}
+
+void v8connector::unbind(v8connector* x, t_symbol* s)
+{
+  if(!s || !x->m_branch.unbind(s->s_name))
+  {
+    x->report_error(std::string("unbind: unknown address '") + (s ? s->s_name : "") + "'");
+    return;
+  }
+  x->status("unbind", s->s_name);
 }
 
 void v8connector::add(v8connector* x, t_symbol*, long argc, t_atom* argv)

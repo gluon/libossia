@@ -1,7 +1,9 @@
 #include "v8connector_branch.hpp"
 
+#include <ossia/network/base/address_scope.hpp>
 #include <ossia/network/base/node_attributes.hpp>
 #include <ossia/network/base/node_functions.hpp>
+#include <ossia/network/common/path.hpp>
 #include <ossia/network/common/complex_type.hpp>
 #include <ossia/network/common/value_bounding.hpp>
 #include <ossia/network/dataspace/dataspace_visitors.hpp>
@@ -440,6 +442,10 @@ branch::branch() = default;
 branch::~branch()
 {
   detach();
+  for(auto& b : m_bindings)
+    release(b);
+  for(auto* dev : m_devices)
+    dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
 }
 
 void branch::attach(ossia::net::node_base& node)
@@ -478,6 +484,8 @@ std::string branch::add(const leaf_spec& spec)
 {
   if(find(spec.address))
     return spec.address + ": already declared";
+  if(find_binding(spec.address))
+    return spec.address + ": already used by bind";
   if(m_node)
   {
     if(auto* existing = ossia::net::find_node(*m_node, spec.address))
@@ -562,9 +570,10 @@ std::string branch::create(leaf& l)
       return spec.address + ": invalid @default: " + err;
     }
     ossia::net::set_default_value(node, v);
-    // Same as ossia.parameter at registration: the value is stored and sent
-    // to the network, the local callbacks are not fired.
-    param->push_value_quiet(v);
+    // The default is pushed like any value from this branch: the network and
+    // the other listeners of the parameter get it, this branch does not.
+    pushing_scope guard{this};
+    param->push_value(v);
   }
 
   const std::string address = spec.address;
@@ -631,20 +640,37 @@ void branch::clear()
 std::string branch::set(std::string_view address, const scalars& values)
 {
   const auto a = normalize_relative_address(address);
-  auto* l = a.empty() ? nullptr : find(a);
-  if(!l)
-    return "unknown address '" + std::string(address) + "'";
-  if(!l->param)
-    return a + ": not attached to a device yet";
+  if(auto* l = a.empty() ? nullptr : find(a))
+  {
+    if(!l->param)
+      return a + ": not attached to a device yet";
 
-  ossia::value v;
-  if(auto err = scalars_to_value(*l->param, values, v); !err.empty())
-    return a + ": " + err;
+    ossia::value v;
+    if(auto err = scalars_to_value(*l->param, values, v); !err.empty())
+      return a + ": " + err;
 
-  pushing_scope guard{this};
-  // libossia only applies the range to values written from the network.
-  l->param->push_value(ossia::bound_value(*l->param, std::move(v)));
-  return {};
+    pushing_scope guard{this};
+    // libossia only applies the range to values written from the network.
+    l->param->push_value(ossia::bound_value(*l->param, std::move(v)));
+    return {};
+  }
+
+  if(auto* b = find_binding(address))
+  {
+    if(b->targets.empty())
+      return b->address + ": bound parameter not found yet";
+    pushing_scope guard{this};
+    for(auto& t : b->targets)
+    {
+      ossia::value v;
+      if(auto err = scalars_to_value(*t.param, values, v); !err.empty())
+        return b->address + ": " + err;
+      t.param->push_value(ossia::bound_value(*t.param, std::move(v)));
+    }
+    return {};
+  }
+
+  return "unknown address '" + std::string(address) + "'";
 }
 
 std::vector<std::string> branch::addresses() const
@@ -681,8 +707,237 @@ void branch::on_value(const std::string& address, const ossia::value& v)
     m_wake();
 }
 
+namespace
+{
+std::string trim_address(std::string_view address)
+{
+  while(!address.empty() && std::isspace(static_cast<unsigned char>(address.front())))
+    address.remove_prefix(1);
+  while(!address.empty() && std::isspace(static_cast<unsigned char>(address.back())))
+    address.remove_suffix(1);
+  return std::string(address);
+}
+
+// Address of a node relative to a root node, without leading slash.
+std::string relative_to(const ossia::net::node_base& root, const ossia::net::node_base& node)
+{
+  const auto full = node.osc_address();
+  auto base = root.osc_address();
+  if(base == "/")
+    return full.substr(1);
+  if(full.rfind(base + "/", 0) == 0)
+    return full.substr(base.size() + 1);
+  return full;
+}
+}
+
+branch::binding* branch::find_binding(std::string_view address)
+{
+  const auto a = trim_address(address);
+  for(auto& b : m_bindings)
+    if(b.address == a)
+      return &b;
+  return nullptr;
+}
+
+std::string branch::bind(std::string_view address)
+{
+  const auto a = trim_address(address);
+  if(a.empty())
+    return "bind expects an address";
+  if(find_binding(a))
+    return a + ": already bound";
+  if(find(normalize_relative_address(a)))
+    return a + ": already declared by add";
+  m_bindings.push_back(binding{a, {}});
+  resolve(m_bindings.back(), true);
+  if(m_binding_changed)
+    m_binding_changed(a, m_bindings.back().targets.size());
+  return {};
+}
+
+bool branch::unbind(std::string_view address)
+{
+  auto* b = find_binding(address);
+  if(!b)
+    return false;
+  release(*b);
+  m_bindings.erase(m_bindings.begin() + (b - m_bindings.data()));
+  return true;
+}
+
+std::size_t branch::bound_count(std::string_view address) const
+{
+  const auto a = trim_address(address);
+  for(const auto& b : m_bindings)
+    if(b.address == a)
+      return b.targets.size();
+  return 0;
+}
+
+void branch::release(binding& b)
+{
+  for(auto& t : b.targets)
+  {
+    if(t.node)
+      t.node->about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
+    if(t.param)
+      t.param->remove_callback(t.callback);
+  }
+  b.targets.clear();
+}
+
+void branch::set_resolution_context(
+    std::vector<ossia::net::node_base*> parents,
+    std::vector<ossia::net::device_base*> devices)
+{
+  for(auto* dev : m_devices)
+    dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+  m_parents = std::move(parents);
+  m_devices = std::move(devices);
+  for(auto* dev : m_devices)
+    dev->on_parameter_created.connect<&branch::on_parameter_created>(this);
+  resolve_bindings(true);
+}
+
+void branch::drop_device(ossia::net::device_base* dev)
+{
+  auto it = std::find(m_devices.begin(), m_devices.end(), dev);
+  if(it == m_devices.end())
+    return;
+  dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+  m_devices.erase(it);
+  std::erase_if(m_parents, [dev](ossia::net::node_base* n) { return &n->get_device() == dev; });
+  for(auto& b : m_bindings)
+  {
+    const auto before = b.targets.size();
+    for(auto& t : b.targets)
+    {
+      if(&t.node->get_device() == dev)
+      {
+        t.node->about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
+        t.param->remove_callback(t.callback);
+        t.node = nullptr;
+      }
+    }
+    std::erase_if(b.targets, [](const target& t) { return t.node == nullptr; });
+    if(b.targets.size() != before && m_binding_changed)
+      m_binding_changed(b.address, b.targets.size());
+  }
+}
+
+void branch::set_binding_changed_callback(
+    std::function<void(const std::string&, std::size_t)> cb)
+{
+  m_binding_changed = std::move(cb);
+}
+
+void branch::resolve_bindings(bool emit_current)
+{
+  for(auto& b : m_bindings)
+  {
+    const auto before = b.targets.size();
+    resolve(b, emit_current);
+    if(b.targets.size() != before && m_binding_changed)
+      m_binding_changed(b.address, b.targets.size());
+  }
+}
+
+void branch::resolve(binding& b, bool emit_current)
+{
+  // Candidate (root, node) pairs for the address, with the rules of ossia.remote.
+  std::vector<std::pair<ossia::net::node_base*, ossia::net::node_base*>> found;
+  std::string_view address = b.address;
+  const auto scope = ossia::net::get_address_scope(address);
+  const bool pattern = ossia::traversal::is_pattern(address);
+
+  auto collect = [&](ossia::net::node_base& root, std::string_view addr) {
+    if(pattern)
+    {
+      for(auto* n : ossia::net::find_nodes(root, addr))
+        found.emplace_back(&root, n);
+    }
+    else if(auto* n = ossia::net::find_node(root, addr))
+      found.emplace_back(&root, n);
+  };
+
+  switch(scope)
+  {
+    case ossia::net::address_scope::relative: {
+      if(address.rfind("//", 0) == 0)
+        address.remove_prefix(2);
+      for(auto* p : m_parents)
+        collect(*p, address);
+      break;
+    }
+    case ossia::net::address_scope::absolute: {
+      if(!m_parents.empty())
+        collect(m_parents.front()->get_device().get_root_node(), address);
+      break;
+    }
+    case ossia::net::address_scope::global: {
+      const auto pos = address.find(":/");
+      const auto name = address.substr(0, pos);
+      const auto osc = address.substr(pos + 1);
+      for(auto* dev : m_devices)
+        if(dev->get_name() == name)
+          collect(dev->get_root_node(), osc);
+      break;
+    }
+  }
+
+  for(auto [root, node] : found)
+  {
+    auto* param = node->get_parameter();
+    if(!param)
+      continue;
+    const bool already = std::any_of(
+        b.targets.begin(), b.targets.end(), [node](const target& t) { return t.node == node; });
+    if(already)
+      continue;
+
+    target t;
+    t.node = node;
+    t.param = param;
+    if(!pattern)
+      t.out_address = b.address;
+    else if(scope == ossia::net::address_scope::global)
+      t.out_address = std::string(b.address.substr(0, b.address.find(":/"))) + ":" + node->osc_address();
+    else if(scope == ossia::net::address_scope::absolute)
+      t.out_address = node->osc_address();
+    else
+      t.out_address = relative_to(*root, *node);
+
+    const std::string out = t.out_address;
+    t.callback = param->add_callback([this, out](const ossia::value& v) { on_value(out, v); });
+    node->about_to_be_deleted.connect<&branch::on_node_removing>(this);
+    b.targets.push_back(std::move(t));
+
+    if(emit_current && param->value().valid())
+      on_value(out, param->value());
+  }
+}
+
+void branch::on_parameter_created(const ossia::net::parameter_base&)
+{
+  bool pending = false;
+  for(const auto& b : m_bindings)
+    if(b.targets.empty() || ossia::traversal::is_pattern(b.address))
+      pending = true;
+  if(pending)
+    resolve_bindings(false);
+}
+
 void branch::on_node_removing(const ossia::net::node_base& n)
 {
+  for(auto& b : m_bindings)
+  {
+    const auto before = b.targets.size();
+    std::erase_if(b.targets, [&n](const target& t) { return t.node == &n; });
+    if(b.targets.size() != before && m_binding_changed)
+      m_binding_changed(b.address, b.targets.size());
+  }
+
   // The node is being destroyed: forget it without touching its signals.
   if(&n == m_node)
   {
