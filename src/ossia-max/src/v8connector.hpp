@@ -7,7 +7,10 @@
 //   add <address> @type ... @min ... @max ...   create a parameter under the branch
 //   remove <address>                              remove it
 //   clear                                         remove every parameter of this instance
-//   set <address> <values...>                     push a value
+//   bind <address>                                follow a parameter declared elsewhere,
+//                                                 addressed as an ossia.remote would
+//   unbind <address>                              stop following it
+//   set <address> <values...>                     push a value to a leaf or a bound parameter
 //   left outlet                                   <address> <values...>, for values that
 //                                                 come from any other source
 //   right outlet                                  status and errors
@@ -58,6 +61,8 @@ public:
   void status(const char* what, const std::string& argument);
 
   void on_device_created(device_base* dev);
+  void on_device_removing(device_base* dev);
+  void update_resolution_context();
 
   static void* create(t_symbol*, long argc, t_atom* argv);
   static void destroy(v8connector* x);
@@ -68,6 +73,8 @@ public:
   static void remove(v8connector* x, t_symbol* s, long argc, t_atom* argv);
   static void clear(v8connector* x);
   static void set(v8connector* x, t_symbol* s, long argc, t_atom* argv);
+  static void bind(v8connector* x, t_symbol* s);
+  static void unbind(v8connector* x, t_symbol* s);
   static void address(v8connector* x, t_symbol* s);
 
   static void drain(v8connector* x);

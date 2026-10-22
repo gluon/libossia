@@ -608,6 +608,97 @@
 									"fontsize": 12.0,
 									"linecount": 4
 								}
+							},
+							{
+								"box": {
+									"id": "obj-29",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										490.0,
+										605.0,
+										360.0,
+										76.0
+									],
+									"text": "bind follows a parameter that exists elsewhere, without creating anything: here the ossia.parameter above, addressed like an ossia.remote would (relative to the device). set pushes to it with the owner's type and range; its changes come back on the left outlet under the bound address.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 5
+								}
+							},
+							{
+								"box": {
+									"id": "obj-30",
+									"maxclass": "message",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"patching_rect": [
+										490.0,
+										690.0,
+										80.0,
+										22.0
+									],
+									"outlettype": [
+										""
+									],
+									"text": "bind manual"
+								}
+							},
+							{
+								"box": {
+									"id": "obj-31",
+									"maxclass": "message",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"patching_rect": [
+										580.0,
+										690.0,
+										90.0,
+										22.0
+									],
+									"outlettype": [
+										""
+									],
+									"text": "unbind manual"
+								}
+							},
+							{
+								"box": {
+									"id": "obj-32",
+									"maxclass": "flonum",
+									"numinlets": 1,
+									"numoutlets": 2,
+									"patching_rect": [
+										690.0,
+										690.0,
+										50.0,
+										22.0
+									],
+									"outlettype": [
+										"",
+										"bang"
+									],
+									"parameter_enable": 0
+								}
+							},
+							{
+								"box": {
+									"id": "obj-33",
+									"maxclass": "message",
+									"numinlets": 2,
+									"numoutlets": 1,
+									"patching_rect": [
+										690.0,
+										720.0,
+										100.0,
+										22.0
+									],
+									"outlettype": [
+										""
+									],
+									"text": "set manual $1"
+								}
 							}
 						],
 						"lines": [
@@ -787,6 +878,54 @@
 									],
 									"source": [
 										"obj-26",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"destination": [
+										"obj-14",
+										0
+									],
+									"source": [
+										"obj-30",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"destination": [
+										"obj-14",
+										0
+									],
+									"source": [
+										"obj-31",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"destination": [
+										"obj-14",
+										0
+									],
+									"source": [
+										"obj-33",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"destination": [
+										"obj-33",
+										0
+									],
+									"source": [
+										"obj-32",
 										0
 									]
 								}
