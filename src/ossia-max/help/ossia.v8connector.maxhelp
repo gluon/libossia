@@ -26,6 +26,24 @@
 			{
 				"box": {
 					"id": "obj-1",
+					"maxclass": "comment",
+					"numinlets": 1,
+					"numoutlets": 0,
+					"patching_rect": [
+						30.0,
+						20.0,
+						560.0,
+						21.0
+					],
+					"text": "ossia.v8connector, Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/",
+					"fontname": "Lato Regular",
+					"fontsize": 12.0,
+					"fontface": 1
+				}
+			},
+			{
+				"box": {
+					"id": "obj-2",
 					"maxclass": "newobj",
 					"numinlets": 1,
 					"numoutlets": 1,
@@ -43,7 +61,7 @@
 			},
 			{
 				"box": {
-					"id": "obj-2",
+					"id": "obj-3",
 					"maxclass": "newobj",
 					"numinlets": 0,
 					"numoutlets": 0,
@@ -954,7 +972,7 @@
 			},
 			{
 				"box": {
-					"id": "obj-3",
+					"id": "obj-4",
 					"maxclass": "newobj",
 					"numinlets": 0,
 					"numoutlets": 0,
@@ -1138,6 +1156,200 @@
 								}
 							}
 						]
+					}
+				}
+			},
+			{
+				"box": {
+					"id": "obj-5",
+					"maxclass": "newobj",
+					"numinlets": 0,
+					"numoutlets": 0,
+					"patching_rect": [
+						295.0,
+						242.0,
+						55.0,
+						22.0
+					],
+					"text": "p Limits",
+					"saved_object_attributes": {
+						"globalpatchername": ""
+					},
+					"patcher": {
+						"fileversion": 1,
+						"appversion": {
+							"major": 9,
+							"minor": 0,
+							"revision": 4,
+							"architecture": "x64",
+							"modernui": 1
+						},
+						"classnamespace": "box",
+						"rect": [
+							47.0,
+							141.0,
+							879.0,
+							805.0
+						],
+						"gridsize": [
+							15.0,
+							15.0
+						],
+						"showontab": 1,
+						"originid": "pat-9004",
+						"boxes": [
+							{
+								"box": {
+									"id": "obj-1",
+									"maxclass": "jsui",
+									"numinlets": 1,
+									"numoutlets": 1,
+									"patching_rect": [
+										8.0,
+										7.0,
+										561.5,
+										143.0
+									],
+									"outlettype": [
+										""
+									],
+									"border": 0,
+									"filename": "helpdetails.js",
+									"ignoreclick": 1,
+									"jsarguments": [
+										"ossia.v8connector"
+									],
+									"parameter_enable": 0
+								}
+							},
+							{
+								"box": {
+									"id": "obj-2",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										30.0,
+										165.0,
+										800.0,
+										21.0
+									],
+									"text": "ossia.v8connector, Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"fontface": 1
+								}
+							},
+							{
+								"box": {
+									"id": "obj-3",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										30.0,
+										200.0,
+										800.0,
+										48.0
+									],
+									"text": "@priority is stored on the node but does not order the outputs of ossia.v8connector: ossia-max orders the outputs of ossia.parameter and ossia.remote only. Defaults and bound values come out in declaration order.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 3
+								}
+							},
+							{
+								"box": {
+									"id": "obj-4",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										30.0,
+										260.0,
+										800.0,
+										48.0
+									],
+									"text": "An ossia.model (or ossia.view) added to the patcher after the object has registered does not take it under its node: send 'address <name>' to the object, or reload the patcher. Models present at load, created, renamed or removed afterwards are followed.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 3
+								}
+							},
+							{
+								"box": {
+									"id": "obj-5",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										30.0,
+										320.0,
+										800.0,
+										35.0
+									],
+									"text": "'ready' is a reserved address: the object sends it on its left outlet once registered, the helper replays its declarations on it. A parameter cannot be named ready.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 2
+								}
+							},
+							{
+								"box": {
+									"id": "obj-6",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										30.0,
+										370.0,
+										800.0,
+										35.0
+									],
+									"text": "Inside one instance, an address is either declared by add or followed by bind, not both; two instances with the same name become name and name.1, like two ossia.model.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 2
+								}
+							},
+							{
+								"box": {
+									"id": "obj-7",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										30.0,
+										420.0,
+										800.0,
+										35.0
+									],
+									"text": "Values leave bounded to the parameter's range then filtered (mute, enable, repetitions), like the outlet of every ossia object; the parameter itself stores what it was given, like ossia.parameter.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 2
+								}
+							},
+							{
+								"box": {
+									"id": "obj-8",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
+										30.0,
+										470.0,
+										800.0,
+										35.0
+									],
+									"text": "macOS universal (x86_64 and arm64). Windows is not built. The OSCQuery server is the one of ossia.device, unchanged.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 2
+								}
+							}
+						],
+						"lines": []
 					}
 				}
 			}

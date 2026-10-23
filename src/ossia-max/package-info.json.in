@@ -8,7 +8,7 @@
 	"homepatcher" : "OSSIA overview.maxpat",
 	"max_version_max" : "none",
 	"max_version_min" : "7.1",
-	"name" : "OSSIA",
+	"name" : "@OSSIA_MAX_PACKAGE_NAME@",
 	"os" : 	{
 		"macintosh" : 		{
 			"platform" : [ "ia32", "x64" ],

@@ -39,6 +39,9 @@
 #ifndef OSSIA_MAX_PACKAGE_VERSION
 #define OSSIA_MAX_PACKAGE_VERSION "unknown"
 #endif
+#ifndef OSSIA_MAX_PACKAGE_NAME
+#define OSSIA_MAX_PACKAGE_NAME "ossia"
+#endif
 
 extern "C" {
 OSSIA_MAX_EXPORT void ossia_v8connector_setup();

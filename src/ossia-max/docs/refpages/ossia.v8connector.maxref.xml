@@ -12,9 +12,31 @@
 	</description>
 
 
+	<discussion>
+		Minimal v8 or v8ui script, with the helper javascript/ossia.v8connector.js and an [ossia.v8connector synth] whose scripting name is "synth" and whose left outlet is patched into the script:
+		<br/>
+		const OssiaConnector = require("ossia.v8connector");
+		<br/>
+		const synth = new OssiaConnector("synth");
+		<br/>
+		function loadbang() {
+		<br/>
+		&#160;&#160;synth.declare({ gain: { type: "float", min: -60, max: 6, unit: "gain.db", default: -12 } });
+		<br/>
+		&#160;&#160;synth.on("gain", (v) =&gt; { post("gain", v, "\n"); });
+		<br/>
+		}
+		<br/>
+		function anything() { synth.dispatch(messagename, arrayfromargs(arguments)); }
+		<br/>
+		function bang() { synth.set("gain", -6); }
+		<br/>
+		The helper keeps the declarations and replays them when the object sends "ready", so the object can be deleted and recreated. bind("other/address") follows a parameter declared elsewhere instead of creating one.
+	</discussion>
+
 	<!--METADATA-->
 	<metadatalist>
-		<metadata name="author">Ossia</metadata>
+		<metadata name="author">ossia.v8connector, Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/</metadata>
 		<metadata name="tag">Ossia</metadata>
 		<metadata name="tag">Network</metadata>
 	</metadatalist>
