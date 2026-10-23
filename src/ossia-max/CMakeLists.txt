@@ -7,8 +7,9 @@ set(CMAKE_INCLUDE_CURRENT_DIR 1)
 option(OSSIA_MAX_TEST "Run automatic test for C74 Max" OFF)
 set(MAXSDK_PATH "${OSSIA_3RDPARTY_FOLDER}/max-sdk" CACHE PATH "Path to Max SDK folder")
 
-# Version of the Max package, and name of the script-driven node object.
-# Both are defined here only; the sources read them as compile definitions.
+# Name and version of the Max package, and name of the script-driven node
+# object. All are defined here only; the sources read them as compile definitions.
+set(OSSIA_MAX_PACKAGE_NAME "ossia-prism")
 set(OSSIA_MAX_PACKAGE_VERSION "2.1.0+prism.1")
 set(OSSIA_V8CONNECTOR_NAME "ossia.v8connector")
 
@@ -108,6 +109,7 @@ add_library(${PROJECT_NAME} SHARED ${PROJECT_SRCS})
 target_compile_options(${PROJECT_NAME} PRIVATE ${OSSIA_COMPILE_OPTIONS})
 target_compile_features(${PROJECT_NAME} PRIVATE cxx_std_20)
 target_compile_definitions(${PROJECT_NAME} PRIVATE
+    OSSIA_MAX_PACKAGE_NAME="${OSSIA_MAX_PACKAGE_NAME}"
     OSSIA_MAX_PACKAGE_VERSION="${OSSIA_MAX_PACKAGE_VERSION}"
     OSSIA_V8CONNECTOR_NAME="${OSSIA_V8CONNECTOR_NAME}")
 
@@ -208,7 +210,7 @@ endif()
 
 set_target_properties(ossia.ossia PROPERTIES OUTPUT_NAME "ossia")
 
-set(OSSIA_MAX_INSTALL_FOLDER "ossia-max-package/ossia" CACHE STRING "Max Package Install folder")
+set(OSSIA_MAX_INSTALL_FOLDER "ossia-max-package/${OSSIA_MAX_PACKAGE_NAME}" CACHE STRING "Max Package Install folder")
 
 install(
     DIRECTORY

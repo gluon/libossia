@@ -63,7 +63,7 @@ extern "C" void ossia_v8connector_setup()
   class_register(CLASS_BOX, c);
   v8connector::max_class = c;
 
-  post("%s: ossia package %s", OSSIA_V8CONNECTOR_NAME, OSSIA_MAX_PACKAGE_VERSION);
+  post("%s %s, PRISM CNRS", OSSIA_MAX_PACKAGE_NAME, OSSIA_MAX_PACKAGE_VERSION);
 }
 
 namespace ossia
