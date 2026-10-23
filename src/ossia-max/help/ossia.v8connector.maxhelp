@@ -447,6 +447,24 @@
 									"numinlets": 1,
 									"numoutlets": 0,
 									"patching_rect": [
+										30.0,
+										735.0,
+										420.0,
+										62.0
+									],
+									"text": "Initialization follows ossia-max: the default of a leaf is stored quietly, then comes out of the left outlet once the leaf exists; bind outputs the value it finds as soon as it reaches the parameter. @priority is stored on the nodes but does not order these outputs: ossia-max orders the outputs of ossia.parameter and ossia.remote only.",
+									"fontname": "Lato Regular",
+									"fontsize": 12.0,
+									"linecount": 4
+								}
+							},
+							{
+								"box": {
+									"id": "obj-21",
+									"maxclass": "comment",
+									"numinlets": 1,
+									"numoutlets": 0,
+									"patching_rect": [
 										490.0,
 										165.0,
 										360.0,
@@ -460,7 +478,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-21",
+									"id": "obj-22",
 									"maxclass": "flonum",
 									"numinlets": 1,
 									"numoutlets": 2,
@@ -479,7 +497,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-22",
+									"id": "obj-23",
 									"maxclass": "newobj",
 									"numinlets": 1,
 									"numoutlets": 3,
@@ -499,7 +517,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-23",
+									"id": "obj-24",
 									"maxclass": "flonum",
 									"numinlets": 1,
 									"numoutlets": 2,
@@ -518,7 +536,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-24",
+									"id": "obj-25",
 									"maxclass": "comment",
 									"numinlets": 1,
 									"numoutlets": 0,
@@ -536,7 +554,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-25",
+									"id": "obj-26",
 									"maxclass": "flonum",
 									"numinlets": 1,
 									"numoutlets": 2,
@@ -555,7 +573,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-26",
+									"id": "obj-27",
 									"maxclass": "newobj",
 									"numinlets": 1,
 									"numoutlets": 2,
@@ -574,7 +592,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-27",
+									"id": "obj-28",
 									"maxclass": "flonum",
 									"numinlets": 1,
 									"numoutlets": 2,
@@ -593,7 +611,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-28",
+									"id": "obj-29",
 									"maxclass": "comment",
 									"numinlets": 1,
 									"numoutlets": 0,
@@ -611,7 +629,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-29",
+									"id": "obj-30",
 									"maxclass": "comment",
 									"numinlets": 1,
 									"numoutlets": 0,
@@ -629,7 +647,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-30",
+									"id": "obj-31",
 									"maxclass": "message",
 									"numinlets": 2,
 									"numoutlets": 1,
@@ -647,7 +665,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-31",
+									"id": "obj-32",
 									"maxclass": "message",
 									"numinlets": 2,
 									"numoutlets": 1,
@@ -665,7 +683,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-32",
+									"id": "obj-33",
 									"maxclass": "flonum",
 									"numinlets": 1,
 									"numoutlets": 2,
@@ -684,7 +702,7 @@
 							},
 							{
 								"box": {
-									"id": "obj-33",
+									"id": "obj-34",
 									"maxclass": "message",
 									"numinlets": 2,
 									"numoutlets": 1,
@@ -837,18 +855,6 @@
 							{
 								"patchline": {
 									"destination": [
-										"obj-22",
-										0
-									],
-									"source": [
-										"obj-21",
-										0
-									]
-								}
-							},
-							{
-								"patchline": {
-									"destination": [
 										"obj-23",
 										0
 									],
@@ -861,11 +867,11 @@
 							{
 								"patchline": {
 									"destination": [
-										"obj-26",
+										"obj-24",
 										0
 									],
 									"source": [
-										"obj-25",
+										"obj-23",
 										0
 									]
 								}
@@ -885,11 +891,11 @@
 							{
 								"patchline": {
 									"destination": [
-										"obj-14",
+										"obj-28",
 										0
 									],
 									"source": [
-										"obj-30",
+										"obj-27",
 										0
 									]
 								}
@@ -913,7 +919,7 @@
 										0
 									],
 									"source": [
-										"obj-33",
+										"obj-32",
 										0
 									]
 								}
@@ -921,11 +927,23 @@
 							{
 								"patchline": {
 									"destination": [
-										"obj-33",
+										"obj-14",
 										0
 									],
 									"source": [
-										"obj-32",
+										"obj-34",
+										0
+									]
+								}
+							},
+							{
+								"patchline": {
+									"destination": [
+										"obj-34",
+										0
+									],
+									"source": [
+										"obj-33",
 										0
 									]
 								}

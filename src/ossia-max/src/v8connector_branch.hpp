@@ -146,7 +146,10 @@ public:
   // Called from the thread that pushed a value, possibly not the host's main
   // thread. It must only schedule a drain on the main thread.
   void set_wake_callback(std::function<void()> cb);
-  // Main thread only: take every value received since the last call.
+  // Main thread only: take every value received since the last call. The
+  // default of a leaf comes out here once the leaf is created, and the current
+  // value of a parameter comes out here when a bind reaches it, as an
+  // ossia.remote outputs the value it finds when it registers.
   std::vector<inbound> drain();
 
   // Called when the node the branch is attached to is destroyed by its owner
@@ -180,10 +183,11 @@ private:
   binding* find_binding(std::string_view address);
   std::string create(leaf& l);
   void destroy(leaf& l);
-  void resolve(binding& b, bool emit_current);
-  void resolve_bindings(bool emit_current);
+  void resolve(binding& b);
+  void resolve_bindings();
   void release(binding& b);
   void on_value(const std::string& address, const ossia::value& v);
+  void queue_current_value(const std::string& address, ossia::net::parameter_base* param);
   void on_node_removing(const ossia::net::node_base& n);
   void on_parameter_created(const ossia::net::parameter_base& p);
 
@@ -194,8 +198,18 @@ private:
   std::vector<ossia::net::device_base*> m_devices;
   std::function<void(const std::string&, std::size_t)> m_binding_changed;
 
+  // A queued value, or a parameter whose current value is read when the host
+  // drains: the value of a parameter being created is only final once its
+  // declaration has completed.
+  struct queued
+  {
+    std::string address;
+    ossia::value value;
+    ossia::net::parameter_base* read_from{};
+  };
+
   std::mutex m_queue_mutex;
-  std::vector<inbound> m_queue;
+  std::vector<queued> m_queue;
   std::function<void()> m_wake;
   std::function<void()> m_node_lost;
 };

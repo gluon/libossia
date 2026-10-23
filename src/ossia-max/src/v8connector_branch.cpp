@@ -570,10 +570,12 @@ std::string branch::create(leaf& l)
       return spec.address + ": invalid @default: " + err;
     }
     ossia::net::set_default_value(node, v);
-    // The default is pushed like any value from this branch: the network and
-    // the other listeners of the parameter get it, this branch does not.
-    pushing_scope guard{this};
-    param->push_value(v);
+    // Same as ossia.parameter at registration: the value is stored and sent
+    // to the network, the local callbacks are not fired. The host then outputs
+    // it locally, as ossia-max outputs the defaults of its objects after they
+    // registered.
+    param->push_value_quiet(v);
+    on_value(spec.address, v);
   }
 
   const std::string address = spec.address;
@@ -689,10 +691,40 @@ void branch::set_wake_callback(std::function<void()> cb)
 
 std::vector<inbound> branch::drain()
 {
+  std::vector<queued> q;
+  {
+    std::lock_guard<std::mutex> lock(m_queue_mutex);
+    q.swap(m_queue);
+  }
   std::vector<inbound> out;
-  std::lock_guard<std::mutex> lock(m_queue_mutex);
-  out.swap(m_queue);
+  out.reserve(q.size());
+  for(auto& e : q)
+  {
+    if(e.read_from)
+    {
+      // Only read a parameter this branch still follows.
+      bool live = false;
+      for(const auto& b : m_bindings)
+        for(const auto& t : b.targets)
+          live = live || t.param == e.read_from;
+      if(!live || !e.read_from->value().valid())
+        continue;
+      out.push_back({std::move(e.address), e.read_from->value()});
+    }
+    else
+      out.push_back({std::move(e.address), std::move(e.value)});
+  }
   return out;
+}
+
+void branch::queue_current_value(const std::string& address, ossia::net::parameter_base* param)
+{
+  {
+    std::lock_guard<std::mutex> lock(m_queue_mutex);
+    m_queue.push_back({address, {}, param});
+  }
+  if(m_wake)
+    m_wake();
 }
 
 void branch::on_value(const std::string& address, const ossia::value& v)
@@ -701,7 +733,7 @@ void branch::on_value(const std::string& address, const ossia::value& v)
     return;
   {
     std::lock_guard<std::mutex> lock(m_queue_mutex);
-    m_queue.push_back({address, v});
+    m_queue.push_back({address, v, nullptr});
   }
   if(m_wake)
     m_wake();
@@ -750,7 +782,7 @@ std::string branch::bind(std::string_view address)
   if(find(normalize_relative_address(a)))
     return a + ": already declared by add";
   m_bindings.push_back(binding{a, {}});
-  resolve(m_bindings.back(), true);
+  resolve(m_bindings.back());
   if(m_binding_changed)
     m_binding_changed(a, m_bindings.back().targets.size());
   return {};
@@ -797,7 +829,7 @@ void branch::set_resolution_context(
   m_devices = std::move(devices);
   for(auto* dev : m_devices)
     dev->on_parameter_created.connect<&branch::on_parameter_created>(this);
-  resolve_bindings(true);
+  resolve_bindings();
 }
 
 void branch::drop_device(ossia::net::device_base* dev)
@@ -832,18 +864,18 @@ void branch::set_binding_changed_callback(
   m_binding_changed = std::move(cb);
 }
 
-void branch::resolve_bindings(bool emit_current)
+void branch::resolve_bindings()
 {
   for(auto& b : m_bindings)
   {
     const auto before = b.targets.size();
-    resolve(b, emit_current);
+    resolve(b);
     if(b.targets.size() != before && m_binding_changed)
       m_binding_changed(b.address, b.targets.size());
   }
 }
 
-void branch::resolve(binding& b, bool emit_current)
+void branch::resolve(binding& b)
 {
   // Candidate (root, node) pairs for the address, with the rules of ossia.remote.
   std::vector<std::pair<ossia::net::node_base*, ossia::net::node_base*>> found;
@@ -913,8 +945,9 @@ void branch::resolve(binding& b, bool emit_current)
     node->about_to_be_deleted.connect<&branch::on_node_removing>(this);
     b.targets.push_back(std::move(t));
 
-    if(emit_current && param->value().valid())
-      on_value(out, param->value());
+    // The value the parameter holds when the subscription starts, read when
+    // the host drains, as an ossia.remote outputs the value it finds.
+    queue_current_value(out, param);
   }
 }
 
@@ -925,7 +958,7 @@ void branch::on_parameter_created(const ossia::net::parameter_base&)
     if(b.targets.empty() || ossia::traversal::is_pattern(b.address))
       pending = true;
   if(pending)
-    resolve_bindings(false);
+    resolve_bindings();
 }
 
 void branch::on_node_removing(const ossia::net::node_base& n)

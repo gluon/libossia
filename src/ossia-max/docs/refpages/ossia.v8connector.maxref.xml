@@ -33,7 +33,7 @@
 	<outletlist>
 		<outlet id="0" name="Values" type="any">
 			<digest>Values changed by another source</digest>
-			<description>A message per changed parameter, the relative address followed by the value. Values set through this instance do not come back here.</description>
+			<description>A message per changed parameter, the relative address followed by the value. Values set through this instance do not come back here. The default of a leaf comes out here once the leaf exists, and a bound address outputs the value it finds when it reaches the parameter.</description>
 		</outlet>
 		<outlet id="1" name="Info outlet" type="any">
 			<digest>Status and errors</digest>
@@ -177,7 +177,7 @@
 				Set priority
 			</digest>
 			<description>
-				The <at>priority</at> attribute allows to order how several values of a same hierarchical level can be recalled
+				The <at>priority</at> attribute is stored on the node, as <o>ossia.model</o> does. It does not order the outputs of <o>ossia.v8connector</o>: ossia-max orders the outputs of <o>ossia.parameter</o> and <o>ossia.remote</o> only. The default of a leaf comes out of the left outlet once the leaf exists, and a bound address outputs the value it finds as soon as it reaches the parameter, in declaration order.
 			</description>
 		</attribute>
 
