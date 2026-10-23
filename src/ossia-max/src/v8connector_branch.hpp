@@ -68,6 +68,8 @@ struct leaf_spec
   bool repetitions{true};
   bool enable{true};
   bool recall_safe{false};
+
+  bool operator==(const leaf_spec&) const = default;
 };
 
 // A value received for a leaf, to be output by the host.
@@ -113,7 +115,9 @@ public:
   bool attached() const { return m_node != nullptr; }
   ossia::net::node_base* node() const { return m_node; }
 
-  // Declare a leaf. Refused if the address is already declared, or if the
+  // Declare a leaf. Declaring the same leaf again with the same attributes is
+  // accepted and does nothing, so that a script can replay its declarations.
+  // Refused if the address is declared with other attributes, bound, or if the
   // branch is attached and the address already holds a parameter.
   std::string add(const leaf_spec& spec);
   // Remove a leaf. Returns false if the address is not declared.
@@ -121,17 +125,19 @@ public:
   // Remove every leaf of this branch.
   void clear();
   // Push a value from the host, to a declared leaf or to a bound address. The
-  // value is clipped to the parameter's range. The value comes back to the host
-  // only when the parameter changed it (clip, type conversion): the effective
-  // value then leaves as if it came from another source.
+  // parameter stores what is sent, as ossia.parameter does; values are bounded
+  // to the parameter's range when they leave the branch, as ossia-max bounds
+  // them at the outlet of each object. The value comes back to the host only
+  // when the bounded value differs from what was sent (clip, type conversion).
   std::string set(std::string_view address, const scalars& values);
 
   // Follow a parameter that exists elsewhere. The address follows the rules of
   // ossia.remote: relative to the parents given by set_resolution_context,
   // absolute ("/a/b") in the parents' device, or global ("device:/a/b");
-  // patterns are accepted. Refused if the address is empty, already bound, or
-  // declared as a leaf of this branch. A bind to a parameter that does not
-  // exist yet is kept and resolved when the parameter appears.
+  // patterns are accepted. Binding an address twice is accepted and does
+  // nothing. Refused if the address is empty or declared as a leaf of this
+  // branch. A bind to a parameter that does not exist yet is kept and resolved
+  // when the parameter appears.
   std::string bind(std::string_view address);
   // Drop a subscription. Returns false if the address is not bound.
   bool unbind(std::string_view address);
@@ -198,7 +204,8 @@ private:
   void resolve(binding& b);
   void resolve_bindings();
   void release(binding& b);
-  void on_value(const std::string& address, const ossia::value& v);
+  void on_value(
+      const std::string& address, ossia::net::parameter_base* param, const ossia::value& v);
   void queue_current_value(const std::string& address, ossia::net::parameter_base* param);
   void on_node_removing(const ossia::net::node_base& n);
   void on_parameter_created(const ossia::net::parameter_base& p);

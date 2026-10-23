@@ -189,7 +189,7 @@ void v8connector::assist(v8connector*, void*, long m, long a, char* s)
   }
   else if(a == 0)
   {
-    sprintf(s, "<address> <values...> changed by another source");
+    sprintf(s, "<address> <values...> changed by another source, ready at registration");
   }
   else
   {
@@ -252,6 +252,10 @@ void v8connector::do_registration()
   update_resolution_context();
   // The node is created only if there are leaves to put under it.
   m_branch.reattach();
+
+  // Tells the script this instance is ready for its declarations: a new
+  // instance (undo of a deletion, paste) has none, the script replays them.
+  outlet_anything(m_data_out, gensym("ready"), 0, nullptr);
 
   m_registering = false;
 }

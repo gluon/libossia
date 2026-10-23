@@ -224,7 +224,7 @@
 										420.0,
 										21.0
 									],
-									"text": "set pushes a value, clipped to the declared range (@clip both here); a corrected value comes back on the left outlet:",
+									"text": "set pushes a value; values leave bounded to the declared range (@clip both here), as every ossia object does:",
 									"fontname": "Lato Regular",
 									"fontsize": 12.0
 								}
@@ -395,12 +395,12 @@
 										30.0,
 										560.0,
 										420.0,
-										48.0
+										62.0
 									],
-									"text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects). A set sent to this instance never comes back here. Right outlet: address, add, remove, clear and error messages.",
+									"text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors.",
 									"fontname": "Lato Regular",
 									"fontsize": 12.0,
-									"linecount": 3
+									"linecount": 4
 								}
 							},
 							{
@@ -1061,12 +1061,12 @@
 										30.0,
 										500.0,
 										800.0,
-										62.0
+										76.0
 									],
-									"text": "Declarations are kept by the object: add can be sent before the object has registered (for instance from the script's loadbang). set is refused until the node exists; the right outlet sends 'address <global address>' when it does. A numeric type without @min and @max (or @range) is refused.",
+									"text": "Declarations are kept by the object: add can be sent before the object has registered (for instance from the script's loadbang). set is refused until the node exists; the right outlet sends 'address <global address>' when it does. The left outlet sends 'ready' once the object has registered: the helper then replays its declarations, so an object deleted and recreated (undo, paste) gets them again. Declaring the same leaf twice is accepted. A numeric type without @min and @max (or @range) is refused.",
 									"fontname": "Lato Regular",
 									"fontsize": 12.0,
-									"linecount": 4
+									"linecount": 5
 								}
 							},
 							{

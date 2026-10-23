@@ -566,8 +566,9 @@ branch::leaf* branch::find(std::string_view address)
 
 std::string branch::add(const leaf_spec& spec)
 {
-  if(find(spec.address))
-    return spec.address + ": already declared";
+  if(auto* l = find(spec.address))
+    return l->spec == spec ? std::string{}
+                           : spec.address + ": already declared with other attributes";
   if(find_binding(spec.address))
     return spec.address + ": already used by bind";
   if(m_node)
@@ -664,11 +665,12 @@ std::string branch::create(leaf& l)
     // it locally, as ossia-max outputs the defaults of its objects after they
     // registered.
     param->push_value_quiet(v);
-    on_value(spec.address, v);
+    on_value(spec.address, param, v);
   }
 
   const std::string address = spec.address;
-  param->add_callback([this, address](const ossia::value& v) { on_value(address, v); });
+  param->add_callback(
+      [this, address, param](const ossia::value& v) { on_value(address, param, v); });
   node.about_to_be_deleted.connect<&branch::on_node_removing>(this);
 
   l.node = &node;
@@ -741,8 +743,8 @@ std::string branch::set(std::string_view address, const scalars& values)
       return a + ": " + err;
 
     pushing_scope guard{this, &values};
-    // libossia only applies the range to values written from the network.
-    l->param->push_value(ossia::bound_value(*l->param, std::move(v)));
+    // Stored as sent, as ossia.parameter does; bounded on output.
+    l->param->push_value(std::move(v));
     return {};
   }
 
@@ -756,7 +758,7 @@ std::string branch::set(std::string_view address, const scalars& values)
       ossia::value v;
       if(auto err = scalars_to_value(*t.param, values, v); !err.empty())
         return b->address + ": " + err;
-      t.param->push_value(ossia::bound_value(*t.param, std::move(v)));
+      t.param->push_value(std::move(v));
     }
     return {};
   }
@@ -798,7 +800,11 @@ std::vector<inbound> branch::drain()
           live = live || t.param == e.read_from;
       if(!live || !e.read_from->value().valid())
         continue;
-      out.push_back({std::move(e.address), e.read_from->value()});
+      out.push_back(
+          {std::move(e.address),
+           ossia::bound_value(
+               e.read_from->get_domain(), e.read_from->value(),
+               e.read_from->get_bounding())});
     }
     else
       out.push_back({std::move(e.address), std::move(e.value)});
@@ -816,15 +822,22 @@ void branch::queue_current_value(const std::string& address, ossia::net::paramet
     m_wake();
 }
 
-void branch::on_value(const std::string& address, const ossia::value& v)
+void branch::on_value(
+    const std::string& address, ossia::net::parameter_base* param, const ossia::value& v)
 {
-  // The branch's own push comes back only if the parameter changed the value
-  // (clip, type conversion): the host then learns the effective value.
-  if(t_pushing == this && t_pushing_request && scalars_match(*t_pushing_request, v))
+  // Bounded on output, as ossia-max bounds the value at the outlet of each
+  // object (the parameter itself stores what it was given).
+  ossia::value bounded
+      = param ? ossia::bound_value(param->get_domain(), v, param->get_bounding()) : v;
+  if(!bounded.valid())
+    return;
+  // The branch's own push comes back only if the value that leaves differs
+  // from the value sent (clip, type conversion): the host then learns it.
+  if(t_pushing == this && t_pushing_request && scalars_match(*t_pushing_request, bounded))
     return;
   {
     std::lock_guard<std::mutex> lock(m_queue_mutex);
-    m_queue.push_back({address, v, nullptr});
+    m_queue.push_back({address, std::move(bounded), nullptr});
   }
   if(m_wake)
     m_wake();
@@ -869,7 +882,7 @@ std::string branch::bind(std::string_view address)
   if(a.empty())
     return "bind expects an address";
   if(find_binding(a))
-    return a + ": already bound";
+    return {};
   if(find(normalize_relative_address(a)))
     return a + ": already declared by add";
   m_bindings.push_back(binding{a, {}});
@@ -1032,7 +1045,8 @@ void branch::resolve(binding& b)
       t.out_address = relative_to(*root, *node);
 
     const std::string out = t.out_address;
-    t.callback = param->add_callback([this, out](const ossia::value& v) { on_value(out, v); });
+    t.callback = param->add_callback(
+        [this, out, param](const ossia::value& v) { on_value(out, param, v); });
     node->about_to_be_deleted.connect<&branch::on_node_removing>(this);
     b.targets.push_back(std::move(t));
 

@@ -15,7 +15,8 @@
 //   unbind <address>                              stop following it
 //   set <address> <values...>                     push a value to a leaf or a bound parameter
 //   left outlet                                   <address> <values...>, for values that
-//                                                 come from any other source
+//                                                 come from any other source; "ready" once
+//                                                 the instance has registered
 //   right outlet                                  status and errors
 //
 // The node registers like an ossia.model: under the ossia.model, ossia.device

@@ -33,7 +33,7 @@
 	<outletlist>
 		<outlet id="0" name="Values" type="any">
 			<digest>Values changed by another source</digest>
-			<description>A message per changed parameter, the relative address followed by the value. Values set through this instance do not come back here. The default of a leaf comes out here once the leaf exists, and a bound address outputs the value it finds when it reaches the parameter.</description>
+			<description>A message per changed parameter, the relative address followed by the value, bounded to the parameter's range as at the outlet of every ossia object. A value set through this instance comes back here only when the bounded value differs from the one sent. The default of a leaf comes out here once the leaf exists, a bound address outputs the value it finds when it reaches the parameter, and <m>ready</m> is sent once the object has registered, so that a script can replay its declarations.</description>
 		</outlet>
 		<outlet id="1" name="Info outlet" type="any">
 			<digest>Status and errors</digest>
@@ -65,7 +65,7 @@
 				Create a parameter under the node
 			</digest>
 			<description>
-				The message <m>add</m> followed by a relative address and attributes creates a parameter, with the same attribute names as <o>ossia.parameter</o>: @type, @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @repetitions, @enable, @recall_safe. @type is required. A numeric type (float, int, vec2f, vec3f, vec4f) requires @min and @max, or @range: the declaration is refused otherwise, and an error is reported on the right outlet.
+				The message <m>add</m> followed by a relative address and attributes creates a parameter, with the same attribute names as <o>ossia.parameter</o>: @type, @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @repetitions, @enable, @recall_safe. @type is required. A numeric type (float, int, vec2f, vec3f, vec4f) requires @min and @max, or @range: the declaration is refused otherwise, and an error is reported on the right outlet. Declaring the same leaf again with the same attributes is accepted and does nothing.
 			</description>
 		</method>
 
@@ -100,7 +100,7 @@
 				Set the value of a parameter
 			</digest>
 			<description>
-				The message <m>set</m> followed by an address (a declared leaf, or a bound address) and a value pushes the value to the parameter, clipped to its range according to its clip mode. The value is sent to the network and to every other ossia object that listens to this address, but does not come back on the left outlet of this instance, unless the parameter changed it (clip, type conversion): the effective value then comes back, as if it came from another source.
+				The message <m>set</m> followed by an address (a declared leaf, or a bound address) and a value pushes the value to the parameter, which stores it as sent, like <o>ossia.parameter</o>. The value is sent to the network and to every other ossia object that listens to this address; each object bounds it to the range at its outlet. It does not come back on the left outlet of this instance, unless the bounded value differs from the one sent (clip, type conversion): the bounded value then comes back, as if it came from another source.
 			</description>
 		</method>
 
