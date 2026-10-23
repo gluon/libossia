@@ -48,7 +48,7 @@
 				Name of the node in the ossia namespace
 			</digest>
 			<description>
-				<o>ossia.v8connector</o> requires a node name. The declared parameters are created under this node. When several nodes have the same name, instances (name.1, name.2, etc...) are created, as for <o>ossia.model</o>.
+				<o>ossia.v8connector</o> requires a node name. The declared parameters are created under this node, which is created by the first <m>add</m> and stays, even without parameters, until the object is deleted, like an <o>ossia.model</o>. An instance that only binds creates no node, like an <o>ossia.remote</o>. When several nodes have the same name, instances (name.1, name.2, etc...) are created, as for <o>ossia.model</o>.
 			</description>
 		</objarg>
 	</objarglist>
@@ -100,7 +100,7 @@
 				Set the value of a parameter
 			</digest>
 			<description>
-				The message <m>set</m> followed by an address (a declared leaf, or a bound address) and a value pushes the value to the parameter, clipped to its range according to its clip mode. The value is sent to the network and to every other ossia object that listens to this address, but does not come back on the left outlet of this instance.
+				The message <m>set</m> followed by an address (a declared leaf, or a bound address) and a value pushes the value to the parameter, clipped to its range according to its clip mode. The value is sent to the network and to every other ossia object that listens to this address, but does not come back on the left outlet of this instance, unless the parameter changed it (clip, type conversion): the effective value then comes back, as if it came from another source.
 			</description>
 		</method>
 

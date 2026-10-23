@@ -3,10 +3,12 @@
 // Max-independent part of ossia.v8connector: a branch of an ossia device
 // whose leaves (parameters) are declared at runtime by a script.
 //
-// The branch does not own its node. The host object creates the node in the
-// device tree, attaches the branch to it and detaches it before the node
-// disappears. The declarations are kept, so that attaching the branch to a new
-// node recreates every leaf.
+// The branch does not own its node. The host gives it a node factory; the
+// branch asks for a node when its first leaf is declared, as an ossia.model
+// creates its node, and keeps it after clear, as an ossia.model without
+// children. A branch that only binds never asks for a node, as an ossia.remote
+// creates nothing. The host detaches the branch before the node disappears;
+// the declarations are kept, so that the next node recreates every leaf.
 //
 // A branch can also follow parameters that exist elsewhere (bind), the way
 // ossia.remote does: nothing is created, the subscription follows the
@@ -96,6 +98,11 @@ public:
   branch(const branch&) = delete;
   branch& operator=(const branch&) = delete;
 
+  // How the branch obtains its node when it needs one. The factory returns
+  // nullptr when no node can be created yet (not registered, no device).
+  void set_node_factory(std::function<ossia::net::node_base*()> factory);
+  // Ask the factory for a node if the branch has leaves and no node yet.
+  void reattach();
   // Attach to a node of the device tree and recreate every declared leaf.
   void attach(ossia::net::node_base& node);
   // Forget the node and the leaves it holds. The declarations are kept.
@@ -111,8 +118,9 @@ public:
   // Remove every leaf of this branch.
   void clear();
   // Push a value from the host, to a declared leaf or to a bound address. The
-  // value is clipped to the parameter's range. The host's own callback is not
-  // fired for this push.
+  // value is clipped to the parameter's range. The value comes back to the host
+  // only when the parameter changed it (clip, type conversion): the effective
+  // value then leaves as if it came from another source.
   std::string set(std::string_view address, const scalars& values);
 
   // Follow a parameter that exists elsewhere. The address follows the rules of
@@ -181,6 +189,7 @@ private:
 
   leaf* find(std::string_view address);
   binding* find_binding(std::string_view address);
+  void ensure_node();
   std::string create(leaf& l);
   void destroy(leaf& l);
   void resolve(binding& b);
@@ -212,6 +221,7 @@ private:
   std::vector<queued> m_queue;
   std::function<void()> m_wake;
   std::function<void()> m_node_lost;
+  std::function<ossia::net::node_base*()> m_node_factory;
 };
 
 }

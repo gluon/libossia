@@ -205,6 +205,25 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
 
     REQUIRE(b1.set("gain", {100}).empty());
     REQUIRE(gain1->value() == ossia::value(6.f));
+    // the parameter changed the value: the effective value comes back to the
+    // instance that sent it, as if it came from another source
+    auto corrected = b1.drain();
+    REQUIRE(corrected.size() == 1);
+    REQUIRE(corrected[0].address == "gain");
+    REQUIRE(corrected[0].value == ossia::value(6.f));
+    REQUIRE(b1.set("gain", {-116}).empty());
+    corrected = b1.drain();
+    REQUIRE(corrected.size() == 1);
+    REQUIRE(corrected[0].value == ossia::value(-60.f));
+    REQUIRE(b1.set("gain", {-6}).empty()); // in range: nothing comes back
+    REQUIRE(b1.drain().empty());
+    REQUIRE(b1.set("voices", {3.7f}).empty()); // converted to int: the effective value comes back
+    corrected = b1.drain();
+    REQUIRE(corrected.size() == 1);
+    REQUIRE(corrected[0].address == "voices");
+    REQUIRE(corrected[0].value == ossia::value(4));
+    REQUIRE(b1.set("voices", {4}).empty());
+    REQUIRE(b1.drain().empty());
 
     REQUIRE(!b1.set("nothere", {1}).empty());
     REQUIRE(!b1.set("pos", {1}).empty());
@@ -366,9 +385,17 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     REQUIRE(in[0].value == ossia::value(-10.f));
     REQUIRE(a.drain().empty());
 
-    // the owner's type and range apply to the follower's pushes
+    // the owner's type and range apply to the follower's pushes, and the
+    // effective value comes back to the follower that sent it
     REQUIRE(b.set("synth/gain", {100}).empty());
     REQUIRE(ossia::net::find_node(root, "/synth/gain")->get_parameter()->value() == ossia::value(6.f));
+    in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/gain");
+    REQUIRE(in[0].value == ossia::value(6.f));
+    in = a.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].value == ossia::value(6.f));
     REQUIRE(!b.set("synth/gain", {S("loud")}).empty());
 
     // unbind: nothing flows any more, the parameter is untouched
@@ -468,5 +495,89 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     REQUIRE(a.bind("manual/gain").empty());
     REQUIRE(!a.bind("gain").empty());  // declared by add in a
     REQUIRE(!a.add(spec_of("manual/gain", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}}))).empty());
+  }
+}
+
+TEST_CASE("v8connector_node_on_first_add", "v8connector_node_on_first_add")
+{
+  auto proto = std::make_unique<ossia::net::multiplex_protocol>();
+  ossia::net::generic_device dev{std::move(proto), "v8_node"};
+  auto& root = dev.get_root_node();
+  {
+    auto& n = ossia::net::create_node(root, "/manual/gain");
+    ossia::try_setup_parameter("float", n);
+  }
+
+  // The host side: a factory that creates the node under the device root, as
+  // ossia.model does, and counts how many times it is asked.
+  int created = 0;
+  branch b;
+  b.set_node_factory([&]() -> ossia::net::node_base* {
+    ++created;
+    return &ossia::net::create_node(root, "/mirror");
+  });
+  b.set_resolution_context({&root}, {&dev});
+
+  SECTION("an instance that only binds creates no node, like an ossia.remote")
+  {
+    b.reattach(); // what registration does
+    REQUIRE(created == 0);
+    REQUIRE(b.bind("manual/gain").empty());
+    REQUIRE(b.bound_count("manual/gain") == 1);
+    REQUIRE(created == 0);
+    REQUIRE(!b.attached());
+    REQUIRE(ossia::net::find_node(root, "/mirror") == nullptr);
+    REQUIRE(b.set("manual/gain", {0.5f}).empty());
+    REQUIRE(created == 0);
+  }
+
+  SECTION("the first add creates the node, which then stays like an ossia.model")
+  {
+    b.reattach();
+    REQUIRE(created == 0);
+    REQUIRE(b.add(spec_of("x", attrs({{"type", {S("int")}}, {"min", {0}}, {"max", {10}}}))).empty());
+    REQUIRE(created == 1);
+    REQUIRE(b.attached());
+    REQUIRE(ossia::net::find_node(root, "/mirror/x") != nullptr);
+    REQUIRE(b.add(spec_of("y", attrs({{"type", {S("bool")}}}))).empty());
+    REQUIRE(created == 1);
+
+    b.clear();
+    REQUIRE(b.attached());
+    REQUIRE(ossia::net::find_node(root, "/mirror") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/mirror")->children().empty());
+    REQUIRE(created == 1);
+
+    REQUIRE(b.add(spec_of("z", attrs({{"type", {S("string")}}}))).empty());
+    REQUIRE(b.remove("z"));
+    REQUIRE(b.attached());
+    REQUIRE(created == 1);
+
+    // the host detaches and registers again (its node was destroyed): the
+    // node is asked for again only because there are leaves
+    REQUIRE(b.add(spec_of("w", attrs({{"type", {S("impulse")}}}))).empty());
+    b.detach();
+    root.remove_child(*ossia::net::find_node(root, "/mirror"));
+    b.reattach();
+    REQUIRE(created == 2);
+    REQUIRE(ossia::net::find_node(root, "/mirror/w") != nullptr);
+  }
+
+  SECTION("a factory that cannot create yet is asked again later")
+  {
+    bool ready = false;
+    int asked = 0;
+    b.set_node_factory([&]() -> ossia::net::node_base* {
+      ++asked;
+      return ready ? &ossia::net::create_node(root, "/mirror") : nullptr;
+    });
+    REQUIRE(b.add(spec_of("x", attrs({{"type", {S("bool")}}}))).empty());
+    REQUIRE(asked == 1);
+    REQUIRE(!b.attached());
+    ready = true;
+    b.reattach();
+    REQUIRE(asked == 2);
+    REQUIRE(b.attached());
+    REQUIRE(ossia::net::find_node(root, "/mirror/x") != nullptr);
   }
 }

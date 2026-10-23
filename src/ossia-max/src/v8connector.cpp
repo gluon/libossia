@@ -129,6 +129,9 @@ void* v8connector::create(t_symbol*, long argc, t_atom* argv)
   void* queue = x->m_queue_qelem;
   x->m_branch.set_wake_callback([queue] { qelem_set(queue); });
   x->m_branch.set_node_lost_callback([x] { x->schedule_registration(); });
+  x->m_branch.set_node_factory([x]() -> ossia::net::node_base* {
+    return x->m_dead ? nullptr : x->create_branch_node();
+  });
   x->m_branch.set_binding_changed_callback([x](const std::string& address, std::size_t n) {
     if(x->m_dead)
       return;
@@ -161,6 +164,7 @@ void v8connector::destroy(v8connector* x)
   x->m_branch.set_wake_callback({});
   x->m_branch.set_node_lost_callback({});
   x->m_branch.set_binding_changed_callback({});
+  x->m_branch.set_node_factory({});
   x->unregister();
 
   if(x->m_register_qelem)
@@ -239,60 +243,67 @@ void v8connector::do_registration()
   unregister();
 
   if(m_name && m_name != _sym_nothing)
-  {
     update_path();
-    auto devices = get_all_devices();
 
-    for(const std::string& path : m_paths)
+  m_registered = true;
+  update_resolution_context();
+  // The node is created only if there are leaves to put under it.
+  m_branch.reattach();
+
+  m_registering = false;
+}
+
+// Create the node of this instance under its parent, like an ossia.model does:
+// a node that already exists gets an instance suffix. Returns nullptr when no
+// device matches.
+ossia::net::node_base* v8connector::create_branch_node()
+{
+  if(!m_registered || !m_name || m_name == _sym_nothing || !m_matchers.empty())
+    return m_matchers.empty() ? nullptr : m_matchers.front()->get_node();
+
+  auto devices = get_all_devices();
+  for(const std::string& path : m_paths)
+  {
+    const auto pos = path.find(":/");
+    if(pos == std::string::npos)
+      continue;
+    const std::string_view prefix(path.data(), pos);
+    const std::string_view osc_address(path.data() + pos + 1);
+
+    for(auto dev : devices)
     {
-      const auto pos = path.find(":/");
-      if(pos == std::string::npos)
+      if(dev->get_name() != prefix)
         continue;
-      const std::string_view prefix(path.data(), pos);
-      const std::string_view osc_address(path.data() + pos + 1);
-
-      for(auto dev : devices)
-      {
-        if(dev->get_name() != prefix)
-          continue;
-        // Like ossia.model: a node that already exists gets an instance suffix.
-        auto& node = ossia::net::create_node(dev->get_root_node(), osc_address);
-        m_matchers.push_back(std::make_shared<matcher>(&node, this));
-      }
-    }
-
-    set_matchers_index();
-    m_selection_path.reset();
-    fill_selection();
-
-    if(m_matchers.empty())
-    {
-      object_error(&m_object, "Can't find a device for %s", m_name->s_name);
-    }
-    else
-    {
-      set_priority();
-      set_description();
-      set_tags();
-      set_hidden();
-      set_recall_safe();
-
-      if(m_matchers.size() > 1)
-        object_warn(
-            &m_object, "%s matches several nodes, the parameters are created under %s",
-            m_name->s_name,
-            ossia::net::address_string_from_node(*m_matchers.front()->get_node()).c_str());
-
-      m_branch.attach(*m_matchers.front()->get_node());
-      status(
-          "address", ossia::net::address_string_from_node(*m_matchers.front()->get_node()));
+      auto& node = ossia::net::create_node(dev->get_root_node(), osc_address);
+      m_matchers.push_back(std::make_shared<matcher>(&node, this));
     }
   }
 
-  update_resolution_context();
+  set_matchers_index();
+  m_selection_path.reset();
+  fill_selection();
 
-  m_registered = true;
-  m_registering = false;
+  if(m_matchers.empty())
+  {
+    object_error(&m_object, "Can't find a device for %s", m_name->s_name);
+    return nullptr;
+  }
+
+  set_priority();
+  set_description();
+  set_tags();
+  set_hidden();
+  set_recall_safe();
+
+  if(m_matchers.size() > 1)
+    object_warn(
+        &m_object, "%s matches several nodes, the parameters are created under %s",
+        m_name->s_name,
+        ossia::net::address_string_from_node(*m_matchers.front()->get_node()).c_str());
+
+  auto* node = m_matchers.front()->get_node();
+  status("address", ossia::net::address_string_from_node(*node));
+  return node;
 }
 
 // Bound addresses resolve like an ossia.remote placed next to this object:
