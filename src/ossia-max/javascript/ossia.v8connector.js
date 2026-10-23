@@ -34,31 +34,48 @@
 //
 //   function anything() { synth.dispatch(messagename, arrayfromargs(arguments)); }
 //
+// The object sends "ready" on that outlet once it has registered. The helper
+// then replays every declaration and bind it knows, so that an object deleted
+// and recreated (undo, paste) gets them again. The helper never keeps a stale
+// reference: it looks the object up by name at each send, and checks that a
+// Maxobj it was given is still valid. "ready" is therefore a reserved address.
+//
+// A value the parameter changed (clip to the declared range, type conversion)
+// comes back on the left outlet, so that the script shows the effective value.
+//
 // A numeric type (float, int, vec2f, vec3f, vec4f) needs min and max, or
 // range: the object refuses the declaration otherwise.
 
 function OssiaConnector(target) {
   this.handlers = {};
+  this.declarations = {}; // address -> attributes, replayed on "ready"
+  this.declarationOrder = [];
+  this.bindings = []; // addresses, replayed on "ready"
   this.target = null;
   this.name = null;
   if (typeof target === "string") {
     this.name = target;
   } else if (target) {
     this.target = target;
+    if (target.varname) this.name = String(target.varname);
   }
 }
 
-// Resolve the object lazily: the scripting name may be set after the script loads.
+function isValid(obj) {
+  if (!obj) return false;
+  if (typeof obj.valid !== "undefined") return !!obj.valid;
+  return true;
+}
+
+// Resolve the object every time: the one found earlier may have been deleted
+// (undo, paste) and replaced by another one with the same scripting name.
 OssiaConnector.prototype.object = function () {
-  if (this.target) return this.target;
+  if (this.target && isValid(this.target) && !this.name) return this.target;
   if (!this.name) return null;
   var p = this.patcher();
   while (p) {
     var obj = p.getnamed(this.name);
-    if (obj) {
-      this.target = obj;
-      return obj;
-    }
+    if (obj && isValid(obj)) return obj;
     p = p.parentpatcher;
   }
   return null;
@@ -80,69 +97,85 @@ OssiaConnector.prototype.send = function (args) {
   return true;
 };
 
+function pushValue(args, value) {
+  if (Array.isArray(value)) {
+    for (var k = 0; k < value.length; k++) args.push(value[k]);
+  } else if (typeof value === "boolean") {
+    args.push(value ? 1 : 0);
+  } else {
+    args.push(value);
+  }
+}
+
+function addMessage(address, attrs) {
+  var args = ["add", address];
+  var names = Object.keys(attrs || {});
+  for (var j = 0; j < names.length; j++) {
+    var value = attrs[names[j]];
+    if (value === undefined || value === null) continue;
+    args.push("@" + names[j]);
+    pushValue(args, value);
+  }
+  return args;
+}
+
 // declare({ address: { type, min, max, range, unit, default, clip, mode,
 //                      description, tags, priority, rate, critical, invisible,
 //                      repetitions, enable, recall_safe } })
-// Each entry becomes one "add" message with the same attribute names as ossia.parameter.
+// Each entry becomes one "add" message with the same attribute names as
+// ossia.parameter. The declarations are kept and replayed on "ready".
 OssiaConnector.prototype.declare = function (spec) {
   var addresses = Object.keys(spec);
   for (var i = 0; i < addresses.length; i++) {
-    var address = addresses[i];
-    var attrs = spec[address] || {};
-    var args = ["add", address];
-    var names = Object.keys(attrs);
-    for (var j = 0; j < names.length; j++) {
-      var value = attrs[names[j]];
-      if (value === undefined || value === null) continue;
-      args.push("@" + names[j]);
-      if (Array.isArray(value)) {
-        for (var k = 0; k < value.length; k++) args.push(value[k]);
-      } else if (typeof value === "boolean") {
-        args.push(value ? 1 : 0);
-      } else {
-        args.push(value);
-      }
-    }
-    this.send(args);
+    this.add(addresses[i], spec[addresses[i]] || {});
   }
 };
 
 OssiaConnector.prototype.add = function (address, attrs) {
-  var spec = {};
-  spec[address] = attrs;
-  this.declare(spec);
+  if (!(address in this.declarations)) this.declarationOrder.push(address);
+  this.declarations[address] = attrs || {};
+  this.send(addMessage(address, this.declarations[address]));
 };
 
 OssiaConnector.prototype.set = function (address) {
   var args = ["set", address];
-  for (var i = 1; i < arguments.length; i++) {
-    var v = arguments[i];
-    if (Array.isArray(v)) {
-      for (var k = 0; k < v.length; k++) args.push(v[k]);
-    } else if (typeof v === "boolean") {
-      args.push(v ? 1 : 0);
-    } else {
-      args.push(v);
-    }
-  }
+  for (var i = 1; i < arguments.length; i++) pushValue(args, arguments[i]);
   this.send(args);
 };
 
 OssiaConnector.prototype.remove = function (address) {
+  delete this.declarations[address];
+  this.declarationOrder = this.declarationOrder.filter(function (a) { return a !== address; });
   this.send(["remove", address]);
 };
 
 OssiaConnector.prototype.clear = function () {
+  this.declarations = {};
+  this.declarationOrder = [];
   this.send(["clear"]);
 };
 
 // bind(address): follow a parameter that exists elsewhere; set and on work on it.
 OssiaConnector.prototype.bind = function (address) {
+  if (this.bindings.indexOf(address) < 0) this.bindings.push(address);
   this.send(["bind", address]);
 };
 
 OssiaConnector.prototype.unbind = function (address) {
+  this.bindings = this.bindings.filter(function (a) { return a !== address; });
   this.send(["unbind", address]);
+};
+
+// Send again every declaration and bind this helper knows. Called on "ready";
+// the object accepts a declaration it already has, unchanged.
+OssiaConnector.prototype.replay = function () {
+  for (var i = 0; i < this.declarationOrder.length; i++) {
+    var address = this.declarationOrder[i];
+    this.send(addMessage(address, this.declarations[address]));
+  }
+  for (var j = 0; j < this.bindings.length; j++) {
+    this.send(["bind", this.bindings[j]]);
+  }
 };
 
 // on(address, handler): handler(values...) runs when the value changes by another source.
@@ -156,6 +189,10 @@ OssiaConnector.prototype.off = function (address) {
 
 // dispatch(address, values): call from anything() with the messages of the left outlet.
 OssiaConnector.prototype.dispatch = function (address, values) {
+  if (address === "ready") {
+    this.replay();
+    return true;
+  }
   var handler = this.handlers[address];
   if (!handler) return false;
   handler.apply(null, values);

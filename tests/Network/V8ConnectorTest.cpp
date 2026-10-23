@@ -174,7 +174,13 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
   REQUIRE(b1.add(spec_of("pos", attrs({{"type", {S("vec2f")}}, {"range", {-1, 1}}}))).empty());
   REQUIRE(b1.add(spec_of("mode", attrs({{"type", {S("string")}}, {"range", {S("sine"), S("saw")}}, {"default", {S("sine")}}}))).empty());
   REQUIRE(b1.add(spec_of("engine/reset", attrs({{"type", {S("impulse")}}, {"critical", {1}}}))).empty());
-  REQUIRE(!b1.add(gain).empty()); // same address twice in one branch
+  REQUIRE(b1.add(gain).empty()); // the same declaration again is accepted and does nothing
+  REQUIRE(b1.size() == 6);
+  {
+    auto other = gain;
+    other.max = {12.f};
+    REQUIRE(!b1.add(other).empty()); // other attributes at a declared address: refused
+  }
 
   SECTION("the default of a leaf comes out of its own branch once it is created")
   {
@@ -207,8 +213,9 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
     REQUIRE(gain1->value() == ossia::value(-6.f));
 
     REQUIRE(b1.set("gain", {100}).empty());
-    REQUIRE(gain1->value() == ossia::value(6.f));
-    // the parameter changed the value: the effective value comes back to the
+    // stored as sent, as ossia.parameter does; bounded when it leaves
+    REQUIRE(gain1->value() == ossia::value(100.f));
+    // the value that leaves differs from the value sent: it comes back to the
     // instance that sent it, as if it came from another source
     auto corrected = b1.drain();
     REQUIRE(corrected.size() == 1);
@@ -240,6 +247,21 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
     REQUIRE(in[0].address == "gain");
     REQUIRE(in[0].value == ossia::value(0.5f));
     REQUIRE(wakes == 1);
+
+    // another source pushes out of range straight on the parameter, as an
+    // ossia.remote does: the parameter stores it, the branch outputs it bounded
+    gain1->push_value(-116.f);
+    REQUIRE(gain1->value() == ossia::value(-116.f));
+    in = b1.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].value == ossia::value(-60.f));
+    auto* voices1 = ossia::net::find_node(root, "/synth/voices")->get_parameter();
+    voices1->set_bounding(ossia::bounding_mode::CLIP);
+    voices1->push_value(40);
+    in = b1.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "voices");
+    REQUIRE(in[0].value == ossia::value(16));
   }
 
   SECTION("the declared leaves are served by the oscquery server next to the hand made parameter")
@@ -362,7 +384,8 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     REQUIRE(b.bind("synth/gain").empty());
     REQUIRE(b.bound_count("synth/gain") == 1);
     REQUIRE(changes.back() == std::make_pair(std::string("synth/gain"), std::size_t(1)));
-    REQUIRE(!b.bind("synth/gain").empty()); // twice
+    REQUIRE(b.bind("synth/gain").empty()); // twice: accepted, nothing changes
+    REQUIRE(b.bound_count("synth/gain") == 1);
     REQUIRE(ossia::net::find_node(root, "/mirror/synth") == nullptr); // nothing created
 
     // the current value is delivered on bind
@@ -391,7 +414,8 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     // the owner's type and range apply to the follower's pushes, and the
     // effective value comes back to the follower that sent it
     REQUIRE(b.set("synth/gain", {100}).empty());
-    REQUIRE(ossia::net::find_node(root, "/synth/gain")->get_parameter()->value() == ossia::value(6.f));
+    auto* gp = ossia::net::find_node(root, "/synth/gain")->get_parameter();
+    REQUIRE(gp->value() == ossia::value(100.f));
     in = b.drain();
     REQUIRE(in.size() == 1);
     REQUIRE(in[0].address == "synth/gain");
@@ -400,6 +424,18 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     REQUIRE(in.size() == 1);
     REQUIRE(in[0].value == ossia::value(6.f));
     REQUIRE(!b.set("synth/gain", {S("loud")}).empty());
+
+    // another source pushes out of range straight on the parameter, as an
+    // ossia.remote does: both instances output the bounded value
+    gp->push_value(-116.f);
+    in = a.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "gain");
+    REQUIRE(in[0].value == ossia::value(-60.f));
+    in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/gain");
+    REQUIRE(in[0].value == ossia::value(-60.f));
 
     // unbind: nothing flows any more, the parameter is untouched
     REQUIRE(b.unbind("synth/gain"));
