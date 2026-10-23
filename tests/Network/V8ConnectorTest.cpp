@@ -173,6 +173,20 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
   REQUIRE(b1.add(spec_of("engine/reset", attrs({{"type", {S("impulse")}}, {"critical", {1}}}))).empty());
   REQUIRE(!b1.add(gain).empty()); // same address twice in one branch
 
+  SECTION("the default of a leaf comes out of its own branch once it is created")
+  {
+    // as ossia-max outputs the defaults of its parameters after they registered
+    auto in = b1.drain();
+    REQUIRE(in.size() == 3);
+    REQUIRE(in[0].address == "gain");
+    REQUIRE(in[0].value == ossia::value(-12.f));
+    REQUIRE(in[1].address == "voices");
+    REQUIRE(in[1].value == ossia::value(4));
+    REQUIRE(in[2].address == "mode");
+    REQUIRE(in[2].value == ossia::value(std::string("sine")));
+    REQUIRE(b1.drain().empty());
+  }
+
   auto* gain1 = ossia::net::find_node(root, "/synth/gain")->get_parameter();
   auto* gain2 = ossia::net::find_node(root, "/synth.1/gain")->get_parameter();
   REQUIRE(gain1);
@@ -269,6 +283,7 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
 
   SECTION("the enclosing node disappears: declarations survive and come back")
   {
+    b1.drain();
     root.remove_child(bn1);
     REQUIRE(lost == 1);
     REQUIRE(!b1.attached());
@@ -279,6 +294,11 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
     b1.attach(bn3);
     REQUIRE(ossia::net::find_node(root, "/synth/cutoff") != nullptr);
     REQUIRE(ossia::net::find_node(root, "/synth/engine/reset") != nullptr);
+    // the defaults come out again after the new registration
+    auto in = b1.drain();
+    REQUIRE(in.size() == 3);
+    REQUIRE(in[0].address == "gain");
+    REQUIRE(in[0].value == ossia::value(-12.f));
     REQUIRE(b1.set("gain", {-3}).empty());
   }
 }
@@ -363,6 +383,7 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
   {
     REQUIRE(b.bind("synth/gain").empty());
     b.drain();
+    a.drain();
     REQUIRE(a.remove("gain"));
     REQUIRE(b.bound_count("synth/gain") == 0);
     REQUIRE(changes.back() == std::make_pair(std::string("synth/gain"), std::size_t(0)));
@@ -370,11 +391,17 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
 
     REQUIRE(a.add(gain).empty());
     REQUIRE(b.bound_count("synth/gain") == 1);
-    // the owner's default reaches the follower
+    // the follower outputs the value it finds, once: the quiet default did
+    // not fire its callback, the resolution read the final value
     auto in = b.drain();
-    REQUIRE(!in.empty());
-    REQUIRE(in.back().address == "synth/gain");
-    REQUIRE(in.back().value == ossia::value(-12.f));
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/gain");
+    REQUIRE(in[0].value == ossia::value(-12.f));
+    // the owner outputs its default locally
+    in = a.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "gain");
+    REQUIRE(in[0].value == ossia::value(-12.f));
     REQUIRE(b.set("synth/gain", {-30}).empty());
     in = a.drain();
     REQUIRE(in.size() == 1);
@@ -384,10 +411,27 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     root.remove_child(bn_a);
     REQUIRE(b.bound_count("synth/gain") == 0);
     auto& bn_a2 = ossia::net::create_node(root, "/synth");
+    b.drain();
     a.attach(bn_a2);
     REQUIRE(b.bound_count("synth/gain") == 1);
+    in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].value == ossia::value(-12.f));
     REQUIRE(b.set("synth/gain", {-40}).empty());
     REQUIRE(ossia::net::find_node(root, "/synth/gain")->get_parameter()->value() == ossia::value(-40.f));
+  }
+
+  SECTION("a bind made before the declaration outputs the default once it exists")
+  {
+    REQUIRE(b.bind("synth/cutoff").empty());
+    REQUIRE(b.bound_count("synth/cutoff") == 0);
+    REQUIRE(b.drain().empty());
+    REQUIRE(a.add(spec_of("cutoff", attrs({{"type", {S("float")}}, {"range", {20, 20000}}, {"default", {1000}}}))).empty());
+    REQUIRE(b.bound_count("synth/cutoff") == 1);
+    auto in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/cutoff");
+    REQUIRE(in[0].value == ossia::value(1000.f));
   }
 
   SECTION("a bind to a parameter that does not exist yet waits for it")
