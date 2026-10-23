@@ -362,6 +362,8 @@ std::string make_leaf_spec(
       err = flag(a, spec.critical);
     else if(a.name == "invisible")
       err = flag(a, spec.invisible);
+    else if(a.name == "mute")
+      err = flag(a, spec.mute);
     else if(a.name == "repetitions")
       err = flag(a, spec.repetitions);
     else if(a.name == "enable")
@@ -642,6 +644,8 @@ std::string branch::create(leaf& l)
   if(spec.rate)
     ossia::net::set_refresh_rate(node, *spec.rate);
   param->set_critical(spec.critical);
+  if(spec.mute)
+    ossia::net::set_muted(node, true);
   param->set_repetition_filter(
       spec.repetitions ? ossia::repetition_filter::OFF : ossia::repetition_filter::ON);
   if(!spec.enable)
@@ -800,11 +804,11 @@ std::vector<inbound> branch::drain()
           live = live || t.param == e.read_from;
       if(!live || !e.read_from->value().valid())
         continue;
-      out.push_back(
-          {std::move(e.address),
-           ossia::bound_value(
-               e.read_from->get_domain(), e.read_from->value(),
-               e.read_from->get_bounding())});
+      auto bounded = ossia::bound_value(
+          e.read_from->get_domain(), e.read_from->value(), e.read_from->get_bounding());
+      if(e.read_from->filter_value(bounded) || !bounded.valid())
+        continue;
+      out.push_back({std::move(e.address), std::move(bounded)});
     }
     else
       out.push_back({std::move(e.address), std::move(e.value)});
@@ -825,11 +829,15 @@ void branch::queue_current_value(const std::string& address, ossia::net::paramet
 void branch::on_value(
     const std::string& address, ossia::net::parameter_base* param, const ossia::value& v)
 {
-  // Bounded on output, as ossia-max bounds the value at the outlet of each
-  // object (the parameter itself stores what it was given).
+  // Same sequence as the outlet of every ossia-max object: the value is
+  // bounded to the parameter's range, then the parameter filters it
+  // (disabled, muted, or a repetition when the repetition filter is on). The
+  // parameter itself stores what it was given.
   ossia::value bounded
       = param ? ossia::bound_value(param->get_domain(), v, param->get_bounding()) : v;
   if(!bounded.valid())
+    return;
+  if(param && param->filter_value(bounded))
     return;
   // The branch's own push comes back only if the value that leaves differs
   // from the value sent (clip, type conversion): the host then learns it.

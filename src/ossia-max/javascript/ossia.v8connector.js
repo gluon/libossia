@@ -121,7 +121,7 @@ function addMessage(address, attrs) {
 
 // declare({ address: { type, min, max, range, unit, default, clip, mode,
 //                      description, tags, priority, rate, critical, invisible,
-//                      repetitions, enable, recall_safe } })
+//                      mute, repetitions, enable, recall_safe } })
 // Each entry becomes one "add" message with the same attribute names as
 // ossia.parameter. The declarations are kept and replayed on "ready".
 OssiaConnector.prototype.declare = function (spec) {
