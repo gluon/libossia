@@ -313,6 +313,63 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
     net.join();
   }
 
+  SECTION("the output is filtered by the parameter, as at the outlet of every ossia object")
+  {
+    // @repetitions 0: the repetition filter is on, two identical values give one output
+    REQUIRE(b1.add(spec_of("rep", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}, {"repetitions", {0}}}))).empty());
+    // @repetitions 1 (the default): two identical values give two outputs
+    REQUIRE(b1.add(spec_of("norep", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}}))).empty());
+    // @mute 1: nothing leaves
+    REQUIRE(b1.add(spec_of("muted", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}, {"mute", {1}}}))).empty());
+    // @enable 0: nothing leaves either
+    REQUIRE(b1.add(spec_of("off", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}, {"enable", {0}}}))).empty());
+    b1.drain();
+
+    auto* rep = ossia::net::find_node(root, "/synth/rep")->get_parameter();
+    auto* norep = ossia::net::find_node(root, "/synth/norep")->get_parameter();
+    auto* muted = ossia::net::find_node(root, "/synth/muted")->get_parameter();
+    auto* off = ossia::net::find_node(root, "/synth/off")->get_parameter();
+    REQUIRE(rep->get_repetition_filter() == ossia::repetition_filter::ON);
+    REQUIRE(norep->get_repetition_filter() == ossia::repetition_filter::OFF);
+    REQUIRE(muted->get_muted());
+    REQUIRE(off->get_disabled());
+
+    // another source pushes the same value twice
+    rep->push_value(0.3f);
+    rep->push_value(0.3f);
+    auto in = b1.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "rep");
+    REQUIRE(in[0].value == ossia::value(0.3f));
+    rep->push_value(0.4f);
+    REQUIRE(b1.drain().size() == 1);
+
+    norep->push_value(0.3f);
+    norep->push_value(0.3f);
+    in = b1.drain();
+    REQUIRE(in.size() == 2);
+    REQUIRE(in[0].address == "norep");
+    REQUIRE(in[1].value == ossia::value(0.3f));
+
+    muted->push_value(0.5f);
+    off->push_value(0.5f);
+    REQUIRE(b1.drain().empty());
+    REQUIRE(muted->value() == ossia::value(0.5f)); // stored, not output
+
+    // the same filter applies to a bound address: the follower of rep sees one value
+    branch f;
+    f.set_resolution_context({&root}, {&dev});
+    REQUIRE(f.bind("synth/rep").empty());
+    f.drain();
+    rep->push_value(0.7f);
+    rep->push_value(0.7f);
+    in = f.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(in[0].address == "synth/rep");
+    REQUIRE(f.bind("synth/muted").empty());
+    REQUIRE(f.drain().empty()); // the value found on bind is filtered too
+  }
+
   SECTION("remove and clear")
   {
     REQUIRE(b1.remove("engine/reset"));

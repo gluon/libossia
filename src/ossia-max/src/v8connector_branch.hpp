@@ -65,6 +65,7 @@ struct leaf_spec
   std::optional<float> rate;
   bool critical{false};
   bool invisible{false};
+  bool mute{false};
   bool repetitions{true};
   bool enable{true};
   bool recall_safe{false};
@@ -126,9 +127,10 @@ public:
   void clear();
   // Push a value from the host, to a declared leaf or to a bound address. The
   // parameter stores what is sent, as ossia.parameter does; values are bounded
-  // to the parameter's range when they leave the branch, as ossia-max bounds
-  // them at the outlet of each object. The value comes back to the host only
-  // when the bounded value differs from what was sent (clip, type conversion).
+  // to the parameter's range when they leave the branch, then filtered by the
+  // parameter (disabled, muted, repetition), as ossia-max does at the outlet of
+  // each object. The value comes back to the host only when the bounded value
+  // differs from what was sent (clip, type conversion).
   std::string set(std::string_view address, const scalars& values);
 
   // Follow a parameter that exists elsewhere. The address follows the rules of

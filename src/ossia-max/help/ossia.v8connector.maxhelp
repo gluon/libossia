@@ -397,7 +397,7 @@
 										420.0,
 										62.0
 									],
-									"text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors.",
+									"text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors.",
 									"fontname": "Lato Regular",
 									"fontsize": 12.0,
 									"linecount": 4
@@ -621,7 +621,7 @@
 										360.0,
 										62.0
 									],
-									"text": "Attributes of add use the names of ossia.parameter: @type (required), @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @repetitions, @enable, @recall_safe.",
+									"text": "Attributes of add use the names of ossia.parameter: @type (required), @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe.",
 									"fontname": "Lato Regular",
 									"fontsize": 12.0,
 									"linecount": 4
