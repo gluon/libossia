@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 CNRS
+// SPDX-FileContributor: Julien Bayle, PRISM <https://www.prism.cnrs.fr/>
+
 #include "v8connector.hpp"
 
 #include "device_base.hpp"

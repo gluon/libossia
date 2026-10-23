@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 CNRS
+// SPDX-FileContributor: Julien Bayle, PRISM <https://www.prism.cnrs.fr/>
+
 // Headless test of the Max-independent part of ossia.v8connector
 // (src/ossia-max/src/v8connector_branch.cpp).
 //
