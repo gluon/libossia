@@ -26,15 +26,25 @@ namespace v8connector_detail
 namespace
 {
 
-// Set on the pushing thread while a branch pushes a value itself. libossia
-// calls the value callbacks synchronously on that thread, so the branch can
-// tell its own pushes apart from every other source without a race.
+// Set on the pushing thread while a branch pushes a value itself, with the
+// value the host asked for. libossia calls the value callbacks synchronously on
+// that thread, so the branch can tell its own pushes apart from every other
+// source without a race, and let through a value the parameter changed.
 thread_local const branch* t_pushing = nullptr;
+thread_local const scalars* t_pushing_request = nullptr;
 
 struct pushing_scope
 {
-  explicit pushing_scope(const branch* b) { t_pushing = b; }
-  ~pushing_scope() { t_pushing = nullptr; }
+  pushing_scope(const branch* b, const scalars* request)
+  {
+    t_pushing = b;
+    t_pushing_request = request;
+  }
+  ~pushing_scope()
+  {
+    t_pushing = nullptr;
+    t_pushing_request = nullptr;
+  }
 };
 
 bool is_number(const scalar& s)
@@ -82,6 +92,57 @@ ossia::value to_value(const scalar& s)
     default:
       return std::get<std::string>(s);
   }
+}
+
+struct flatten
+{
+  scalars& out;
+  void operator()(float f) const { out.push_back(f); }
+  void operator()(int i) const { out.push_back(i); }
+  void operator()(bool b) const { out.push_back(b ? 1 : 0); }
+  void operator()(ossia::impulse) const { }
+  void operator()(const std::string& s) const { out.push_back(s); }
+  void operator()(const std::vector<ossia::value>& l) const
+  {
+    for(const auto& v : l)
+      v.apply(*this);
+  }
+  void operator()(const ossia::value_map_type&) const { }
+  template <std::size_t N>
+  void operator()(const std::array<float, N>& a) const
+  {
+    for(float f : a)
+      out.push_back(f);
+  }
+  void operator()() const { }
+};
+
+// True when a value holds exactly what the host sent: same count, numbers equal
+// as numbers, symbols equal as text. An impulse carries nothing to compare.
+bool scalars_match(const scalars& request, const ossia::value& v)
+{
+  if(v.get_type() == ossia::val_type::IMPULSE)
+    return true;
+  scalars got;
+  if(v.valid())
+    v.apply(flatten{got});
+  if(got.size() != request.size())
+    return false;
+  for(std::size_t i = 0; i < got.size(); ++i)
+  {
+    const bool num_r = is_number(request[i]);
+    const bool num_g = is_number(got[i]);
+    if(num_r != num_g)
+      return false;
+    if(num_r)
+    {
+      if(to_float(request[i]) != to_float(got[i]))
+        return false;
+    }
+    else if(std::get<std::string>(request[i]) != std::get<std::string>(got[i]))
+      return false;
+  }
+  return true;
 }
 
 // Number of numeric components of a type, 0 for non numeric types.
@@ -448,6 +509,26 @@ branch::~branch()
     dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
 }
 
+void branch::set_node_factory(std::function<ossia::net::node_base*()> factory)
+{
+  m_node_factory = std::move(factory);
+}
+
+void branch::reattach()
+{
+  ensure_node();
+}
+
+// A node is only asked for when there is a leaf to put under it: a branch that
+// only binds creates nothing, like an ossia.remote.
+void branch::ensure_node()
+{
+  if(m_node || m_leaves.empty() || !m_node_factory)
+    return;
+  if(auto* node = m_node_factory())
+    attach(*node);
+}
+
 void branch::attach(ossia::net::node_base& node)
 {
   detach();
@@ -500,6 +581,11 @@ std::string branch::add(const leaf_spec& spec)
       m_leaves.pop_back();
       return err;
     }
+  }
+  else
+  {
+    // First leaf: the node is created now, and attach creates the leaf.
+    ensure_node();
   }
   return {};
 }
@@ -651,7 +737,7 @@ std::string branch::set(std::string_view address, const scalars& values)
     if(auto err = scalars_to_value(*l->param, values, v); !err.empty())
       return a + ": " + err;
 
-    pushing_scope guard{this};
+    pushing_scope guard{this, &values};
     // libossia only applies the range to values written from the network.
     l->param->push_value(ossia::bound_value(*l->param, std::move(v)));
     return {};
@@ -661,7 +747,7 @@ std::string branch::set(std::string_view address, const scalars& values)
   {
     if(b->targets.empty())
       return b->address + ": bound parameter not found yet";
-    pushing_scope guard{this};
+    pushing_scope guard{this, &values};
     for(auto& t : b->targets)
     {
       ossia::value v;
@@ -729,7 +815,9 @@ void branch::queue_current_value(const std::string& address, ossia::net::paramet
 
 void branch::on_value(const std::string& address, const ossia::value& v)
 {
-  if(t_pushing == this)
+  // The branch's own push comes back only if the parameter changed the value
+  // (clip, type conversion): the host then learns the effective value.
+  if(t_pushing == this && t_pushing_request && scalars_match(*t_pushing_request, v))
     return;
   {
     std::lock_guard<std::mutex> lock(m_queue_mutex);

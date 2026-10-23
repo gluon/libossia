@@ -224,7 +224,7 @@
 										420.0,
 										21.0
 									],
-									"text": "set pushes a value; it is clipped to the declared range (@clip both here):",
+									"text": "set pushes a value, clipped to the declared range (@clip both here); a corrected value comes back on the left outlet:",
 									"fontname": "Lato Regular",
 									"fontsize": 12.0
 								}
@@ -415,10 +415,10 @@
 										420.0,
 										48.0
 									],
-									"text": "The node registers like ossia.model: under the nearest ossia.model, ossia.device or ossia.client in the patcher hierarchy (here the ossia.device of the parent patcher), otherwise under the global device.",
+									"text": "The node registers like ossia.model: under the nearest ossia.model, ossia.device or ossia.client in the patcher hierarchy (here the ossia.device of the parent patcher), otherwise under the global device. It is created by the first add and stays, even empty, until the object is deleted; an instance that only binds creates no node.",
 									"fontname": "Lato Regular",
 									"fontsize": 12.0,
-									"linecount": 3
+									"linecount": 4
 								}
 							},
 							{

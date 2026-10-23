@@ -15,9 +15,12 @@
 //                                                 come from any other source
 //   right outlet                                  status and errors
 //
-// The branch registers like an ossia.model: under the ossia.model, ossia.device
+// The node registers like an ossia.model: under the ossia.model, ossia.device
 // or ossia.client found in the patcher hierarchy, or under the global device.
-// Duplicate names get an instance suffix, as every ossia node.
+// It is created by the first add and stays until the object is deleted, like
+// an ossia.model without children; an instance that only binds creates nothing,
+// like an ossia.remote. Duplicate names get an instance suffix, as every ossia
+// node.
 
 #include <ossia-max/src/node_base.hpp>
 #include <ossia-max/src/v8connector_branch.hpp>
@@ -56,6 +59,7 @@ public:
 
   void do_registration();
   void unregister();
+  ossia::net::node_base* create_branch_node();
   void schedule_registration();
   void report_error(const std::string& message);
   void status(const char* what, const std::string& argument);
