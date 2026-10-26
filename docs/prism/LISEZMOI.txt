@@ -1,0 +1,52 @@
+ossia-prism 2.1.0+prism.2
+Paquet Max ossia (libossia 2.1.0) avec l'objet ossia.v8connector.
+Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
+
+CONTENU
+- Tous les objets ossia.* du paquet ossia officiel 2.1.0.
+- ossia.v8connector : les paramètres déclarés par un script v8 ou v8ui
+  rejoignent l'arbre ossia du patch, à côté des ossia.parameter.
+- Plateformes : macOS universel (Apple Silicon et Intel), Windows x64.
+
+INSTALLATION
+1. Quitter Max.
+2. Retirer le paquet ossia officiel s'il est installé (Package Manager,
+   ossia, Uninstall, ou supprimer Documents/Max 9/Packages/ossia).
+   ossia-prism contient déjà tous les objets ossia : les deux paquets
+   ne peuvent pas cohabiter.
+3. Décompresser l'archive dans Documents/Max 9/Packages/
+   (on obtient Documents/Max 9/Packages/ossia-prism).
+4. macOS seulement, le paquet n'étant pas signé par Apple, dans le Terminal :
+   xattr -dr com.apple.quarantine ~/Documents/Max\ 9/Packages/ossia-prism
+5. Relancer Max. À la création d'un ossia.v8connector, la console affiche
+   « ossia-prism 2.1.0+prism.2, PRISM CNRS ».
+
+PRISE EN MAIN
+- Aide : clic droit sur ossia.v8connector, Open Help (onglets Basic,
+  Script, Limits).
+- Démo : examples/ossia.v8connector.demo.maxpat dans le paquet.
+- Helper JavaScript : javascript/ossia.v8connector.js (declare, set,
+  bind, on).
+
+MISE À JOUR
+- Ne pas mettre ossia à jour depuis le Package Manager : il réinstallerait
+  le paquet officiel.
+- Pour une nouvelle version d'ossia-prism, remplacer le dossier
+  Documents/Max 9/Packages/ossia-prism par celui de la nouvelle archive.
+
+LIMITES CONNUES
+- Serveur OSCQuery : celui d'ossia.device, inchangé. Un second « expose »
+  sur un port déjà occupé fait planter Max : utiliser des ports explicites
+  et libres, et envoyer « stop » avant d'exposer de nouveau.
+- Windows : la découverte automatique des devices OSCQuery (mDNS) dépend
+  du service Bonjour, installé et démarré. Sans lui, connecter ossia.client
+  à une adresse explicite.
+- Autres limites de l'objet : onglet Limits de l'aide.
+
+LIENS
+- Paquets Max : https://docs.cycling74.com/userguide/packages/
+- Documentation ossia : https://ossia.io/ossia-docs/
+
+LICENCE
+libossia : LGPLv3 ou CeCILL-C, au choix. Fichiers de ossia.v8connector :
+copyright CNRS.
