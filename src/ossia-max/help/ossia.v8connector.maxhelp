@@ -276,7 +276,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 12.5, 560.0, 536.0, 64.0 ],
-                                    "text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors."
+                                    "text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors. Every refusal also comes out here: refused <address> <reason>."
                                 }
                             },
                             {
@@ -425,7 +425,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 580.0, 530.0, 363.0, 64.0 ],
-                                    "text": "Attributes of add use the names of ossia.parameter: @type (required), @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe."
+                                    "text": "Attributes of add use the names of ossia.parameter: @type (required), @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe. @clip none is the free mode. A unit imposes its type: @type vec4f @unit color.rgb is refused."
                                 }
                             },
                             {
@@ -824,7 +824,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 30.0, 320.0, 685.0, 35.0 ],
-                                    "text": "'ready' is a reserved address: the object sends it on its left outlet once registered, the helper replays its declarations on it. A parameter cannot be named ready."
+                                    "text": "'ready' and 'refused' are reserved addresses: the object sends ready on its left outlet once registered (the helper replays its declarations), and refused <address> <reason> for every refusal. No parameter can be named ready or refused."
                                 }
                             },
                             {

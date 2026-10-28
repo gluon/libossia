@@ -11,11 +11,11 @@ Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
 | Message | Effect |
 |---|---|
-| `add <address> @type ... @min ... @max ...` | creates a parameter under the node, with the attribute names of `ossia.parameter` (`@type`, `@min`, `@max`, `@range`, `@unit`, `@default`, `@clip`, `@mode`, `@description`, `@tags`, `@priority`, `@rate`, `@critical`, `@invisible`, `@mute`, `@repetitions`, `@enable`, `@recall_safe`). A numeric type requires `@min` and `@max`, or `@range`. |
+| `add <address> @type ... @min ... @max ...` | creates a parameter under the node, with the attribute names of `ossia.parameter` (`@type`, `@min`, `@max`, `@range`, `@unit`, `@default`, `@clip`, `@mode`, `@description`, `@tags`, `@priority`, `@rate`, `@critical`, `@invisible`, `@mute`, `@repetitions`, `@enable`, `@recall_safe`). A numeric type requires `@min` and `@max`, or `@range`. A `@type` that the `@unit` would change is refused (`color.rgb` is `vec3f`, `color.rgba` is `vec4f`). `@clip none` is accepted as the free mode. |
 | `remove <address>`, `clear` | removes one parameter, or every parameter of this instance |
 | `bind <address>`, `unbind <address>` | follows a parameter that exists elsewhere (an `ossia.parameter`, another instance), addressed as an `ossia.remote` would; creates nothing, follows the parameter when it disappears and comes back |
 | `set <address> <values...>` | pushes a value to a declared or bound parameter |
-| left outlet | `<address> <values...>` for every value changed by another source, bounded and filtered like the outlet of every ossia object; `ready` once the object has registered |
+| left outlet | `<address> <values...>` for every value changed by another source, bounded and filtered like the outlet of every ossia object; `ready` once the object has registered; `refused <address> <reason>` for every refusal of `add`, `bind`, `set`, `remove` or `unbind` |
 | right outlet | `address`, `add`, `remove`, `clear`, `bind <address> <count>` and `error` messages |
 
 Minimal `v8` or `v8ui` script, with the helper `javascript/ossia.v8connector.js`. The object has the scripting name `synth`; its left outlet is patched into the script's inlet, nothing else is wired:
@@ -38,7 +38,7 @@ function anything() { synth.dispatch(messagename, arrayfromargs(arguments)); }
 function bang() { synth.set("gain", -6); }
 ```
 
-`synth.bind("other/gain")` follows a parameter declared elsewhere instead of creating one. The helper keeps the declarations and replays them when the object sends `ready`, so the object can be deleted and recreated.
+`synth.bind("other/gain")` follows a parameter declared elsewhere instead of creating one. The helper keeps the declarations and replays them when the object sends `ready`, so the object can be deleted and recreated. It reports every `refused` message in the Max console and calls `synth.onRefused(address, reason)` when it is set.
 
 ### Demo and help
 
@@ -58,7 +58,8 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 - `@priority` is stored on the node but does not order the outputs of `ossia.v8connector`: ossia-max orders the outputs of `ossia.parameter` and `ossia.remote` only.
 - An `ossia.model` or `ossia.view` added to the patcher after the object has registered does not take it under its node: send `address <name>` to the object, or reload the patcher.
-- `ready` is a reserved address; inside one instance an address is either declared by `add` or followed by `bind`.
+- `ready` and `refused` are reserved addresses; inside one instance an address is either declared by `add` or followed by `bind`.
+- Color units are served the way libossia serves them: as an `EXTENDED_TYPE` array (`color.rgb.r`, `color.rgb.g`, ...) followed by a second `EXTENDED_TYPE` key (`vecf`), not as `UNIT`. A client that keeps the last duplicate key sees `vecf` and no unit. Units of other dataspaces (gain, time, distance, speed, angle) are served as `UNIT`.
 - Two instances with the same name become `name` and `name.1`, like two `ossia.model`.
 - The OSCQuery server is the one of `ossia.device`, unchanged: sending `expose` twice on a port that is already in use crashes Max. Use explicit, free ports, and `stop` before exposing again.
 - On Windows, the automatic discovery of OSCQuery devices (mDNS) depends on the Bonjour service being installed and running; without it, connect `ossia.client` to an explicit address.

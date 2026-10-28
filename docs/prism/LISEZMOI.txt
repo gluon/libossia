@@ -1,4 +1,4 @@
-ossia-prism 2.1.0+prism.2
+ossia-prism 2.1.0+prism.3
 Paquet Max ossia (libossia 2.1.0) avec l'objet ossia.v8connector.
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
@@ -19,7 +19,7 @@ INSTALLATION
 4. macOS seulement, le paquet n'étant pas signé par Apple, dans le Terminal :
    xattr -dr com.apple.quarantine ~/Documents/Max\ 9/Packages/ossia-prism
 5. Relancer Max. À la création d'un ossia.v8connector, la console affiche
-   « ossia-prism 2.1.0+prism.2, PRISM CNRS ».
+   « ossia-prism 2.1.0+prism.3, PRISM CNRS ».
 
 PRISE EN MAIN
 - Aide : clic droit sur ossia.v8connector, Open Help (onglets Basic,
@@ -41,6 +41,16 @@ LIMITES CONNUES
 - Windows : la découverte automatique des devices OSCQuery (mDNS) dépend
   du service Bonjour, installé et démarré. Sans lui, connecter ossia.client
   à une adresse explicite.
+- Unités de couleur : libossia les publie en EXTENDED_TYPE (tableau
+  color.rgb.r, color.rgb.g, ...) suivi d'une seconde clé EXTENDED_TYPE
+  « vecf », jamais en UNIT. Un client qui garde la dernière clé en double
+  voit « vecf » et aucune unité. Les autres unités (gain, temps, distance,
+  vitesse, angle) sont publiées en UNIT.
+- Une unité impose son type (color.rgb : vec3f, color.rgba : vec4f) :
+  une déclaration dont le @type diffère est refusée, avec la raison.
+- @clip none est accepté comme mode libre (free).
+- Tout refus sort aussi par la sortie gauche : refused <adresse> <raison>.
+  « ready » et « refused » sont des noms réservés.
 - Autres limites de l'objet : onglet Limits de l'aide.
 
 LIENS

@@ -38,19 +38,30 @@
 // then replays every declaration and bind it knows, so that an object deleted
 // and recreated (undo, paste) gets them again. The helper never keeps a stale
 // reference: it looks the object up by name at each send, and checks that a
-// Maxobj it was given is still valid. "ready" is therefore a reserved address.
+// Maxobj it was given is still valid.
 //
 // A value the parameter changed (clip to the declared range, type conversion)
 // comes back on the left outlet, so that the script shows the effective value.
 //
 // A numeric type (float, int, vec2f, vec3f, vec4f) needs min and max, or
-// range: the object refuses the declaration otherwise.
+// range: the object refuses the declaration otherwise. A unit imposes its type
+// (color.rgb is vec3f, color.rgba vec4f): a declaration whose type differs is
+// refused too. clip accepts "none", the OSCQuery name of the free mode.
+//
+// Every refusal (add, bind, set, remove, unbind) also comes out of the left
+// outlet as "refused <address> <reason>". The helper reports it in the Max
+// console and calls connector.onRefused(address, reason) when it is set:
+//
+//   synth.onRefused = (address, reason) => { post("refused", address, reason, "\n"); };
+//
+// "ready" and "refused" are therefore reserved addresses.
 
 function OssiaConnector(target) {
   this.handlers = {};
   this.declarations = {}; // address -> attributes, replayed on "ready"
   this.declarationOrder = [];
   this.bindings = []; // addresses, replayed on "ready"
+  this.onRefused = null; // optional function (address, reason)
   this.target = null;
   this.name = null;
   if (typeof target === "string") {
@@ -191,6 +202,13 @@ OssiaConnector.prototype.off = function (address) {
 OssiaConnector.prototype.dispatch = function (address, values) {
   if (address === "ready") {
     this.replay();
+    return true;
+  }
+  if (address === "refused") {
+    var refusedAddress = values.length > 0 ? String(values[0]) : "";
+    var reason = values.length > 1 ? values.slice(1).join(" ") : "";
+    error("ossia.v8connector: refused " + refusedAddress + ": " + reason + "\n");
+    if (typeof this.onRefused === "function") this.onRefused(refusedAddress, reason);
     return true;
   }
   var handler = this.handlers[address];
