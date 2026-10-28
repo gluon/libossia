@@ -408,7 +408,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "patching_rect": [ 16.274193548387075, 678.2258064516129, 401.45161290322585, 50.0 ],
-                    "text": "A script's own set never comes back to it; it reaches the network, the remotes above and the other script. A declaration without @min and @max for a numeric type is refused (see the Max console).",
+                    "text": "A script's own set never comes back to it; it reaches the network, the remotes above and the other script. A declaration without @min and @max for a numeric type is refused: see the Max console, and refused <address> <reason> on the connector's left outlet.",
                     "textcolor": [ 1.0, 0.396078431372549, 0.0, 1.0 ]
                 }
             },

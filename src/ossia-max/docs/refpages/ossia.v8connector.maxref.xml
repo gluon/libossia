@@ -55,7 +55,7 @@
 	<outletlist>
 		<outlet id="0" name="Values" type="any">
 			<digest>Values changed by another source</digest>
-			<description>A message per changed parameter, the relative address followed by the value, bounded to the parameter's range then filtered by the parameter (disabled, muted, repetition when @repetitions is 0), as at the outlet of every ossia object. A value set through this instance comes back here only when the bounded value differs from the one sent. The default of a leaf comes out here once the leaf exists, a bound address outputs the value it finds when it reaches the parameter, and <m>ready</m> is sent once the object has registered, so that a script can replay its declarations.</description>
+			<description>A message per changed parameter, the relative address followed by the value, bounded to the parameter's range then filtered by the parameter (disabled, muted, repetition when @repetitions is 0), as at the outlet of every ossia object. A value set through this instance comes back here only when the bounded value differs from the one sent. The default of a leaf comes out here once the leaf exists, a bound address outputs the value it finds when it reaches the parameter, and <m>ready</m> is sent once the object has registered, so that a script can replay its declarations. Every refusal of <m>add</m>, <m>bind</m>, <m>set</m>, <m>remove</m> or <m>unbind</m> also comes out here as <m>refused</m> followed by the address and the reason, through the same deferred queue as the values. <m>ready</m> and <m>refused</m> are reserved addresses.</description>
 		</outlet>
 		<outlet id="1" name="Info outlet" type="any">
 			<digest>Status and errors</digest>
@@ -87,7 +87,7 @@
 				Create a parameter under the node
 			</digest>
 			<description>
-				The message <m>add</m> followed by a relative address and attributes creates a parameter, with the same attribute names as <o>ossia.parameter</o>: @type, @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe. @type is required. A numeric type (float, int, vec2f, vec3f, vec4f) requires @min and @max, or @range: the declaration is refused otherwise, and an error is reported on the right outlet. Declaring the same leaf again with the same attributes is accepted and does nothing.
+				The message <m>add</m> followed by a relative address and attributes creates a parameter, with the same attribute names as <o>ossia.parameter</o>: @type, @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe. @type is required. A numeric type (float, int, vec2f, vec3f, vec4f) requires @min and @max, or @range: the declaration is refused otherwise. A unit imposes the type of its values (color.rgb is vec3f, color.rgba vec4f, gain.db float): a declared @type that the unit would change is refused, with the reason. @clip accepts none, the OSCQuery name of the free mode, as well as free, both, low, high, wrap and fold. A refusal is reported on the right outlet and as refused &lt;address&gt; &lt;reason&gt; on the left outlet. Declaring the same leaf again with the same attributes is accepted and does nothing.
 			</description>
 		</method>
 

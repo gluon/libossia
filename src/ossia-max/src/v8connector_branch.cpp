@@ -148,6 +148,56 @@ bool scalars_match(const scalars& request, const ossia::value& v)
   return true;
 }
 
+ossia::val_type type_of(std::string_view type)
+{
+  if(type == "float")
+    return ossia::val_type::FLOAT;
+  if(type == "int")
+    return ossia::val_type::INT;
+  if(type == "bool")
+    return ossia::val_type::BOOL;
+  if(type == "impulse")
+    return ossia::val_type::IMPULSE;
+  if(type == "string")
+    return ossia::val_type::STRING;
+  if(type == "list")
+    return ossia::val_type::LIST;
+  if(type == "vec2f")
+    return ossia::val_type::VEC2F;
+  if(type == "vec3f")
+    return ossia::val_type::VEC3F;
+  if(type == "vec4f")
+    return ossia::val_type::VEC4F;
+  return ossia::val_type::NONE;
+}
+
+std::string_view type_name(ossia::val_type t)
+{
+  switch(t)
+  {
+    case ossia::val_type::FLOAT:
+      return "float";
+    case ossia::val_type::INT:
+      return "int";
+    case ossia::val_type::BOOL:
+      return "bool";
+    case ossia::val_type::IMPULSE:
+      return "impulse";
+    case ossia::val_type::STRING:
+      return "string";
+    case ossia::val_type::LIST:
+      return "list";
+    case ossia::val_type::VEC2F:
+      return "vec2f";
+    case ossia::val_type::VEC3F:
+      return "vec3f";
+    case ossia::val_type::VEC4F:
+      return "vec4f";
+    default:
+      return "unknown";
+  }
+}
+
 // Number of numeric components of a type, 0 for non numeric types.
 int numeric_components(std::string_view type)
 {
@@ -322,6 +372,9 @@ std::string make_leaf_spec(
       err = one_symbol(a, spec.clip);
       if(err.empty())
       {
+        // "none" is the name OSCQuery gives to the free mode.
+        if(spec.clip == "none")
+          spec.clip = "free";
         static constexpr std::string_view clips[]
             = {"free", "both", "low", "high", "wrap", "fold"};
         if(std::find(std::begin(clips), std::end(clips), spec.clip) == std::end(clips))
@@ -441,8 +494,15 @@ std::string make_leaf_spec(
 
   if(!spec.unit.empty())
   {
-    if(!ossia::parse_pretty_unit(spec.unit))
+    const auto unit = ossia::parse_pretty_unit(spec.unit);
+    if(!unit)
       return where + "unknown unit '" + spec.unit + "'";
+    // A unit imposes the type of its values: refuse a declared type that the
+    // unit would silently change.
+    const auto required = ossia::matching_type(unit);
+    if(required != ossia::val_type::IMPULSE && required != type_of(spec.type))
+      return where + "unit '" + spec.unit + "' requires type '"
+             + std::string(type_name(required)) + "', not '" + spec.type + "'";
   }
 
   out = std::move(spec);
@@ -568,16 +628,21 @@ branch::leaf* branch::find(std::string_view address)
 
 std::string branch::add(const leaf_spec& spec)
 {
+  auto refused = [&](std::string err) {
+    refuse(spec.address, err);
+    return err;
+  };
   if(auto* l = find(spec.address))
-    return l->spec == spec ? std::string{}
-                           : spec.address + ": already declared with other attributes";
+    return l->spec == spec
+               ? std::string{}
+               : refused(spec.address + ": already declared with other attributes");
   if(find_binding(spec.address))
-    return spec.address + ": already used by bind";
+    return refused(spec.address + ": already used by bind");
   if(m_node)
   {
     if(auto* existing = ossia::net::find_node(*m_node, spec.address))
       if(existing->get_parameter())
-        return spec.address + ": a parameter already exists at this address";
+        return refused(spec.address + ": a parameter already exists at this address");
   }
   m_leaves.push_back(leaf{spec, nullptr, nullptr});
   if(m_node)
@@ -585,7 +650,7 @@ std::string branch::add(const leaf_spec& spec)
     if(auto err = create(m_leaves.back()); !err.empty())
     {
       m_leaves.pop_back();
-      return err;
+      return refused(err);
     }
   }
   else
@@ -716,12 +781,39 @@ void branch::destroy(leaf& l)
   }
 }
 
+std::string branch::declare(std::string_view address, const std::vector<attribute>& attrs)
+{
+  leaf_spec spec;
+  if(auto err = make_leaf_spec(address, attrs, spec); !err.empty())
+  {
+    refuse(address, err);
+    return err;
+  }
+  return add(spec);
+}
+
+void branch::refuse(std::string_view address, std::string_view reason)
+{
+  {
+    std::lock_guard<std::mutex> lock(m_queue_mutex);
+    m_queue.push_back(
+        {"refused",
+         ossia::value(std::vector<ossia::value>{std::string(address), std::string(reason)}),
+         nullptr});
+  }
+  if(m_wake)
+    m_wake();
+}
+
 bool branch::remove(std::string_view address)
 {
   const auto a = normalize_relative_address(address);
   auto* l = a.empty() ? nullptr : find(a);
   if(!l)
+  {
+    refuse(address, "unknown address '" + std::string(address) + "'");
     return false;
+  }
   destroy(*l);
   m_leaves.erase(m_leaves.begin() + (l - m_leaves.data()));
   return true;
@@ -735,6 +827,14 @@ void branch::clear()
 }
 
 std::string branch::set(std::string_view address, const scalars& values)
+{
+  auto err = set_impl(address, values);
+  if(!err.empty())
+    refuse(address, err);
+  return err;
+}
+
+std::string branch::set_impl(std::string_view address, const scalars& values)
 {
   const auto a = normalize_relative_address(address);
   if(auto* l = a.empty() ? nullptr : find(a))
@@ -888,11 +988,17 @@ std::string branch::bind(std::string_view address)
 {
   const auto a = trim_address(address);
   if(a.empty())
+  {
+    refuse(address, "bind expects an address");
     return "bind expects an address";
+  }
   if(find_binding(a))
     return {};
   if(find(normalize_relative_address(a)))
+  {
+    refuse(a, a + ": already declared by add");
     return a + ": already declared by add";
+  }
   m_bindings.push_back(binding{a, {}});
   resolve(m_bindings.back());
   if(m_binding_changed)
@@ -904,7 +1010,10 @@ bool branch::unbind(std::string_view address)
 {
   auto* b = find_binding(address);
   if(!b)
+  {
+    refuse(address, "unknown address '" + std::string(address) + "'");
     return false;
+  }
   release(*b);
   m_bindings.erase(m_bindings.begin() + (b - m_bindings.data()));
   return true;

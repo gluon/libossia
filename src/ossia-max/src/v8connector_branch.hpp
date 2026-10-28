@@ -121,8 +121,16 @@ public:
   // Refused if the address is declared with other attributes, bound, or if the
   // branch is attached and the address already holds a parameter.
   std::string add(const leaf_spec& spec);
+  // Validate the attributes of an add message and declare the leaf. On
+  // refusal, the reason is returned and queued as a refusal (see refuse).
+  std::string declare(std::string_view address, const std::vector<attribute>& attrs);
   // Remove a leaf. Returns false if the address is not declared.
   bool remove(std::string_view address);
+  // Queue a refusal: drain returns it as the address "refused" with the
+  // refused address and the reason as value, on the host's main thread, like
+  // any value. add, declare, set, bind, remove and unbind call it themselves
+  // when they refuse; the host calls it for the refusals it detects first.
+  void refuse(std::string_view address, std::string_view reason);
   // Remove every leaf of this branch.
   void clear();
   // Push a value from the host, to a declared leaf or to a bound address. The
@@ -198,6 +206,7 @@ private:
     std::vector<target> targets;
   };
 
+  std::string set_impl(std::string_view address, const scalars& values);
   leaf* find(std::string_view address);
   binding* find_binding(std::string_view address);
   void ensure_node();

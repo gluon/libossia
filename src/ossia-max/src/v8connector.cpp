@@ -404,6 +404,7 @@ void v8connector::bind(v8connector* x, t_symbol* s)
 {
   if(!s || s == _sym_nothing)
   {
+    x->m_branch.refuse("", "bind expects an address");
     x->report_error("bind expects an address");
     return;
   }
@@ -413,7 +414,13 @@ void v8connector::bind(v8connector* x, t_symbol* s)
 
 void v8connector::unbind(v8connector* x, t_symbol* s)
 {
-  if(!s || !x->m_branch.unbind(s->s_name))
+  if(!s)
+  {
+    x->m_branch.refuse("", "unbind expects an address");
+    x->report_error("unbind expects an address");
+    return;
+  }
+  if(!x->m_branch.unbind(s->s_name))
   {
     x->report_error(std::string("unbind: unknown address '") + (s ? s->s_name : "") + "'");
     return;
@@ -425,6 +432,7 @@ void v8connector::add(v8connector* x, t_symbol*, long argc, t_atom* argv)
 {
   if(argc < 1 || atom_gettype(argv) != A_SYM)
   {
+    x->m_branch.refuse("", "add expects an address followed by @attributes");
     x->report_error("add expects an address followed by @attributes");
     return;
   }
@@ -438,6 +446,8 @@ void v8connector::add(v8connector* x, t_symbol*, long argc, t_atom* argv)
     }
     else if(attrs.empty())
     {
+      x->m_branch.refuse(
+          atom_getsym(argv)->s_name, "unexpected argument before the first @attribute");
       x->report_error(
           std::string("add ") + atom_getsym(argv)->s_name
           + ": unexpected argument before the first @attribute");
@@ -449,24 +459,20 @@ void v8connector::add(v8connector* x, t_symbol*, long argc, t_atom* argv)
     }
   }
 
-  v8d::leaf_spec spec;
-  if(auto err = v8d::make_leaf_spec(atom_getsym(argv)->s_name, attrs, spec); !err.empty())
+  // declare validates, adds, and queues the refusal for the left outlet.
+  if(auto err = x->m_branch.declare(atom_getsym(argv)->s_name, attrs); !err.empty())
   {
     x->report_error("add refused: " + err);
     return;
   }
-  if(auto err = x->m_branch.add(spec); !err.empty())
-  {
-    x->report_error("add refused: " + err);
-    return;
-  }
-  x->status("add", spec.address);
+  x->status("add", v8d::normalize_relative_address(atom_getsym(argv)->s_name));
 }
 
 void v8connector::remove(v8connector* x, t_symbol*, long argc, t_atom* argv)
 {
   if(argc < 1 || atom_gettype(argv) != A_SYM)
   {
+    x->m_branch.refuse("", "remove expects an address");
     x->report_error("remove expects an address");
     return;
   }
@@ -489,6 +495,7 @@ void v8connector::set(v8connector* x, t_symbol*, long argc, t_atom* argv)
 {
   if(argc < 1 || atom_gettype(argv) != A_SYM)
   {
+    x->m_branch.refuse("", "set expects an address followed by the value");
     x->report_error("set expects an address followed by the value");
     return;
   }
