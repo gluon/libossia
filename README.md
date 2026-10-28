@@ -1,7 +1,7 @@
 ossia-prism (PRISM, CNRS)
 ===
 
-**ossia-prism** is the Max package built from this repository: [ossia](https://ossia.io) 2.1.0 for Max (every `ossia.*` object of the official package, unchanged) plus one object, **`ossia.v8connector`**. It replaces the official `ossia` package: both contain the same objects and cannot be installed together. Binaries (macOS universal, Apple Silicon and Intel; Windows x64) are published on the project's [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page; the French installation notes are in [docs/prism/LISEZMOI.txt](docs/prism/LISEZMOI.txt).
+**ossia-prism** is the Max package built from this repository: [ossia](https://ossia.io) 2.1.0 for Max (every `ossia.*` object of the official package, unchanged except for one fix in the OSCQuery server, see below) plus one object, **`ossia.v8connector`**. It replaces the official `ossia` package: both contain the same objects and cannot be installed together. Binaries (macOS universal, Apple Silicon and Intel; Windows x64) are published on the project's [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page; the French installation notes are in [docs/prism/LISEZMOI.txt](docs/prism/LISEZMOI.txt).
 
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
@@ -54,14 +54,17 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 ![Help, Limits tab](docs/prism/help3.png)
 
+### One EXTENDED_TYPE per parameter
+
+The one change to libossia itself is in its OSCQuery server (`src/ossia/network/oscquery/detail/json_writer_detail.cpp`), for every object that publishes a parameter, not only `ossia.v8connector`. libossia 2.1.0 describes a color by the `EXTENDED_TYPE` array of its components (`color.rgb.r`, `color.rgb.g`, ...), then writes the node's own extended type (`vecf`) as a second `EXTENDED_TYPE` key in the same object; a client that keeps the last duplicate key sees `vecf` and loses the color. In ossia-prism, the node's extended type is not written when the parameter has a unit, so each parameter has a single `EXTENDED_TYPE`. Colors are still described by that array, not by `UNIT`; a parameter without a unit keeps its own extended type.
+
 ### Known limits
 
 - `@priority` is stored on the node but does not order the outputs of `ossia.v8connector`: ossia-max orders the outputs of `ossia.parameter` and `ossia.remote` only.
 - An `ossia.model` or `ossia.view` added to the patcher after the object has registered does not take it under its node: send `address <name>` to the object, or reload the patcher.
 - `ready` and `refused` are reserved addresses; inside one instance an address is either declared by `add` or followed by `bind`.
-- Color units are served the way libossia serves them: as an `EXTENDED_TYPE` array (`color.rgb.r`, `color.rgb.g`, ...) followed by a second `EXTENDED_TYPE` key (`vecf`), not as `UNIT`. A client that keeps the last duplicate key sees `vecf` and no unit. Units of other dataspaces (gain, time, distance, speed, angle) are served as `UNIT`.
 - Two instances with the same name become `name` and `name.1`, like two `ossia.model`.
-- The OSCQuery server is the one of `ossia.device`, unchanged: sending `expose` twice on a port that is already in use crashes Max. Use explicit, free ports, and `stop` before exposing again.
+- The OSCQuery server is the one of `ossia.device`: sending `expose` twice on a port that is already in use crashes Max. Use explicit, free ports, and `stop` before exposing again.
 - On Windows, the automatic discovery of OSCQuery devices (mDNS) depends on the Bonjour service being installed and running; without it, connect `ossia.client` to an explicit address.
 
 ### Building

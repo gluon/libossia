@@ -750,9 +750,39 @@ TEST_CASE("v8connector_units_clip_refusals", "v8connector_units_clip_refusals")
     root.remove_child(*ossia::net::find_node(root, "/types"));
     b.reattach();
     check();
-    // what is served: libossia writes color units as EXTENDED_TYPE, never UNIT
-    const auto json = served(*ossia::net::find_node(root, "/types/color"));
-    REQUIRE(json.find("\"color.rgb.r\"") != std::string::npos);
+  }
+
+  SECTION("a leaf is served with a single EXTENDED_TYPE")
+  {
+    REQUIRE(b.declare("color", attrs({{"type", {S("vec3f")}}, {"min", {0}}, {"max", {1}},
+                                      {"unit", {S("color.rgb")}}, {"default", {1, 0.5f, 0}}})).empty());
+    REQUIRE(b.declare("rgba", attrs({{"type", {S("vec4f")}}, {"min", {0}}, {"max", {1}},
+                                     {"unit", {S("color.rgba")}}, {"default", {0, 0.5f, 1, 1}}})).empty());
+    REQUIRE(b.declare("plain", attrs({{"type", {S("vec3f")}}, {"min", {0}}, {"max", {1}}})).empty());
+    // a second EXTENDED_TYPE key would hide the first from clients that keep
+    // the last duplicate key
+    auto check = [&](const char* address, const char* extended_type) {
+      const auto json = served(*ossia::net::find_node(root, address));
+      INFO(json);
+      const auto first = json.find("\"EXTENDED_TYPE\"");
+      REQUIRE(first != std::string::npos);
+      REQUIRE(json.find("\"EXTENDED_TYPE\"", first + 1) == std::string::npos);
+      REQUIRE(json.find(std::string("\"EXTENDED_TYPE\":") + extended_type) != std::string::npos);
+      REQUIRE(json.find("\"UNIT\"") == std::string::npos);
+    };
+    auto check_all = [&] {
+      // a color is described by the array of its components
+      check("/types/color", "[\"color.rgb.r\",\"color.rgb.g\",\"color.rgb.b\"]");
+      check("/types/rgba", "[\"color.rgb.r\",\"color.rgb.g\",\"color.rgb.b\",\"color.rgb.a\"]");
+      // without a unit, the node's own extended type
+      check("/types/plain", "\"vecf\"");
+    };
+    check_all();
+    // the parent registers again: same form
+    b.detach();
+    root.remove_child(*ossia::net::find_node(root, "/types"));
+    b.reattach();
+    check_all();
   }
 
   SECTION("a type the unit would change is refused, with the reason")
