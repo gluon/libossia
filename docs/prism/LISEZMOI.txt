@@ -33,6 +33,29 @@ PRISE EN MAIN
 - Helper JavaScript : javascript/ossia.v8connector.js (declare, set,
   bind, on).
 
+RECETTES
+- Ajouter et retirer depuis un script : le helper envoie lui-même add et
+  remove, en trouvant l'objet par son nom de scripting (varname, dans
+  l'inspecteur), sans câble. Le câble de la sortie gauche vers le script
+  ne sert qu'à recevoir les valeurs, ready et refused. Exemple : une
+  grille v8ui où un clic crée cell/x/y et un second le retire :
+    if (cells.has(a)) { cells.delete(a); grid.remove(a); }
+    else { cells.add(a); grid.add(a, { type: "float", min: 0, max: 1, default: 0 }); }
+  Si l'objet est supprimé puis recréé, il envoie ready et le helper rejoue
+  les cases encore déclarées, pas celles retirées.
+- Qui possède un paramètre : une instance ne retire que ce qu'elle a
+  déclaré. remove cell/3/4 envoyé à une autre instance y est refusé
+  (refused cell/3/4 unknown address 'cell/3/4') et le paramètre reste :
+  son propriétaire rejoue ses déclarations à chaque ready. Pour agir sur
+  un paramètre déclaré ailleurs : bind puis set.
+- L'argument est obligatoire : [ossia.v8connector synth] nomme le nœud
+  qui regroupe les paramètres de l'instance, sous le model ou le device
+  englobant ; add gain crée synth/gain. Un second synth au même endroit
+  devient synth.1. Sans argument, la console affiche « ossia.v8connector
+  needs a branch name as first argument ». bind ne passe pas par ce nœud :
+  son adresse est relative au model ou au device englobant, comme pour
+  ossia.remote (bind synth/gain).
+
 MISE À JOUR
 - Ne pas mettre ossia à jour depuis le Package Manager : il réinstallerait
   le paquet officiel.
