@@ -76,6 +76,22 @@ LIMITES CONNUES
   « ready » et « refused » sont des noms réservés.
 - Autres limites de l'objet : onglet Limits de l'aide.
 
+DÉFAUTS CONNUS
+- Max a planté deux fois dans ossia.v8connector (branch::queue_current_value,
+  appelé quand l'objet s'enregistre de nouveau), dans un patch dont les bind
+  visent un device distant : une fois 1,4 s après le retour de ce device sous
+  le même nom, une fois sans action sur ce device depuis 30 minutes. Un retour
+  identique, plus tôt, n'a pas planté. La cause n'est pas établie.
+- Un ossia.client connecté par nom (connect <nom>, zeroconf) reçoit l'arbre,
+  mais les changements envoyés ensuite par le serveur (PATH_ADDED,
+  ATTRIBUTES_CHANGED) ne sont pas appliqués : un paramètre ajouté sur le
+  serveur n'apparaît pas. Dans le code, ces commandes ne sont exécutées que
+  pour un client connecté par URL (connect oscquery ws://hôte:port).
+- Le client OSCQuery envoie un message OSC par valeur, jamais un bundle, même
+  pour des valeurs poussées ensemble : 128 paramètres liés qui changent à
+  chaque frame donnent 128 messages WebSocket par frame. Le serveur sait
+  envoyer des bundles.
+
 LIENS
 - Paquets Max : https://docs.cycling74.com/userguide/packages/
 - Documentation ossia : https://ossia.io/ossia-docs/
