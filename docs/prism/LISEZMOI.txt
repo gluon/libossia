@@ -11,7 +11,7 @@ CONTENU
   tableau de ses composantes (color.rgb.r, color.rgb.g, ...), sans UNIT ;
   libossia 2.1.0 ajoutait une seconde clé EXTENDED_TYPE « vecf », qui
   masquait ce tableau pour un client gardant la dernière clé en double.
-- Plateformes : macOS universel (Apple Silicon et Intel), Windows x64.
+- Plateformes : macOS universel (Apple Silicon et Intel) seulement.
 
 INSTALLATION
 1. Quitter Max.
