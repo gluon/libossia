@@ -1,7 +1,7 @@
 ossia-prism (PRISM, CNRS)
 ===
 
-**ossia-prism** is the Max package built from this repository: [ossia](https://ossia.io) 2.1.0 for Max (every `ossia.*` object of the official package, unchanged except for the fixes listed under [Differences from ossia 2.1.0](#differences-from-ossia-210)) plus one object, **`ossia.v8connector`**. It replaces the official `ossia` package: both contain the same objects and cannot be installed together. Binaries (macOS universal, Apple Silicon and Intel; Windows x64) are published on the project's [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page; the French installation notes are in [docs/prism/LISEZMOI.txt](docs/prism/LISEZMOI.txt).
+**ossia-prism** is the Max package built from this repository: [ossia](https://ossia.io) 2.1.0 for Max (every `ossia.*` object of the official package, unchanged except for the fixes listed under [Differences from ossia 2.1.0](#differences-from-ossia-210)) plus one object, **`ossia.v8connector`**. It replaces the official `ossia` package: both contain the same objects and cannot be installed together. Binaries are published on the project's [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page: macOS universal (Apple Silicon and Intel) for `2.1.0+prism.3`; Windows x64 to come, same version, added to the Release later; the French installation notes are in [docs/prism/LISEZMOI.txt](docs/prism/LISEZMOI.txt).
 
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
