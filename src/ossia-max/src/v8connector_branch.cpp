@@ -659,8 +659,28 @@ void branch::reindex_leaves()
 void branch::reindex_bindings()
 {
   m_binding_index.clear();
+  m_binding_by_name.clear();
+  m_pattern_bindings.clear();
   for(std::size_t i = 0; i < m_bindings.size(); i++)
-    m_binding_index.emplace(m_bindings[i].address, i);
+    index_binding(i);
+}
+
+void branch::index_binding(std::size_t i)
+{
+  const std::string& a = m_bindings[i].address;
+  m_binding_index.emplace(a, i);
+  if(ossia::traversal::is_pattern(a))
+  {
+    m_pattern_bindings.push_back(i);
+    return;
+  }
+  // "dev:/a/b", "/a/b" or "a/b": the name of the node is "b"
+  std::string_view name = a;
+  if(auto slash = name.find_last_of('/'); slash != std::string_view::npos)
+    name.remove_prefix(slash + 1);
+  else if(auto colon = name.find(':'); colon != std::string_view::npos)
+    name.remove_prefix(colon + 1);
+  m_binding_by_name[std::string(name)].push_back(i);
 }
 
 std::string branch::add(const leaf_spec& spec)
@@ -1201,7 +1221,7 @@ std::string branch::bind(std::string_view address)
     return a + ": already declared by add";
   }
   m_bindings.push_back(binding{a, {}});
-  m_binding_index.emplace(a, m_bindings.size() - 1);
+  index_binding(m_bindings.size() - 1);
   resolve(m_bindings.back());
   if(m_binding_changed)
     m_binding_changed(a, m_bindings.back().targets.size());
@@ -1409,14 +1429,30 @@ void branch::resolve(binding& b)
   }
 }
 
-void branch::on_parameter_created(const ossia::net::parameter_base&)
+// Only the bindings the new parameter can satisfy are resolved again: those
+// with a pattern, and those still waiting whose address ends with the name
+// of its node. Resolving every binding at each creation cost, for 3000
+// bindings waiting while 3000 parameters appear, 15 s in one poll.
+void branch::on_parameter_created(const ossia::net::parameter_base& p)
 {
-  bool pending = false;
-  for(const auto& b : m_bindings)
-    if(b.targets.empty() || ossia::traversal::is_pattern(b.address))
-      pending = true;
-  if(pending)
-    resolve_bindings();
+  auto again = [this](std::size_t i) {
+    auto& b = m_bindings[i];
+    const auto before = b.targets.size();
+    resolve(b);
+    if(b.targets.size() != before && m_binding_changed)
+      m_binding_changed(b.address, b.targets.size());
+  };
+  if(auto it = m_binding_by_name.find(p.get_node().get_name()); it != m_binding_by_name.end())
+  {
+    const auto candidates = it->second;
+    for(auto i : candidates)
+      if(i < m_bindings.size() && m_bindings[i].targets.empty())
+        again(i);
+  }
+  const auto patterns = m_pattern_bindings;
+  for(auto i : patterns)
+    if(i < m_bindings.size())
+      again(i);
 }
 
 void branch::on_node_removing(const ossia::net::node_base& n)
