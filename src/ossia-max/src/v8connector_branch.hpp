@@ -13,6 +13,11 @@
 // creates nothing. The host detaches the branch before the node disappears;
 // the declarations are kept, so that the next node recreates every leaf.
 //
+// A branch can also share a node it does not own (an ossia.model's node, the
+// root of a device): its leaves then sit next to the other parameters of that
+// node. A leaf whose address is taken is refused, never renamed; the branch
+// removes only the nodes it created, and removes its leaves when it detaches.
+//
 // A branch can also follow parameters that exist elsewhere (bind), the way
 // ossia.remote does: nothing is created, the subscription follows the
 // parameter when it disappears and comes back, and set pushes to it.
@@ -111,8 +116,12 @@ public:
   void reattach();
   // Attach to a node of the device tree and recreate every declared leaf.
   void attach(ossia::net::node_base& node);
-  // Forget the node and the leaves it holds. The declarations are kept.
+  // Forget the node and the leaves it holds. The declarations are kept. A
+  // branch that shares its node removes its leaves from it first.
   void detach();
+  // false: the node given by the factory belongs to someone else (see above).
+  // Set before the first attach.
+  void set_owns_node(bool owns) { m_owns_node = owns; }
   bool attached() const { return m_node != nullptr; }
   ossia::net::node_base* node() const { return m_node; }
 
@@ -161,7 +170,9 @@ public:
   void set_resolution_context(
       std::vector<ossia::net::node_base*> parents,
       std::vector<ossia::net::device_base*> devices);
-  // Forget a device before it is destroyed.
+  // Forget a device before it is destroyed. A device destroyed without this
+  // call is forgotten anyway: the branch listens to the destruction of the
+  // root of every device given by set_resolution_context.
   void drop_device(ossia::net::device_base* dev);
   // Called when the number of parameters followed by a bound address changes.
   void set_binding_changed_callback(
@@ -190,6 +201,9 @@ private:
     leaf_spec spec;
     ossia::net::node_base* node{};
     ossia::net::parameter_base* param{};
+    // Shared node only: the topmost node this leaf created, nullptr if the
+    // leaf took a node that existed.
+    ossia::net::node_base* created{};
   };
 
   struct target
@@ -219,12 +233,16 @@ private:
       const std::string& address, ossia::net::parameter_base* param, const ossia::value& v);
   void queue_current_value(const std::string& address, ossia::net::parameter_base* param);
   void on_node_removing(const ossia::net::node_base& n);
+  void watch_device(ossia::net::device_base& dev);
+  void unwatch_device(ossia::net::device_base& dev, bool root_alive);
+  void forget_device(ossia::net::device_base* dev, bool root_alive);
   void on_parameter_created(const ossia::net::parameter_base& p);
 
   ossia::net::node_base* m_node{};
   std::vector<leaf> m_leaves;
   std::vector<binding> m_bindings;
   std::vector<ossia::net::node_base*> m_parents;
+  std::vector<ossia::net::device_base*> m_parent_devices; // device of each parent
   std::vector<ossia::net::device_base*> m_devices;
   std::function<void(const std::string&, std::size_t)> m_binding_changed;
 
@@ -243,6 +261,8 @@ private:
   std::function<void()> m_wake;
   std::function<void()> m_node_lost;
   std::function<ossia::net::node_base*()> m_node_factory;
+  bool m_owns_node{true};
+  std::string m_attach_refusal; // reason of the last leaf refused by attach
 };
 
 }

@@ -147,7 +147,7 @@ if(OSSIA_PROTOCOL_OSCQUERY)
 
   # Max-independent part of ossia.v8connector (ossia-max)
   ossia_add_test(V8ConnectorTest
-      "${CMAKE_CURRENT_SOURCE_DIR}/Network/V8ConnectorTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/v8connector_branch.cpp")
+      "${CMAKE_CURRENT_SOURCE_DIR}/Network/V8ConnectorTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/v8connector_branch.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp")
   target_include_directories(ossia_V8ConnectorTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
 endif()
 

@@ -15,6 +15,7 @@
 #include <ossia/network/value/vec.hpp>
 
 #include <algorithm>
+#include <utility>
 #include <cctype>
 #include <cmath>
 #include <sstream>
@@ -571,7 +572,7 @@ branch::~branch()
   for(auto& b : m_bindings)
     release(b);
   for(auto* dev : m_devices)
-    dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+    unwatch_device(*dev, true);
 }
 
 void branch::set_node_factory(std::function<ossia::net::node_base*()> factory)
@@ -599,14 +600,34 @@ void branch::attach(ossia::net::node_base& node)
   detach();
   m_node = &node;
   m_node->about_to_be_deleted.connect<&branch::on_node_removing>(this);
-  for(auto& l : m_leaves)
-    create(l);
+  if(m_owns_node)
+  {
+    for(auto& l : m_leaves)
+      create(l);
+    return;
+  }
+  // In a shared node, an address may have been taken while the branch was
+  // away: that leaf is refused and forgotten, as a new declaration would be.
+  for(std::size_t i = 0; i < m_leaves.size();)
+  {
+    if(auto err = create(m_leaves[i]); !err.empty())
+    {
+      refuse(m_leaves[i].spec.address, err);
+      m_leaves.erase(m_leaves.begin() + i);
+      m_attach_refusal = std::move(err);
+    }
+    else
+      ++i;
+  }
 }
 
 void branch::detach()
 {
   if(!m_node)
     return;
+  if(!m_owns_node)
+    for(auto& l : m_leaves)
+      destroy(l);
   m_node->about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
   for(auto& l : m_leaves)
   {
@@ -614,6 +635,7 @@ void branch::detach()
       l.node->about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
     l.node = nullptr;
     l.param = nullptr;
+    l.created = nullptr;
   }
   m_node = nullptr;
 }
@@ -642,7 +664,9 @@ std::string branch::add(const leaf_spec& spec)
   {
     if(auto* existing = ossia::net::find_node(*m_node, spec.address))
       if(existing->get_parameter())
-        return refused(spec.address + ": a parameter already exists at this address");
+        return refused(
+            m_owns_node ? spec.address + ": a parameter already exists at this address"
+                        : std::string("already exists"));
   }
   m_leaves.push_back(leaf{spec, nullptr, nullptr});
   if(m_node)
@@ -655,18 +679,49 @@ std::string branch::add(const leaf_spec& spec)
   }
   else
   {
-    // First leaf: the node is created now, and attach creates the leaf.
+    // First leaf: the node is created now, and attach creates the leaf. In a
+    // shared node, attach refuses it if its address is taken.
+    m_attach_refusal.clear();
     ensure_node();
+    if(!m_owns_node && m_node && !find(spec.address))
+      return m_attach_refusal;
   }
   return {};
+}
+
+// The node of a leaf in a shared node: the existing node at the address, or a
+// new one; created is set to the topmost node created on the way.
+static ossia::net::node_base*
+shared_leaf_node(ossia::net::node_base& root, std::string_view address, ossia::net::node_base*& created)
+{
+  created = nullptr;
+  auto* parent = &root;
+  while(!address.empty())
+  {
+    const auto slash = address.find('/');
+    const auto name = address.substr(0, slash);
+    auto* child = parent->find_child(name);
+    if(!child)
+    {
+      auto& node = ossia::net::find_or_create_node(*parent, address);
+      created = parent->find_child(name);
+      return &node;
+    }
+    parent = child;
+    address = slash == std::string_view::npos ? std::string_view{} : address.substr(slash + 1);
+  }
+  return parent;
 }
 
 std::string branch::create(leaf& l)
 {
   const auto& spec = l.spec;
-  auto& node = ossia::net::find_or_create_node(*m_node, spec.address);
+  ossia::net::node_base* created{};
+  auto& node = m_owns_node ? ossia::net::find_or_create_node(*m_node, spec.address)
+                           : *shared_leaf_node(*m_node, spec.address, created);
   if(node.get_parameter())
-    return spec.address + ": a parameter already exists at this address";
+    return m_owns_node ? spec.address + ": a parameter already exists at this address"
+                       : std::string("already exists");
 
   auto* param = ossia::try_setup_parameter(spec.type, node);
   if(!param)
@@ -744,6 +799,7 @@ std::string branch::create(leaf& l)
 
   l.node = &node;
   l.param = param;
+  l.created = created;
   return {};
 }
 
@@ -753,12 +809,37 @@ void branch::destroy(leaf& l)
   {
     l.node = nullptr;
     l.param = nullptr;
+    l.created = nullptr;
     return;
   }
   auto* node = l.node;
   node->about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
   l.node = nullptr;
   l.param = nullptr;
+
+  if(!m_owns_node)
+  {
+    // Remove only what the leaf created: a node that existed keeps everything
+    // but the parameter, and the removal stops at the topmost created node.
+    auto* top = std::exchange(l.created, nullptr);
+    if(!top || !node->children().empty())
+    {
+      node->remove_parameter();
+      return;
+    }
+    auto* parent = node->get_parent();
+    while(parent)
+    {
+      const bool last = node == top;
+      auto* grandparent = parent->get_parent();
+      parent->remove_child(*node);
+      if(last || !parent->children().empty() || parent->get_parameter())
+        break;
+      node = parent;
+      parent = grandparent;
+    }
+    return;
+  }
 
   // A leaf that holds other leaves stays as a container.
   if(!node->children().empty())
@@ -1045,22 +1126,55 @@ void branch::set_resolution_context(
     std::vector<ossia::net::device_base*> devices)
 {
   for(auto* dev : m_devices)
-    dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+    unwatch_device(*dev, true);
   m_parents = std::move(parents);
+  m_parent_devices.clear();
+  for(auto* n : m_parents)
+    m_parent_devices.push_back(&n->get_device());
   m_devices = std::move(devices);
   for(auto* dev : m_devices)
-    dev->on_parameter_created.connect<&branch::on_parameter_created>(this);
+    watch_device(*dev);
   resolve_bindings();
+}
+
+// The branch listens to the destruction of the root of every device it knows,
+// so that it never keeps a device the host forgot to drop: ossia-max's client
+// clears its device before it announces the removal.
+void branch::watch_device(ossia::net::device_base& dev)
+{
+  dev.on_parameter_created.connect<&branch::on_parameter_created>(this);
+  dev.get_root_node().about_to_be_deleted.connect<&branch::on_node_removing>(this);
+}
+
+void branch::unwatch_device(ossia::net::device_base& dev, bool root_alive)
+{
+  dev.on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+  if(root_alive)
+    dev.get_root_node().about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
 }
 
 void branch::drop_device(ossia::net::device_base* dev)
 {
+  forget_device(dev, true);
+}
+
+void branch::forget_device(ossia::net::device_base* dev, bool root_alive)
+{
   auto it = std::find(m_devices.begin(), m_devices.end(), dev);
   if(it == m_devices.end())
     return;
-  dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+  unwatch_device(*dev, root_alive);
   m_devices.erase(it);
-  std::erase_if(m_parents, [dev](ossia::net::node_base* n) { return &n->get_device() == dev; });
+  // The parents of a device being destroyed may already be gone: their device
+  // was noted when they were given.
+  for(std::size_t i = m_parents.size(); i-- > 0;)
+  {
+    if(m_parent_devices[i] == dev)
+    {
+      m_parents.erase(m_parents.begin() + i);
+      m_parent_devices.erase(m_parent_devices.begin() + i);
+    }
+  }
   for(auto& b : m_bindings)
   {
     const auto before = b.targets.size();
@@ -1193,6 +1307,13 @@ void branch::on_node_removing(const ossia::net::node_base& n)
       m_binding_changed(b.address, b.targets.size());
   }
 
+  // A node without parent is the root of its device: the device is being
+  // destroyed, its children are already gone. Forget it without touching the
+  // signal being emitted nor calling the device, which is half destroyed. The
+  // root may also be the node of a branch without name; this signal may then
+  // fire twice for it, the second time with nothing left to do.
+  const bool root = !n.get_parent();
+
   // The node is being destroyed: forget it without touching its signals.
   if(&n == m_node)
   {
@@ -1200,10 +1321,18 @@ void branch::on_node_removing(const ossia::net::node_base& n)
     {
       l.node = nullptr;
       l.param = nullptr;
+      l.created = nullptr;
     }
     m_node = nullptr;
+    if(root)
+      forget_device(&n.get_device(), false);
     if(m_node_lost)
       m_node_lost();
+    return;
+  }
+  if(root)
+  {
+    forget_device(&n.get_device(), false);
     return;
   }
   for(auto& l : m_leaves)
@@ -1212,6 +1341,7 @@ void branch::on_node_removing(const ossia::net::node_base& n)
     {
       l.node = nullptr;
       l.param = nullptr;
+      l.created = nullptr;
     }
   }
 }

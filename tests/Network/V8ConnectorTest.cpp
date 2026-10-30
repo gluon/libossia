@@ -29,6 +29,7 @@
 #include "include_catch.hpp"
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 
+#include <client_mirror.hpp>
 #include <v8connector_branch.hpp>
 
 #include <arpa/inet.h>
@@ -848,5 +849,751 @@ TEST_CASE("v8connector_units_clip_refusals", "v8connector_units_clip_refusals")
     b.set_wake_callback([&] { ++wakes; });
     b.refuse("z", "reason");
     REQUIRE(wakes == 1);
+  }
+}
+
+// A device that a branch follows disappears and comes back under the same
+// name, as an ossia.client connected by name does when the zeroconf
+// announcement of its server goes away and comes back. The host gives the
+// branch the new device, as it does when a device is created; it does not
+// tell the branch that the old one is gone, because ossia-max's client clears
+// its device before announcing the removal.
+TEST_CASE("v8connector_device_return", "v8connector_device_return")
+{
+  // The server: leaves under /bench, served over OSCQuery.
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "td_bench"};
+  std::vector<ossia::net::parameter_base*> leaves;
+  for(int i = 0; i < 4; i++)
+  {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/p" + std::to_string(i));
+    auto* p = ossia::try_setup_parameter("float", n);
+    p->set_domain(ossia::make_domain(0.f, 1.f));
+    p->push_value(0.f);
+    leaves.push_back(p);
+  }
+  const uint16_t osc = free_port(false);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // The global device of Max, where the instance registers.
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  auto& max_root = max_dev.get_root_node();
+
+  auto connect = [&] {
+    auto d = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+            "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+        "td_bench");
+    REQUIRE(d->get_protocol().update(d->get_root_node()));
+    return d;
+  };
+
+  // The server pushes the value until the branch receives it: a client that
+  // has just connected may not be known to the server yet.
+  auto received = [](branch& b, ossia::net::parameter_base& p, const ossia::value& v) {
+    for(int i = 0; i < 400; i++)
+    {
+      if(i % 20 == 0)
+        p.push_value(v);
+      for(auto& in : b.drain())
+        if(in.address == "td_bench:/bench/p0" && in.value == v)
+          return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+  };
+
+  branch b;
+  std::shared_ptr<ossia::net::generic_device> client = connect();
+  b.set_resolution_context({&max_root}, {&max_dev, client.get()});
+  REQUIRE(b.bind("td_bench:/bench/p0").empty());
+  REQUIRE(b.bound_count("td_bench:/bench/p0") == 1);
+
+  for(int cycle = 0; cycle < 20; cycle++)
+  {
+    INFO("cycle " << cycle);
+    // The device goes away; the host does not call drop_device.
+    client.reset();
+    REQUIRE(b.bound_count("td_bench:/bench/p0") == 0);
+
+    // It comes back under the same name: the host registers the instance
+    // again with the devices it knows.
+    client = connect();
+    b.set_resolution_context({&max_root}, {&max_dev, client.get()});
+    REQUIRE(b.bound_count("td_bench:/bench/p0") == 1);
+
+    // Values are received again.
+    const bool ok = received(b, *leaves[0], ossia::value((cycle + 1) / 32.f));
+    if(!ok)
+    {
+      client.reset();
+      ossia::net::stop_network_context(*ctx);
+      net.join();
+    }
+    REQUIRE(ok);
+  }
+
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+}
+
+// An ossia.client connected by name gets its device from the zeroconf
+// listener, which builds an OSCQuery mirror and reads the tree once. The tree
+// changes the server sends afterwards wait in the mirror's command queue until
+// the client polls it.
+TEST_CASE("v8connector_client_by_name", "v8connector_client_by_name")
+{
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "td_bench"};
+  {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/first");
+    ossia::try_setup_parameter("float", n)->push_value(0.f);
+  }
+  const uint16_t osc = free_port(false);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // As ZeroconfOscqueryListener::addInstance builds it.
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+          "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  auto& croot = client->get_root_node();
+  REQUIRE(ossia::net::find_node(croot, "/bench/first") != nullptr);
+
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  REQUIRE(b.bind("td_bench:/bench/late").empty());
+  REQUIRE(b.bound_count("td_bench:/bench/late") == 0);
+
+  // Without polling, a parameter added on the server never shows up.
+  {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/late");
+    ossia::try_setup_parameter("float", n)->push_value(0.5f);
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  REQUIRE(ossia::net::find_node(croot, "/bench/late") == nullptr);
+
+  // The client polls the mirror, as it does for a connection by URL.
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+  auto poll_until = [&](auto done) {
+    for(int i = 0; i < 400 && mirror && !done(); i++)
+    {
+      mirror->run_commands();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return done();
+  };
+
+  bool ok = mirror != nullptr;
+  ok = ok && poll_until([&] { return ossia::net::find_node(croot, "/bench/late") != nullptr; });
+  // The bind made before the parameter existed resolves when it appears.
+  ok = ok && b.bound_count("td_bench:/bench/late") == 1;
+
+  // A path removed on the server is removed on the client.
+  if(ok)
+  {
+    server.get_root_node().find_child("bench")->remove_child("late");
+    ok = poll_until([&] { return ossia::net::find_node(croot, "/bench/late") == nullptr; });
+    ok = ok && b.bound_count("td_bench:/bench/late") == 0;
+  }
+
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+  REQUIRE(ok);
+}
+
+namespace
+{
+bool drained_refusal(branch& b, const std::string& address, const std::string& reason)
+{
+  for(auto& in : b.drain())
+    if(in.address == "refused")
+    {
+      const auto& l = in.value.get<std::vector<ossia::value>>();
+      if(l[0] == ossia::value(address) && l[1] == ossia::value(reason))
+        return true;
+    }
+  return false;
+}
+}
+
+// [ossia.v8connector] without a name: the leaves sit directly under the node
+// of the enclosing model, next to the ossia.parameter objects.
+TEST_CASE("v8connector_without_name", "v8connector_without_name")
+{
+  auto proto = std::make_unique<ossia::net::multiplex_protocol>();
+  ossia::net::generic_device dev{std::move(proto), "v8_shared"};
+  auto& root = dev.get_root_node();
+
+  // The node of an ossia.model, with an ossia.parameter and an empty child
+  // node made by another object.
+  auto* model = &ossia::net::create_node(root, "/synth");
+  {
+    auto* p = ossia::try_setup_parameter("float", ossia::net::create_node(*model, "manual"));
+    p->push_value(0.25f);
+    ossia::net::create_node(*model, "fx");
+  }
+
+  auto shared = [&](branch& b) {
+    b.set_owns_node(false);
+    b.set_node_factory([&]() -> ossia::net::node_base* { return model; });
+    b.set_resolution_context({&root}, {&dev});
+  };
+  branch a, b;
+  shared(a);
+  shared(b);
+  const auto gain = attrs({{"type", {S("float")}}, {"min", {-60}}, {"max", {6}}, {"default", {-12}}});
+
+  REQUIRE(a.declare("gain", gain).empty());
+  auto* a_gain = ossia::net::find_node(root, "/synth/gain");
+  REQUIRE(a_gain != nullptr);
+  REQUIRE(a_gain->get_parameter() != nullptr);
+  REQUIRE(a.node() == model);
+  a.drain();
+
+  SECTION("an address taken by another instance is refused, never renamed")
+  {
+    REQUIRE(!b.declare("gain", gain).empty());
+    REQUIRE(drained_refusal(b, "gain", "already exists"));
+    REQUIRE(b.size() == 0);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain.1") == nullptr);
+    REQUIRE(a_gain->get_parameter()->value() == ossia::value(-12.f));
+  }
+
+  SECTION("an address taken by an ossia.parameter is refused")
+  {
+    REQUIRE(!a.declare("manual", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    REQUIRE(drained_refusal(a, "manual", "already exists"));
+    REQUIRE(ossia::net::find_node(root, "/synth/manual")->get_parameter()->value()
+            == ossia::value(0.25f));
+  }
+
+  SECTION("for comparison, ossia.parameter renames: a second one becomes gain.1")
+  {
+    // object_base.cpp, case object_class::param: a node that already holds a
+    // parameter is replaced by create_node(parent, name), which picks a free name.
+    auto* n = &ossia::net::create_node(*a_gain->get_parent(), a_gain->get_name());
+    REQUIRE(n != a_gain);
+    REQUIRE(n->get_name() == "gain.1");
+  }
+
+  SECTION("remove takes only the leaves of its instance, and only the nodes it created")
+  {
+    REQUIRE(b.declare("env/attack", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    REQUIRE(b.declare("fx/mix", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    REQUIRE(ossia::net::find_node(root, "/synth/env/attack") != nullptr);
+    b.drain();
+
+    REQUIRE(!a.remove("env/attack"));
+    REQUIRE(drained_refusal(a, "env/attack", "unknown address 'env/attack'"));
+    REQUIRE(!b.remove("gain"));
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+
+    REQUIRE(b.remove("env/attack"));
+    REQUIRE(ossia::net::find_node(root, "/synth/env") == nullptr);
+    REQUIRE(b.remove("fx/mix"));
+    // fx existed before: it stays
+    REQUIRE(ossia::net::find_node(root, "/synth/fx") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/manual") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+  }
+
+  SECTION("the replay on ready does not conflict with itself")
+  {
+    REQUIRE(a.declare("gain", gain).empty());
+    for(auto& in : a.drain())
+      REQUIRE(in.address != "refused");
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain.1") == nullptr);
+  }
+
+  SECTION("detached, the instance leaves the node as it found it; an address taken meanwhile is refused on return")
+  {
+    REQUIRE(a.declare("env/attack", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    a.detach();
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/env") == nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/manual") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/fx") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth") == model);
+
+    // an ossia.parameter takes gain while the instance is away
+    ossia::try_setup_parameter("float", ossia::net::create_node(*model, "gain"));
+    a.drain();
+    a.reattach();
+    REQUIRE(drained_refusal(a, "gain", "already exists"));
+    REQUIRE(a.size() == 1);
+    REQUIRE(ossia::net::find_node(root, "/synth/env/attack") != nullptr);
+  }
+
+  SECTION("the model registers again: the leaves come back under its new node")
+  {
+    root.remove_child("synth");
+    REQUIRE(!a.attached());
+    model = &ossia::net::create_node(root, "/synth");
+    a.reattach();
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") != nullptr);
+  }
+}
+
+// Without a name and without an enclosing model, the leaves sit at the root of
+// the device, which the branch also knows for its bindings. The device goes away.
+TEST_CASE("v8connector_without_name_device_root", "v8connector_without_name_device_root")
+{
+  auto d = std::make_unique<ossia::net::generic_device>(
+      std::make_unique<ossia::net::multiplex_protocol>(), "v8_root");
+  branch a;
+  a.set_owns_node(false);
+  a.set_node_factory([&]() -> ossia::net::node_base* { return d ? &d->get_root_node() : nullptr; });
+  a.set_resolution_context({&d->get_root_node()}, {d.get()});
+  REQUIRE(a.declare("gain", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+  REQUIRE(ossia::net::find_node(d->get_root_node(), "/gain") != nullptr);
+  REQUIRE(a.bind("gain.1").empty());
+
+  d.reset();
+  REQUIRE(!a.attached());
+  // the branch no longer knows the device: a new context does not touch it
+  ossia::net::generic_device other{std::make_unique<ossia::net::multiplex_protocol>(), "other"};
+  a.set_resolution_context({&other.get_root_node()}, {&other});
+  REQUIRE(a.size() == 1);
+}
+
+// A server removes a parameter and creates it again at the same address, as
+// a server that restarts publishes its tree again. The client receives
+// PATH_REMOVED then PATH_ADDED; a bind to that address follows the new
+// parameter, values included.
+TEST_CASE("v8connector_parameter_recreated", "v8connector_parameter_recreated")
+{
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "td_bench"};
+  auto make_leaf = [&] {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/p0");
+    auto* p = ossia::try_setup_parameter("float", n);
+    p->set_domain(ossia::make_domain(0.f, 1.f));
+    p->push_value(0.f);
+    return p;
+  };
+  auto* leaf = make_leaf();
+  const uint16_t osc = free_port(false);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // A client connected by URL, polled as ossia.client polls it.
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+          "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+  auto& croot = client->get_root_node();
+
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  REQUIRE(b.bind("td_bench:/bench/p0").empty());
+  REQUIRE(b.bound_count("td_bench:/bench/p0") == 1);
+
+  auto poll_until = [&](auto done) {
+    for(int i = 0; i < 400 && !done(); i++)
+    {
+      mirror->run_commands();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return done();
+  };
+  auto received = [&](ossia::net::parameter_base& p, const ossia::value& v) {
+    for(int i = 0; i < 400; i++)
+    {
+      if(i % 20 == 0)
+        p.push_value(v);
+      mirror->run_commands();
+      for(auto& in : b.drain())
+        if(in.address == "td_bench:/bench/p0" && in.value == v)
+          return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+  };
+
+  bool ok = received(*leaf, ossia::value(0.25f));
+  INFO("before: " << ok);
+
+  // The client reads the whole tree again (update): every parameter is
+  // removed, then created again at the same address.
+  bool reloaded = false, reload_bound = false, after_reload = false;
+  if(ok)
+  {
+    reloaded = client->get_protocol().update(croot);
+    reload_bound = poll_until([&] { return b.bound_count("td_bench:/bench/p0") == 1; });
+    after_reload = received(*leaf, ossia::value(0.5f));
+  }
+
+  // The server removes the parameter, then creates it again.
+  bool removed = false, back = false, bound_again = false, after = false;
+  if(ok)
+  {
+    server.get_root_node().find_child("bench")->remove_child("p0");
+    removed = poll_until([&] { return ossia::net::find_node(croot, "/bench/p0") == nullptr; });
+    leaf = make_leaf();
+    back = poll_until([&] { return ossia::net::find_node(croot, "/bench/p0") != nullptr; });
+    bound_again = poll_until([&] { return b.bound_count("td_bench:/bench/p0") == 1; });
+    after = received(*leaf, ossia::value(0.75f));
+  }
+
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+  REQUIRE(ok);
+  REQUIRE(reloaded);
+  REQUIRE(reload_bound);
+  REQUIRE(after_reload);
+  REQUIRE(removed);
+  REQUIRE(back);
+  REQUIRE(bound_again);
+  REQUIRE(after);
+}
+
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/spdlog.h>
+
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+
+extern char** environ;
+
+namespace
+{
+// The clock of the host: one callback, armed for later, fired by the test loop
+// on its own thread, as Max fires a clock on its main thread.
+struct fake_clock
+{
+  std::function<void()> fn;
+  bool armed{};
+  std::chrono::steady_clock::time_point due;
+  void set(int ms)
+  {
+    armed = true;
+    due = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+  }
+  void unset() { armed = false; }
+  void run()
+  {
+    if(armed && std::chrono::steady_clock::now() >= due)
+    {
+      armed = false;
+      fn();
+    }
+  }
+};
+
+std::string self_path()
+{
+#ifdef __APPLE__
+  char buf[4096];
+  uint32_t size = sizeof(buf);
+  if(_NSGetExecutablePath(buf, &size) == 0)
+    return buf;
+#endif
+  return {};
+}
+
+// An OSCQuery server in another process, as a TouchDesigner component is:
+// killed and started again on the same ports, it keeps nothing of its clients.
+// It pushes a new value to /bench/p0 every 50 ms, and logs the WebSocket
+// messages it receives to a file: a LISTEN logged after a restart proves the
+// client subscribed again on the new connection.
+struct server_process
+{
+  uint16_t osc, ws;
+  std::string log_path;
+  pid_t pid{};
+
+  server_process(uint16_t osc, uint16_t ws)
+      : osc{osc}
+      , ws{ws}
+      , log_path{"/tmp/ossia_v8connector_server_" + std::to_string(getpid()) + ".log"}
+  {
+    std::remove(log_path.c_str());
+  }
+  ~server_process()
+  {
+    stop();
+    std::remove(log_path.c_str());
+  }
+  bool start()
+  {
+    const auto exe = self_path();
+    if(exe.empty())
+      return false;
+    setenv("OSSIA_BENCH_OSC", std::to_string(osc).c_str(), 1);
+    setenv("OSSIA_BENCH_WS", std::to_string(ws).c_str(), 1);
+    setenv("OSSIA_BENCH_LOG", log_path.c_str(), 1);
+    const char* argv[] = {exe.c_str(), "zz_td_bench_server", nullptr};
+    if(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, const_cast<char**>(argv), environ) != 0)
+      return false;
+    const auto url = "ws://127.0.0.1:" + std::to_string(ws);
+    for(int i = 0; i < 100; i++)
+    {
+      if(ossia::max_binding::oscquery_server_reachable(url, 100))
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    return false;
+  }
+  void stop()
+  {
+    if(!pid)
+      return;
+    kill(pid, SIGKILL);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    pid = 0;
+  }
+  std::string log() const
+  {
+    std::ifstream in{log_path};
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+  }
+  bool listened_since(std::size_t from, const std::string& address) const
+  {
+    const auto s = log();
+    for(auto pos = s.find("LISTEN", from); pos != std::string::npos; pos = s.find("LISTEN", pos + 1))
+    {
+      const auto eol = s.find('\n', pos);
+      if(s.substr(pos, eol == std::string::npos ? eol : eol - pos).find(address) != std::string::npos)
+        return true;
+    }
+    return false;
+  }
+};
+}
+
+// The server process, run by server_process (hidden from the normal runs).
+TEST_CASE("zz_td_bench_server", "[.]")
+{
+  const char* osc_s = std::getenv("OSSIA_BENCH_OSC");
+  const char* ws_s = std::getenv("OSSIA_BENCH_WS");
+  const char* log_s = std::getenv("OSSIA_BENCH_LOG");
+  REQUIRE(osc_s);
+  REQUIRE(ws_s);
+  REQUIRE(log_s);
+  auto ctx = ossia::net::create_network_context();
+  auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = mp.get();
+  ossia::net::generic_device dev{std::move(mp), "td_bench"};
+  auto& n = ossia::net::create_node(dev.get_root_node(), "/bench/p0");
+  auto* leaf = ossia::try_setup_parameter("float", n);
+  leaf->set_domain(ossia::make_domain(0.f, 1.f));
+  leaf->push_value(0.f);
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, std::atoi(osc_s), std::atoi(ws_s), false);
+  ossia::net::network_logger l;
+  l.inbound_logger = spdlog::basic_logger_mt("server_in", log_s);
+  l.inbound_logger->flush_on(spdlog::level::info);
+  server->set_logger(l);
+  multiplex->expose_to(std::move(server));
+  std::thread net([&] { ctx->run(); });
+  // Killed by the test; 10 minutes at most on its own.
+  for(int i = 0; i < 12000; i++)
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    leaf->push_value(((i % 999) + 1) / 1000.f);
+  }
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+}
+
+// The server of an ossia.client connected by URL dies and comes back on the
+// same ports, as a TouchDesigner component turned off and on. The link
+// reports the loss, builds the device again when the server answers, and the
+// bound address receives values again, the server having received LISTEN on
+// the new connection. Every wait is bounded and names its step.
+TEST_CASE("v8connector_client_reconnects", "v8connector_client_reconnects")
+{
+  const uint16_t osc = free_port(false);
+  const uint16_t ws = free_port(true);
+  const std::string url = "ws://127.0.0.1:" + std::to_string(ws);
+  server_process server{osc, ws};
+  REQUIRE(server.start());
+
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  auto& max_root = max_dev.get_root_node();
+  branch b;
+  std::shared_ptr<ossia::net::generic_device> client;
+  fake_clock clock;
+  int losses = 0, attempts = 0;
+
+  // What ossia.client does: build the mirror device by URL, read its tree,
+  // register the objects of the patcher again.
+  auto connect = [&]() -> bool {
+    attempts++;
+    try
+    {
+      client = std::make_shared<ossia::net::generic_device>(
+          std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url, free_port(false)),
+          "td_bench");
+    }
+    catch(...)
+    {
+      return false;
+    }
+    if(!client->get_protocol().update(client->get_root_node()))
+      return false;
+    b.set_resolution_context({&max_root}, {&max_dev, client.get()});
+    return true;
+  };
+
+  std::unique_ptr<ossia::max_binding::oscquery_link> link;
+  link = std::make_unique<ossia::max_binding::oscquery_link>(ossia::max_binding::oscquery_link::host{
+      [&](int ms) { clock.set(ms); },
+      [&] { clock.unset(); },
+      [&] { losses++; },
+      [&] {
+    if(!connect())
+      return false;
+    // the host gives the link the device it built, as client::connect does
+    link->watch(*client, url, 10);
+    return true;
+      }});
+  clock.fn = [&] { link->tick(); };
+
+  REQUIRE(connect());
+  link->watch(*client, url, 10);
+  REQUIRE(b.bind("td_bench:/bench/p0").empty());
+  REQUIRE(b.bound_count("td_bench:/bench/p0") == 1);
+
+  // Run the host's clock and the test until done() or the time is up.
+  auto run_until = [&](auto done, int ms) {
+    for(int i = 0; i < ms / 5 && !done(); i++)
+    {
+      clock.run();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return done();
+  };
+  // A value pushed by the server (a new one every 50 ms) reaches the bind.
+  auto receives = [&] {
+    b.drain();
+    bool got = false;
+    return run_until(
+        [&] {
+      for(auto& in : b.drain())
+        if(in.address == "td_bench:/bench/p0")
+          got = true;
+      return got;
+        },
+        3000);
+  };
+
+  REQUIRE(receives());
+
+  SECTION("the server dies and comes back: the link reports it and the bind receives again")
+  {
+    const int cycles = 10;
+    bool ok = true;
+    std::string step;
+    for(int cycle = 0; cycle < cycles && ok; cycle++)
+    {
+      const int losses_before = losses, attempts_before = attempts;
+      server.stop();
+      step = "cycle " + std::to_string(cycle) + ": loss reported";
+      ok = run_until([&] { return losses > losses_before; }, 3000);
+      if(!ok)
+        break;
+      // the server is down: nothing is built, the link keeps trying
+      step = "cycle " + std::to_string(cycle) + ": still lost while the server is down";
+      run_until([&] { return false; }, 1200);
+      ok = link->lost() && attempts == attempts_before;
+      if(!ok)
+        break;
+      const auto log_from = server.log().size();
+      step = "cycle " + std::to_string(cycle) + ": server started again";
+      ok = server.start();
+      if(!ok)
+        break;
+      step = "cycle " + std::to_string(cycle) + ": bound again after the return";
+      ok = run_until([&] { return b.bound_count("td_bench:/bench/p0") == 1 && !link->lost(); }, 5000);
+      if(!ok)
+        break;
+      step = "cycle " + std::to_string(cycle) + ": value received after the return";
+      ok = receives();
+      if(!ok)
+        break;
+      step = "cycle " + std::to_string(cycle) + ": LISTEN received by the new server";
+      ok = server.listened_since(log_from, "/bench/p0");
+    }
+    const int final_losses = losses;
+    INFO(step);
+    link.reset();
+    client.reset();
+    REQUIRE(ok);
+    REQUIRE(final_losses == cycles);
+  }
+
+  SECTION("reconnect off: the loss is reported, nothing is tried")
+  {
+    link->set_reconnect(false);
+    const int attempts_before = attempts;
+    server.stop();
+    const bool reported = run_until([&] { return losses == 1; }, 3000);
+    REQUIRE(server.start());
+    run_until([&] { return false; }, 2500);
+    const bool tried = attempts != attempts_before;
+    const bool watching = link->watching();
+    link.reset();
+    client.reset();
+    REQUIRE(reported);
+    REQUIRE(!tried);
+    REQUIRE(!watching);
+  }
+
+  SECTION("destroyed while lost: no tick fires afterwards")
+  {
+    server.stop();
+    REQUIRE(run_until([&] { return losses == 1; }, 3000));
+    // a retry is scheduled; the host is destroyed before it fires. The clock
+    // of the host keeps its target, as a Max clock does: a tick that still
+    // fired would run on freed memory.
+    REQUIRE(clock.armed);
+    auto* raw = link.get();
+    clock.fn = [raw] { raw->tick(); };
+    link.reset();
+    const bool cancelled = !clock.armed;
+    clock.due = std::chrono::steady_clock::now();
+    clock.run();
+    REQUIRE(cancelled);
+    client.reset();
   }
 }

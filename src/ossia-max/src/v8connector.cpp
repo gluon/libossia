@@ -121,8 +121,9 @@ void* v8connector::create(t_symbol*, long argc, t_atom* argv)
   }
   attr_args_process(x, argc - attrstart, argv + attrstart);
 
-  if(x->m_name == _sym_nothing)
-    object_error((t_object*)x, "%s needs a branch name as first argument", OSSIA_V8CONNECTOR_NAME);
+  // Without a name, the parameters sit directly under the enclosing model or
+  // device, next to the ossia.parameter objects.
+  x->m_branch.set_owns_node(x->has_name());
 
   x->m_queue_qelem = qelem_new(x, (method)v8connector::drain);
   x->m_register_qelem = qelem_new(x, (method)v8connector::deferred_registration);
@@ -225,9 +226,6 @@ void v8connector::loadbang(v8connector* x)
     return;
   if(x->m_registered || x->m_dead)
     return;
-  if(!x->m_name || x->m_name == _sym_nothing)
-    return;
-
   critical_enter(0);
   // Registers the whole patcher hierarchy if it has not been done yet, so
   // that the enclosing models and devices exist before the branch is created.
@@ -244,8 +242,10 @@ void v8connector::do_registration()
   m_registering = true;
 
   unregister();
+  // address <name> may have changed the mode: the branch has left its old node.
+  m_branch.set_owns_node(has_name());
 
-  if(m_name && m_name != _sym_nothing)
+  if(has_name())
     update_path();
 
   m_registered = true;
@@ -265,7 +265,9 @@ void v8connector::do_registration()
 // device matches.
 ossia::net::node_base* v8connector::create_branch_node()
 {
-  if(!m_registered || !m_name || m_name == _sym_nothing || !m_matchers.empty())
+  if(m_registered && !has_name())
+    return shared_node();
+  if(!m_registered || !has_name() || !m_matchers.empty())
     return m_matchers.empty() ? nullptr : m_matchers.front()->get_node();
 
   auto devices = get_all_devices();
@@ -309,6 +311,39 @@ ossia::net::node_base* v8connector::create_branch_node()
         ossia::net::address_string_from_node(*m_matchers.front()->get_node()).c_str());
 
   auto* node = m_matchers.front()->get_node();
+  status("address", ossia::net::address_string_from_node(*node));
+  return node;
+}
+
+// Without a name: the node of the enclosing model, or the root of the
+// enclosing device or client, or the root of the global device. It belongs to
+// that object; the branch only adds its leaves to it.
+ossia::net::node_base* v8connector::shared_node()
+{
+  ossia::net::node_base* node{};
+  if(auto* parent = find_parent_object())
+  {
+    switch(parent->m_otype)
+    {
+      case object_class::device:
+      case object_class::client:
+        if(auto dev = static_cast<device_base*>(parent)->m_device)
+          node = &dev->get_root_node();
+        break;
+      case object_class::model:
+        for(const auto& m : parent->m_matchers)
+          if(auto n = m->get_node(); n && !m->is_dead() && !m->is_zombie())
+          {
+            node = n;
+            break;
+          }
+        break;
+      default:
+        break;
+    }
+  }
+  if(!node)
+    node = &ossia_max::instance().get_default_device()->get_root_node();
   status("address", ossia::net::address_string_from_node(*node));
   return node;
 }
