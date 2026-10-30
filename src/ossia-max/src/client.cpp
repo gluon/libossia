@@ -40,6 +40,7 @@ extern "C" void ossia_client_setup()
       (short)sizeof(client), 0L, A_GIMME, 0);
 
   device_base::class_setup(c);
+  device_base::bundle_class_setup(c);
 
   class_addmethod(c, (method)client::update, "update", A_NOTHING, 0);
 
@@ -218,6 +219,12 @@ void client::destroy(client* x)
   // Waits for the attempts still running: one attempt at most each.
   x->m_attempt.reset();
   x->m_abandoned.clear();
+  x->stop_bundles();
+  if(x->m_bundle_clock)
+  {
+    clock_free((t_object*)x->m_bundle_clock);
+    x->m_bundle_clock = nullptr;
+  }
   if(x->m_poll_clock)
   {
     clock_unset(x->m_poll_clock);
@@ -464,6 +471,7 @@ void client::finish_connect(client* x, int count, t_atom* status, bool read_tree
   outlet_anything(x->m_dumpout, gensym("connect"), count, status);
 
   x->connect_slots();
+  x->start_bundles();
   if(read_tree)
     client::update(x);
   client::on_device_created(x);
@@ -585,6 +593,7 @@ void client::disconnect(client* x)
     // FIXME it should not be necessary to unregister_children because they should listen
     // to on_node_removing signal
     x->unregister_children();
+    x->stop_bundles();
     x->m_device = nullptr;
     x->m_oscq_protocol = nullptr;
     client::on_device_removing(x);

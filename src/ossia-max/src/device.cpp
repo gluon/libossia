@@ -77,6 +77,7 @@ namespace max_binding
 void device::class_setup(t_class* c)
 {
   device_base::class_setup(c);
+  device_base::bundle_class_setup(c);
   class_addmethod(c, (method)device::register_children, "register", A_NOTHING, 0);
   class_addmethod(c, (method)device::expose, "expose", A_GIMME, 0);
   class_addmethod(
@@ -158,6 +159,7 @@ void* device::create(t_symbol*, long argc, t_atom* argv)
     x->m_device = std::make_shared<ossia::net::generic_device>(
         std::move(local_proto_ptr), x->m_name->s_name);
     x->connect_slots();
+    x->start_bundles();
 
     defer_low(x, (method)object_base::loadbang, nullptr, 0, nullptr);
 
@@ -211,6 +213,12 @@ void device::destroy(device* x)
   x->disconnect_slots();
   on_device_removing(x);
 
+  x->stop_bundles();
+  if(x->m_bundle_clock)
+  {
+    clock_free((t_object*)x->m_bundle_clock);
+    x->m_bundle_clock = nullptr;
+  }
   x->m_device = nullptr;
 
   if(x->m_dumpout)
