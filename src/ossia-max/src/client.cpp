@@ -55,6 +55,10 @@ extern "C" void ossia_client_setup()
   CLASS_ATTR_STYLE(c, "feedback", 0, "onoff");
   CLASS_ATTR_LABEL(c, "feedback", 0, "Control feebdack to host device");
 
+  CLASS_ATTR_LONG(c, "reconnect", 0, client, m_reconnect);
+  CLASS_ATTR_STYLE(c, "reconnect", 0, "onoff");
+  CLASS_ATTR_LABEL(c, "reconnect", 0, "Reconnect to an OSCQuery server reached by URL when it goes away");
+
   class_addmethod(c, (method)client::do_notify, "notify", A_CANT, 0);
 
   class_register(CLASS_BOX, c);
@@ -78,6 +82,11 @@ client::do_notify(client* x, t_symbol* s, t_symbol* msg, void* a, void* data)
 
     if(attrname == gensym("feedback"))
       x->set_feedback(x->m_feedback);
+    else if(attrname == gensym("reconnect"))
+    {
+      if(x->m_link)
+        x->m_link->set_reconnect(x->m_reconnect > 0);
+    }
     else
       return object_base::notify(x, s, msg, a, data);
   }
@@ -120,6 +129,30 @@ void* client::create(t_symbol* name, long argc, t_atom* argv)
     x->m_poll_clock = clock_new(x, (method)client::poll_message);
     x->m_clock = clock_new(x, (method)client::connect);
 
+    // The link to a server reached by URL. Everything it does runs on the
+    // main thread, through the poll clock.
+    x->m_link = std::make_unique<oscquery_link>(oscquery_link::host{
+        [x](int ms) { clock_delay(x->m_poll_clock, ms); },
+        [x] { clock_unset(x->m_poll_clock); },
+        [x] {
+      // The WebSocket went down: reported as a failed connection is.
+      t_atom a[4];
+      A_SETFLOAT(a, 0);
+      A_SETSYM(a + 1, gensym("oscquery"));
+      A_SETSYM(a + 2, x->m_name);
+      A_SETSYM(a + 3, gensym(x->m_wsurl.c_str()));
+      outlet_anything(x->m_dumpout, gensym("connect"), 4, a);
+        },
+        [x] {
+      // The server answers again: connect as the first time did. On failure,
+      // the link tries again itself; connect must not.
+      client::connect(x);
+      const bool ok = x->m_link->watching() && !x->m_link->lost();
+      if(!ok && x->m_clock)
+        clock_unset(x->m_clock);
+      return ok;
+        }});
+
     // parse arguments
     long attrstart = attr_args_offset(argc, argv);
 
@@ -145,6 +178,7 @@ void* client::create(t_symbol* name, long argc, t_atom* argv)
 
     // process attr args, if any
     attr_args_process(x, argc - attrstart, argv + attrstart);
+    x->m_link->set_reconnect(x->m_reconnect > 0);
 
     object_attach_byptr_register(x, x, CLASS_BOX);
     defer_low(x, (method)object_base::loadbang, nullptr, 0, nullptr);
@@ -166,8 +200,17 @@ void client::destroy(client* x)
 
   if(x->m_clock)
     clock_free((t_object*)x->m_clock);
+  x->m_clock = nullptr;
 
   disconnect(x);
+  // No tick after this: the link forgets its clock, then the clock goes.
+  x->m_link.reset();
+  if(x->m_poll_clock)
+  {
+    clock_unset(x->m_poll_clock);
+    clock_free((t_object*)x->m_poll_clock);
+    x->m_poll_clock = nullptr;
+  }
   if(x->m_dumpout)
     outlet_delete(x->m_dumpout);
   ossia_max::instance().clients.remove_all(x);
@@ -301,20 +344,33 @@ void client::connect(client* x)
       A_SETSYM(connection_status + 1, gensym("oscquery"));
       A_SETSYM(connection_status + 2, gensym(oscq_settings.name.c_str()));
       A_SETSYM(connection_status + 3, gensym(wsurl.c_str()));
+      x->m_wsurl = wsurl;
 
-      try
+      // Building the mirror on a server that is down blocks for 1.5 s: the
+      // port is probed first. While the link is trying again after a loss,
+      // a server still down is not an error.
+      if(!oscquery_server_reachable(wsurl, 100))
       {
-        x->m_oscq_protocol = new ossia::oscquery::oscquery_mirror_protocol{wsurl};
-        x->m_oscq_protocol->set_zombie_on_remove(false);
-        x->m_device = std::make_shared<ossia::net::generic_device>(
-            std::unique_ptr<ossia::net::protocol_base>(x->m_oscq_protocol),
-            oscq_settings.name);
-
-        clock_set(x->m_poll_clock, 1);
+        if(!x->m_link->lost())
+          object_error((t_object*)x, "Could not connect to %s", wsurl.c_str());
       }
-      catch(const std::exception& e)
+      else
       {
-        object_error((t_object*)x, "%s", e.what());
+        try
+        {
+          x->m_oscq_protocol = new ossia::oscquery::oscquery_mirror_protocol{wsurl};
+          x->m_oscq_protocol->set_zombie_on_remove(false);
+          x->m_device = std::make_shared<ossia::net::generic_device>(
+              std::unique_ptr<ossia::net::protocol_base>(x->m_oscq_protocol),
+              oscq_settings.name);
+
+          // Polls the mirror from now on, and reconnects when the server goes away.
+          x->m_link->watch(*x->m_device, wsurl, static_cast<int>(x->m_rate));
+        }
+        catch(const std::exception& e)
+        {
+          object_error((t_object*)x, "%s", e.what());
+        }
       }
 
       count = 4;
@@ -462,6 +518,10 @@ void client::update(client* x)
 
 void client::disconnect(client* x)
 {
+  // An explicit disconnect, or a new connection: no more attempts. Ignored
+  // by the link while it is the one connecting.
+  if(x->m_link)
+    x->m_link->unwatch();
   if(x->m_device)
   {
     x->m_node_selection.clear();
@@ -482,6 +542,14 @@ void client::disconnect(client* x)
 
 void client::poll_message(client* x)
 {
+  // Connection by URL: the link polls, and reconnects when the server goes away.
+  if(x->m_link && x->m_link->watching())
+  {
+    x->m_link->tick();
+    return;
+  }
+  // Connection by name: the device comes from the zeroconf listener, which
+  // connects again when the announcement comes back.
   if(x->m_oscq_protocol)
   {
     x->m_oscq_protocol->run_commands();

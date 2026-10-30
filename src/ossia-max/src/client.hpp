@@ -4,7 +4,11 @@
 #include <ossia/network/oscquery/oscquery_mirror.hpp>
 #include <ossia/network/zeroconf/zeroconf.hpp>
 
+#include <ossia-max/src/client_mirror.hpp>
 #include <ossia-max/src/device_base.hpp>
+
+#include <memory>
+#include <string>
 
 namespace ossia
 {
@@ -50,6 +54,10 @@ public:
   void* m_poll_clock;
 
   ossia::oscquery::oscquery_mirror_protocol* m_oscq_protocol{};
+  // Connection by URL: polls the mirror, reconnects when the server goes away.
+  std::unique_ptr<oscquery_link> m_link;
+  std::string m_wsurl;
+  long m_reconnect{1};
 
   bool m_zeroconf{true};
   bool is_zeroconf() const { return m_zeroconf; }
