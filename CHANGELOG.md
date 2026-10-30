@@ -4,7 +4,7 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [2.1.0+prism.4]
+## [2.1.0+prism.4] - 2026-10-30
 
 Published for macOS universal (Apple Silicon and Intel). Windows x64 to come: same version, added to the Release later.
 
