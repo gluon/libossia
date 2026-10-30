@@ -1931,9 +1931,12 @@ TEST_CASE("v8connector_bundles", "v8connector_bundles")
   client.reset();
 }
 
+// Leaves declared under a served device (ossia.device): the bundle leaves
+// through the OSCQuery server, which sends what it is given as one datagram.
+// The branch hands it groups of at most 1400 bytes.
 TEST_CASE("v8connector_bundles_served_leaves", "v8connector_bundles_served_leaves")
 {
-  const int n = 300;
+  const int n = 3000;
   sink_server server{0};
   udp_sink client_sink{free_port(false)};
   raw_client client{server.url()};
@@ -1958,10 +1961,14 @@ TEST_CASE("v8connector_bundles_served_leaves", "v8connector_bundles_served_leave
   REQUIRE(b.flush() == std::size_t(n));
   const bool all = client_sink.wait_messages(n, 3000);
   std::lock_guard lock{client_sink.mutex};
-  INFO("datagrams " << client_sink.datagrams.size() << ", messages " << client_sink.messages.size());
-  REQUIRE(all);
+  std::size_t largest = 0;
   for(auto size : client_sink.datagrams)
-    REQUIRE(size <= 1400);
+    largest = std::max(largest, size);
+  INFO("datagrams " << client_sink.datagrams.size() << ", messages " << client_sink.messages.size()
+                    << ", largest " << largest);
+  REQUIRE(all);
+  REQUIRE(client_sink.messages.size() == std::size_t(n));
+  REQUIRE(largest <= 1400);
   REQUIRE(client_sink.datagrams.size() < std::size_t(n) / 20);
 }
 
