@@ -1964,3 +1964,306 @@ TEST_CASE("v8connector_bundles_served_leaves", "v8connector_bundles_served_leave
     REQUIRE(size <= 1400);
   REQUIRE(client_sink.datagrams.size() < std::size_t(n) / 20);
 }
+
+#include <csignal>
+#include <cstring>
+#include <cstdio>
+
+namespace
+{
+std::atomic_bool g_load_server_stop{false};
+void load_server_on_term(int)
+{
+  g_load_server_stop = true;
+}
+
+int64_t now_ns()
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+// One value as the load server received it.
+struct load_arrival
+{
+  uint32_t leaf;
+  float tick;
+  int64_t ns;
+};
+// One datagram as the load server received it.
+struct load_datagram
+{
+  uint32_t size;
+  int64_t ns;
+};
+}
+
+// The load server, run in its own process by the load bench (hidden from the
+// normal runs). 3000 leaves; it announces OSC_LOAD_OSC in HOST_INFO and reads
+// that port itself; on SIGTERM it writes what it received to OSSIA_LOAD_OUT.
+TEST_CASE("zz_load_server", "[.]")
+{
+  const char* osc_s = std::getenv("OSSIA_LOAD_OSC");
+  const char* ws_s = std::getenv("OSSIA_LOAD_WS");
+  const char* out_s = std::getenv("OSSIA_LOAD_OUT");
+  REQUIRE(osc_s);
+  REQUIRE(ws_s);
+  REQUIRE(out_s);
+  std::signal(SIGTERM, load_server_on_term);
+  const uint16_t osc = std::atoi(osc_s);
+
+  auto ctx = ossia::net::create_network_context();
+  auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = mp.get();
+  ossia::net::generic_device dev{std::move(mp), "load_server"};
+  for(int i = 0; i < 3000; i++)
+  {
+    auto& n = ossia::net::create_node(dev.get_root_node(), "/load/p" + std::to_string(i));
+    ossia::try_setup_parameter("float", n)->set_domain(ossia::make_domain(0.f, 1000000.f));
+  }
+  multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol_base>(
+      ctx,
+      std::vector<ossia::net::osc_server_configuration>{
+          ossia::net::udp_server_configuration{{{"0.0.0.0"}, osc}}},
+      std::atoi(ws_s), false));
+  std::thread net([&] { ctx->run(); });
+
+  std::vector<load_arrival> arrivals;
+  arrivals.reserve(6'000'000);
+  std::vector<load_datagram> datagrams;
+  datagrams.reserve(400'000);
+
+  boost::asio::io_context uctx;
+  boost::asio::ip::udp::socket socket{uctx};
+  socket.open(boost::asio::ip::udp::v4());
+  socket.set_option(boost::asio::socket_base::receive_buffer_size(8 * 1024 * 1024));
+  socket.bind({boost::asio::ip::make_address("0.0.0.0"), osc});
+  socket.non_blocking(true);
+
+  std::function<void(const char*, std::size_t, int64_t)> decode;
+  decode = [&](const char* data, std::size_t size, int64_t ns) {
+    oscpack::ReceivedPacket p{data, (oscpack::osc_bundle_element_size_t)size};
+    if(p.IsBundle())
+    {
+      oscpack::ReceivedBundle b{p};
+      for(auto it = b.ElementsBegin(); it != b.ElementsEnd(); ++it)
+        decode(it->Contents(), it->Size(), ns);
+      return;
+    }
+    oscpack::ReceivedMessage m{p};
+    const char* addr = m.AddressPattern();
+    const char* digits = std::strrchr(addr, 'p');
+    if(!digits || m.ArgumentCount() < 1 || !m.ArgumentsBegin()->IsFloat())
+      return;
+    arrivals.push_back({uint32_t(std::atoi(digits + 1)), m.ArgumentsBegin()->AsFloat(), ns});
+  };
+
+  std::vector<char> buf(65536);
+  // 5 minutes at most on its own
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
+  while(!g_load_server_stop && std::chrono::steady_clock::now() < deadline)
+  {
+    boost::system::error_code ec;
+    boost::asio::ip::udp::endpoint from;
+    auto n = socket.receive_from(boost::asio::buffer(buf), from, 0, ec);
+    if(ec)
+    {
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+      continue;
+    }
+    const auto ns = now_ns();
+    datagrams.push_back({uint32_t(n), ns});
+    try
+    {
+      decode(buf.data(), n, ns);
+    }
+    catch(...)
+    {
+    }
+  }
+
+  if(FILE* f = std::fopen(out_s, "wb"))
+  {
+    const uint64_t na = arrivals.size(), nd = datagrams.size();
+    std::fwrite(&na, sizeof(na), 1, f);
+    std::fwrite(arrivals.data(), sizeof(load_arrival), na, f);
+    std::fwrite(&nd, sizeof(nd), 1, f);
+    std::fwrite(datagrams.data(), sizeof(load_datagram), nd, f);
+    std::fclose(f);
+  }
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+}
+
+// The load bench, run by hand, one mode per run (each under 120 s):
+//   OSSIA_LOAD_MODE=bundle1|bundle0|changes1pct [OSSIA_LOAD_SECONDS=30]
+//   ossia_V8ConnectorTest "[load]"
+// 3000 leaves of a server in another process, bound through a client by URL,
+// all set at each tick, 60 ticks per second. With changes1pct, all are set at
+// each tick but 1 % change, with the repetition filter on.
+TEST_CASE("v8connector_load", "[.][load]")
+{
+  const std::string mode = std::getenv("OSSIA_LOAD_MODE") ? std::getenv("OSSIA_LOAD_MODE") : "bundle1";
+  const int seconds = std::getenv("OSSIA_LOAD_SECONDS") ? std::atoi(std::getenv("OSSIA_LOAD_SECONDS")) : 30;
+  const int n = 3000, rate = 60, ticks = seconds * rate;
+  const bool bundle = mode != "bundle0";
+  const bool one_percent = mode == "changes1pct";
+
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  const std::string out = "/tmp/ossia_v8connector_load_" + std::to_string(getpid()) + ".bin";
+  std::remove(out.c_str());
+  setenv("OSSIA_LOAD_OSC", std::to_string(osc).c_str(), 1);
+  setenv("OSSIA_LOAD_WS", std::to_string(ws).c_str(), 1);
+  setenv("OSSIA_LOAD_OUT", out.c_str(), 1);
+  const auto exe = self_path();
+  const char* argv[] = {exe.c_str(), "zz_load_server", nullptr};
+  pid_t pid{};
+  REQUIRE(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, const_cast<char**>(argv), environ) == 0);
+  struct reaper
+  {
+    pid_t pid;
+    ~reaper()
+    {
+      if(pid)
+      {
+        kill(pid, SIGKILL);
+        waitpid(pid, nullptr, 0);
+      }
+    }
+  } reap{pid};
+
+  const std::string url = "ws://127.0.0.1:" + std::to_string(ws);
+  bool up = false;
+  for(int i = 0; i < 100 && !up; i++)
+  {
+    up = ossia::max_binding::oscquery_server_reachable(url, 100);
+    if(!up)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  INFO("step: load server up");
+  REQUIRE(up);
+
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url, free_port(false)),
+      "load_server");
+  INFO("step: client reads the tree");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  std::vector<std::string> addresses;
+  for(int i = 0; i < n; i++)
+  {
+    addresses.push_back("load_server:/load/p" + std::to_string(i));
+    REQUIRE(b.bind(addresses.back()).empty());
+    if(one_percent)
+      ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i))
+          ->get_parameter()
+          ->set_repetition_filter(ossia::repetition_filter::ON);
+  }
+  INFO("step: 3000 binds resolved");
+  REQUIRE(b.bound_count(addresses[n - 1]) == 1);
+  b.drain();
+  b.set_bundle(bundle);
+
+  // Tick k sends the value k + 1 (exact in a float) to every leaf, or, with
+  // changes1pct, to the 1 % of the leaves whose turn it is.
+  std::vector<int64_t> tick_start(ticks), tick_ns(ticks);
+  std::vector<float> current(n, 0.f);
+  std::size_t expected = 0;
+  const auto period = std::chrono::nanoseconds(1'000'000'000 / rate);
+  auto next = std::chrono::steady_clock::now();
+  for(int k = 0; k < ticks; k++)
+  {
+    std::this_thread::sleep_until(next);
+    next += period;
+    const auto t0 = now_ns();
+    tick_start[k] = t0;
+    for(int i = 0; i < n; i++)
+    {
+      if(!one_percent || i % 100 == k % 100)
+        current[i] = float(k + 1);
+      b.set(addresses[i], {current[i]});
+    }
+    expected += one_percent ? std::size_t(n / 100) : std::size_t(n);
+    b.flush();
+    tick_ns[k] = now_ns() - t0;
+  }
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  kill(pid, SIGTERM);
+  int status = 0;
+  waitpid(pid, &status, 0);
+  reap.pid = 0;
+  client.reset();
+
+  // What the server received
+  std::vector<load_arrival> arrivals;
+  std::vector<load_datagram> datagrams;
+  {
+    FILE* f = std::fopen(out.c_str(), "rb");
+    INFO("step: load server results");
+    REQUIRE(f);
+    uint64_t na = 0, nd = 0;
+    std::fread(&na, sizeof(na), 1, f);
+    arrivals.resize(na);
+    std::fread(arrivals.data(), sizeof(load_arrival), na, f);
+    std::fread(&nd, sizeof(nd), 1, f);
+    datagrams.resize(nd);
+    std::fread(datagrams.data(), sizeof(load_datagram), nd, f);
+    std::fclose(f);
+    std::remove(out.c_str());
+  }
+
+  // Latency of each value: from the start of the tick that set it to its
+  // arrival. Only the values of the measured ticks count (k + 1 in 1..ticks).
+  std::vector<double> latency_ms;
+  latency_ms.reserve(arrivals.size());
+  std::vector<uint8_t> seen;
+  if(!one_percent)
+    seen.assign(std::size_t(n) * ticks, 0);
+  std::size_t received = 0;
+  for(const auto& a : arrivals)
+  {
+    const int k = int(a.tick) - 1;
+    if(k < 0 || k >= ticks || a.leaf >= uint32_t(n))
+      continue;
+    if(one_percent && int(a.leaf % 100) != k % 100)
+      continue;
+    if(!one_percent)
+    {
+      auto& s = seen[std::size_t(k) * n + a.leaf];
+      if(s)
+        continue;
+      s = 1;
+    }
+    received++;
+    latency_ms.push_back((a.ns - tick_start[k]) / 1e6);
+  }
+  auto pct = [](std::vector<double> v, double p) {
+    if(v.empty())
+      return 0.;
+    std::sort(v.begin(), v.end());
+    return v[std::min(v.size() - 1, std::size_t(p * (v.size() - 1)))];
+  };
+  std::vector<double> tick_ms(ticks);
+  for(int k = 0; k < ticks; k++)
+    tick_ms[k] = tick_ns[k] / 1e6;
+  uint64_t bytes = 0;
+  std::size_t max_size = 0;
+  for(const auto& d : datagrams)
+  {
+    bytes += d.size;
+    max_size = std::max<std::size_t>(max_size, d.size);
+  }
+  const double lost = expected ? 100. * double(expected - std::min(expected, received)) / expected : 0.;
+
+  std::printf(
+      "LOAD mode=%s ticks=%d values/tick=%.0f datagrams/tick=%.1f bytes/tick=%.0f max_datagram=%zu "
+      "latency_p50=%.2fms latency_p99=%.2fms lost=%.3f%% tick_p50=%.2fms tick_p99=%.2fms tick_max=%.2fms\n",
+      mode.c_str(), ticks, double(expected) / ticks, double(datagrams.size()) / ticks,
+      double(bytes) / ticks, max_size, pct(latency_ms, 0.5), pct(latency_ms, 0.99), lost,
+      pct(tick_ms, 0.5), pct(tick_ms, 0.99), pct(tick_ms, 1.0));
+  std::fflush(stdout);
+  REQUIRE(received > 0);
+}
