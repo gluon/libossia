@@ -55,6 +55,14 @@ RECETTES
   @bundle 0 envoie un message par valeur, comme 2.1.0+prism.4. Au banc,
   3000 valeurs par tick à 60 Hz : 53 datagrammes au lieu de 3000,
   latence médiane 1,65 ms au lieu de 4,19 ms.
+  Tous les objets aussi : ce que poussent ossia.parameter, ossia.remote
+  ou ossia.view pendant un tick part en bundles par leur ossia.device ou
+  ossia.client, sans fusion (deux valeurs d'une même adresse partent
+  toutes deux, dans l'ordre). @bundle de ossia.device et ossia.client :
+  -1 (par défaut) en OSCQuery seulement, 0 jamais, 1 toujours ; l'OSC
+  simple et Minuit restent sans bundle par défaut. Au banc, avec des
+  ossia.remote : 53 datagrammes par tick au lieu de 3000, latence médiane
+  0,79 ms au lieu de 3,59 ms.
 - Ajouter et retirer depuis un script : le helper envoie lui-même add et
   remove, en trouvant l'objet par son nom de scripting (varname, dans
   l'inspecteur), sans câble. Le câble de la sortie gauche vers le script
