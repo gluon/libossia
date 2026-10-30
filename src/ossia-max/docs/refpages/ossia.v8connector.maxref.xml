@@ -65,12 +65,12 @@
 
 	<!--ARGUMENTS-->
 	<objarglist>
-		<objarg name="Name" optional="0" type="symbol">
+		<objarg name="Name" optional="1" type="symbol">
 			<digest>
 				Name of the node in the ossia namespace
 			</digest>
 			<description>
-				<o>ossia.v8connector</o> requires a node name. The declared parameters are created under this node, which is created by the first <m>add</m> and stays, even without parameters, until the object is deleted, like an <o>ossia.model</o>. An instance that only binds creates no node, like an <o>ossia.remote</o>. When several nodes have the same name, instances (name.1, name.2, etc...) are created, as for <o>ossia.model</o>.
+				With a name, the declared parameters are created under a node of that name, which is created by the first <m>add</m> and stays, even without parameters, until the object is deleted, like an <o>ossia.model</o>. An instance that only binds creates no node, like an <o>ossia.remote</o>. When several nodes have the same name, instances (name.1, name.2, etc...) are created, as for <o>ossia.model</o>. Without a name, the parameters are created directly under the node of the enclosing <o>ossia.model</o>, or the root of the enclosing <o>ossia.device</o> or <o>ossia.client</o>, or the root of the global device, next to the <o>ossia.parameter</o> objects: an address already taken, by another instance or by an <o>ossia.parameter</o>, is refused (refused &lt;address&gt; already exists) and never renamed, and the instance removes only its own parameters. <m>bind</m> addresses are relative to the enclosing model or device in both cases.
 			</description>
 		</objarg>
 	</objarglist>
