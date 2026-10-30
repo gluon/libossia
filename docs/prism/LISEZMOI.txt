@@ -6,6 +6,10 @@ CONTENU
 - Tous les objets ossia.* du paquet ossia officiel 2.1.0.
 - ossia.v8connector : les paramètres déclarés par un script v8 ou v8ui
   rejoignent l'arbre ossia du patch, à côté des ossia.parameter.
+- Corrections d'ossia aussi : un clic sur connect d'un ossia.client
+  connecté par URL ne fait plus planter Max (le poll et connect ne
+  tournent plus en même temps) ; supprimer [ossia] arrête les serveurs
+  qu'il a exposés et libère leurs ports.
 - Modifications d'ossia : le serveur OSCQuery écrit une seule clé
   EXTENDED_TYPE par paramètre ; un ossia.client connecté par nom
   applique les changements d'arbre du serveur (PATH_ADDED, PATH_REMOVED),
