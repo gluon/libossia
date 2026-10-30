@@ -32,6 +32,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -256,6 +257,22 @@ private:
   std::vector<leaf> m_leaves;
   std::vector<binding> m_bindings;
   std::vector<ossia::net::node_base*> m_parents;
+
+  // Index of each address in m_leaves and m_bindings: a script sets
+  // thousands of addresses per tick.
+  struct address_hash
+  {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view s) const noexcept
+    {
+      return std::hash<std::string_view>{}(s);
+    }
+  };
+  using address_index = std::unordered_map<std::string, std::size_t, address_hash, std::equal_to<>>;
+  address_index m_leaf_index;
+  address_index m_binding_index;
+  void reindex_leaves();
+  void reindex_bindings();
   std::vector<ossia::net::device_base*> m_parent_devices; // device of each parent
   std::vector<ossia::net::device_base*> m_devices;
   std::function<void(const std::string&, std::size_t)> m_binding_changed;

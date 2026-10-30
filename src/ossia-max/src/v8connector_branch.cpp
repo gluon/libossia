@@ -616,6 +616,7 @@ void branch::attach(ossia::net::node_base& node)
     {
       refuse(m_leaves[i].spec.address, err);
       m_leaves.erase(m_leaves.begin() + i);
+      reindex_leaves();
       m_attach_refusal = std::move(err);
     }
     else
@@ -644,10 +645,22 @@ void branch::detach()
 
 branch::leaf* branch::find(std::string_view address)
 {
-  for(auto& l : m_leaves)
-    if(l.spec.address == address)
-      return &l;
-  return nullptr;
+  auto it = m_leaf_index.find(address);
+  return it == m_leaf_index.end() ? nullptr : &m_leaves[it->second];
+}
+
+void branch::reindex_leaves()
+{
+  m_leaf_index.clear();
+  for(std::size_t i = 0; i < m_leaves.size(); i++)
+    m_leaf_index.emplace(m_leaves[i].spec.address, i);
+}
+
+void branch::reindex_bindings()
+{
+  m_binding_index.clear();
+  for(std::size_t i = 0; i < m_bindings.size(); i++)
+    m_binding_index.emplace(m_bindings[i].address, i);
 }
 
 std::string branch::add(const leaf_spec& spec)
@@ -671,11 +684,13 @@ std::string branch::add(const leaf_spec& spec)
                         : std::string("already exists"));
   }
   m_leaves.push_back(leaf{spec, nullptr, nullptr});
+  m_leaf_index.emplace(spec.address, m_leaves.size() - 1);
   if(m_node)
   {
     if(auto err = create(m_leaves.back()); !err.empty())
     {
       m_leaves.pop_back();
+      m_leaf_index.erase(spec.address);
       return refused(err);
     }
   }
@@ -899,6 +914,7 @@ bool branch::remove(std::string_view address)
   }
   destroy(*l);
   m_leaves.erase(m_leaves.begin() + (l - m_leaves.data()));
+  reindex_leaves();
   return true;
 }
 
@@ -907,6 +923,7 @@ void branch::clear()
   for(auto& l : m_leaves)
     destroy(l);
   m_leaves.clear();
+  m_leaf_index.clear();
 }
 
 std::string branch::set(std::string_view address, const scalars& values)
@@ -1164,11 +1181,8 @@ std::string relative_to(const ossia::net::node_base& root, const ossia::net::nod
 
 branch::binding* branch::find_binding(std::string_view address)
 {
-  const auto a = trim_address(address);
-  for(auto& b : m_bindings)
-    if(b.address == a)
-      return &b;
-  return nullptr;
+  auto it = m_binding_index.find(trim_address(address));
+  return it == m_binding_index.end() ? nullptr : &m_bindings[it->second];
 }
 
 std::string branch::bind(std::string_view address)
@@ -1187,6 +1201,7 @@ std::string branch::bind(std::string_view address)
     return a + ": already declared by add";
   }
   m_bindings.push_back(binding{a, {}});
+  m_binding_index.emplace(a, m_bindings.size() - 1);
   resolve(m_bindings.back());
   if(m_binding_changed)
     m_binding_changed(a, m_bindings.back().targets.size());
@@ -1203,6 +1218,7 @@ bool branch::unbind(std::string_view address)
   }
   release(*b);
   m_bindings.erase(m_bindings.begin() + (b - m_bindings.data()));
+  reindex_bindings();
   return true;
 }
 
