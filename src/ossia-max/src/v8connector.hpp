@@ -74,6 +74,8 @@ public:
   void on_device_created(device_base* dev);
   void on_device_removing(device_base* dev);
   void update_resolution_context();
+  ossia::net::node_base* shared_node();
+  bool has_name() const { return m_name && m_name != _sym_nothing; }
 
   static void* create(t_symbol*, long argc, t_atom* argv);
   static void destroy(v8connector* x);
