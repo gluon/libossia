@@ -12,7 +12,9 @@ CONTENU
   comme un client connecté par URL ; un ossia.client connecté par URL
   signale la perte du serveur (connect 0 ...), se reconnecte seul quand il
   revient (connect 1 ..., arbre relu, abonnements renvoyés), ce que
-  @reconnect 0 désactive ; un client OSCQuery envoie des bundles OSC
+  @reconnect 0 désactive ; la connexion par URL se fait sur un thread à
+  part, sans figer Max, y compris vers un ossia.device du même Max ; un
+  client OSCQuery envoie des bundles OSC
   (push_bundle), et un device exposé les transmet à son serveur. Une
   couleur reste décrite par le
   tableau de ses composantes (color.rgb.r, color.rgb.g, ...), sans UNIT ;
@@ -39,7 +41,7 @@ PRISE EN MAIN
 - Aide : clic droit sur ossia.v8connector, Open Help (onglets Basic,
   Script, Limits).
 - Menu Extras de Max : « ossia-prism examples » ouvre chaque exemple
-  du paquet en un clic.
+  d'ossia.v8connector (demo, grid, load) en un clic.
 - Démo : examples/ossia.v8connector.demo.maxpat dans le paquet ; charge :
   examples/ossia.v8connector.load.maxpat (3000 paramètres par frame,
   @bundle 1 ou 0).
