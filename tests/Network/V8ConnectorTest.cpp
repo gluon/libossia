@@ -1174,3 +1174,103 @@ TEST_CASE("v8connector_without_name_device_root", "v8connector_without_name_devi
   a.set_resolution_context({&other.get_root_node()}, {&other});
   REQUIRE(a.size() == 1);
 }
+
+// A server removes a parameter and creates it again at the same address, as
+// a server that restarts publishes its tree again. The client receives
+// PATH_REMOVED then PATH_ADDED; a bind to that address follows the new
+// parameter, values included.
+TEST_CASE("v8connector_parameter_recreated", "v8connector_parameter_recreated")
+{
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "td_bench"};
+  auto make_leaf = [&] {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/p0");
+    auto* p = ossia::try_setup_parameter("float", n);
+    p->set_domain(ossia::make_domain(0.f, 1.f));
+    p->push_value(0.f);
+    return p;
+  };
+  auto* leaf = make_leaf();
+  const uint16_t osc = free_port(false);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // A client connected by URL, polled as ossia.client polls it.
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+          "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+  auto& croot = client->get_root_node();
+
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  REQUIRE(b.bind("td_bench:/bench/p0").empty());
+  REQUIRE(b.bound_count("td_bench:/bench/p0") == 1);
+
+  auto poll_until = [&](auto done) {
+    for(int i = 0; i < 400 && !done(); i++)
+    {
+      mirror->run_commands();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return done();
+  };
+  auto received = [&](ossia::net::parameter_base& p, const ossia::value& v) {
+    for(int i = 0; i < 400; i++)
+    {
+      if(i % 20 == 0)
+        p.push_value(v);
+      mirror->run_commands();
+      for(auto& in : b.drain())
+        if(in.address == "td_bench:/bench/p0" && in.value == v)
+          return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+  };
+
+  bool ok = received(*leaf, ossia::value(0.25f));
+  INFO("before: " << ok);
+
+  // The client reads the whole tree again (update): every parameter is
+  // removed, then created again at the same address.
+  bool reloaded = false, reload_bound = false, after_reload = false;
+  if(ok)
+  {
+    reloaded = client->get_protocol().update(croot);
+    reload_bound = poll_until([&] { return b.bound_count("td_bench:/bench/p0") == 1; });
+    after_reload = received(*leaf, ossia::value(0.5f));
+  }
+
+  // The server removes the parameter, then creates it again.
+  bool removed = false, back = false, bound_again = false, after = false;
+  if(ok)
+  {
+    server.get_root_node().find_child("bench")->remove_child("p0");
+    removed = poll_until([&] { return ossia::net::find_node(croot, "/bench/p0") == nullptr; });
+    leaf = make_leaf();
+    back = poll_until([&] { return ossia::net::find_node(croot, "/bench/p0") != nullptr; });
+    bound_again = poll_until([&] { return b.bound_count("td_bench:/bench/p0") == 1; });
+    after = received(*leaf, ossia::value(0.75f));
+  }
+
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+  REQUIRE(ok);
+  REQUIRE(reloaded);
+  REQUIRE(reload_bound);
+  REQUIRE(after_reload);
+  REQUIRE(removed);
+  REQUIRE(back);
+  REQUIRE(bound_again);
+  REQUIRE(after);
+}
