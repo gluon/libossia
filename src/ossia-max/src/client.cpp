@@ -283,6 +283,15 @@ void client::connect_mess_cb(client* x, t_symbol*, int argc, t_atom* argv)
 
 void client::connect(client* x)
 {
+  // The poll and the end of a connection run on the scheduler thread: they
+  // never touch the device while connect replaces it.
+  critical_enter(0);
+  connect_impl(x);
+  critical_exit(0);
+}
+
+void client::connect_impl(client* x)
+{
   int argc = x->m_argc;
   t_atom* argv = x->m_argv;
 
@@ -484,6 +493,13 @@ void client::finish_connect(client* x, int count, t_atom* status, bool read_tree
 // Main thread: is the connection by URL done?
 void client::attempt_check(client* x)
 {
+  critical_enter(0);
+  attempt_check_impl(x);
+  critical_exit(0);
+}
+
+void client::attempt_check_impl(client* x)
+{
   std::erase_if(x->m_abandoned, [](const auto& a) { return a->done(); });
   if(!x->m_attempt || !x->m_attempt->done())
   {
@@ -573,6 +589,13 @@ void client::update(client* x)
 
 void client::disconnect(client* x)
 {
+  critical_enter(0);
+  disconnect_impl(x);
+  critical_exit(0);
+}
+
+void client::disconnect_impl(client* x)
+{
   // An explicit disconnect, or a new connection: no more attempts. Ignored
   // by the link while it is the one connecting.
   if(x->m_link)
@@ -605,6 +628,13 @@ void client::disconnect(client* x)
 }
 
 void client::poll_message(client* x)
+{
+  critical_enter(0);
+  poll_message_impl(x);
+  critical_exit(0);
+}
+
+void client::poll_message_impl(client* x)
 {
   // Connection by URL: the link polls, and reconnects when the server goes away.
   if(x->m_link && x->m_link->watching())

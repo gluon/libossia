@@ -14,6 +14,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -104,6 +105,10 @@ public:
   oscquery_link(const oscquery_link&) = delete;
   oscquery_link& operator=(const oscquery_link&) = delete;
 
+  // tick runs on Max's scheduler thread, watch and unwatch on the main thread
+  // (connect, disconnect): each waits for a tick in progress, so that the
+  // device can be destroyed once unwatch returns.
+  //
   // Follow the device just connected to ws_url; poll_ms is the period of the
   // poll while the WebSocket is up. Not a mirror: nothing is followed.
   void watch(ossia::net::device_base& dev, std::string ws_url, int poll_ms);
@@ -132,6 +137,8 @@ private:
   };
 
   host m_host;
+  // Recursive: a tick that reconnects calls connect, which calls unwatch.
+  std::recursive_mutex m_mutex;
   ossia::oscquery::oscquery_mirror_protocol* m_mirror{};
   std::string m_url;
   int m_poll_ms{10};

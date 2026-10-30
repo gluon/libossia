@@ -110,12 +110,14 @@ oscquery_link::oscquery_link(host h)
 
 oscquery_link::~oscquery_link()
 {
+  std::lock_guard lock{m_mutex};
   m_attempting = false;
   unwatch();
 }
 
 void oscquery_link::watch(ossia::net::device_base& dev, std::string ws_url, int poll_ms)
 {
+  std::lock_guard lock{m_mutex};
   m_mirror = polled_oscquery_mirror(dev);
   m_url = std::move(ws_url);
   m_poll_ms = poll_ms > 0 ? poll_ms : 1;
@@ -133,6 +135,8 @@ void oscquery_link::watch(ossia::net::device_base& dev, std::string ws_url, int 
 
 void oscquery_link::unwatch()
 {
+  // Waits for a tick running on another thread.
+  std::lock_guard lock{m_mutex};
   if(m_attempting)
     return;
   m_mirror = nullptr;
@@ -143,6 +147,7 @@ void oscquery_link::unwatch()
 
 void oscquery_link::tick()
 {
+  std::lock_guard lock{m_mutex};
   switch(m_state)
   {
     case state::idle:
