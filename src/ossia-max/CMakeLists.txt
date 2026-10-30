@@ -57,6 +57,7 @@ set(PROJECT_SRCS
     src/attribute.hpp
     src/client.hpp
     src/client.cpp
+    src/client_mirror.hpp
     src/device.hpp
     src/device.cpp
     src/device_base.hpp

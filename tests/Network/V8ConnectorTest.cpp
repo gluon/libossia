@@ -29,6 +29,7 @@
 #include "include_catch.hpp"
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 
+#include <client_mirror.hpp>
 #include <v8connector_branch.hpp>
 
 #include <arpa/inet.h>
@@ -941,4 +942,78 @@ TEST_CASE("v8connector_device_return", "v8connector_device_return")
   client.reset();
   ossia::net::stop_network_context(*ctx);
   net.join();
+}
+
+// An ossia.client connected by name gets its device from the zeroconf
+// listener, which builds an OSCQuery mirror and reads the tree once. The tree
+// changes the server sends afterwards wait in the mirror's command queue until
+// the client polls it.
+TEST_CASE("v8connector_client_by_name", "v8connector_client_by_name")
+{
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "td_bench"};
+  {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/first");
+    ossia::try_setup_parameter("float", n)->push_value(0.f);
+  }
+  const uint16_t osc = free_port(false);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // As ZeroconfOscqueryListener::addInstance builds it.
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+          "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  auto& croot = client->get_root_node();
+  REQUIRE(ossia::net::find_node(croot, "/bench/first") != nullptr);
+
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  REQUIRE(b.bind("td_bench:/bench/late").empty());
+  REQUIRE(b.bound_count("td_bench:/bench/late") == 0);
+
+  // Without polling, a parameter added on the server never shows up.
+  {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/late");
+    ossia::try_setup_parameter("float", n)->push_value(0.5f);
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  REQUIRE(ossia::net::find_node(croot, "/bench/late") == nullptr);
+
+  // The client polls the mirror, as it does for a connection by URL.
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+  auto poll_until = [&](auto done) {
+    for(int i = 0; i < 400 && mirror && !done(); i++)
+    {
+      mirror->run_commands();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return done();
+  };
+
+  bool ok = mirror != nullptr;
+  ok = ok && poll_until([&] { return ossia::net::find_node(croot, "/bench/late") != nullptr; });
+  // The bind made before the parameter existed resolves when it appears.
+  ok = ok && b.bound_count("td_bench:/bench/late") == 1;
+
+  // A path removed on the server is removed on the client.
+  if(ok)
+  {
+    server.get_root_node().find_child("bench")->remove_child("late");
+    ok = poll_until([&] { return ossia::net::find_node(croot, "/bench/late") == nullptr; });
+    ok = ok && b.bound_count("td_bench:/bench/late") == 0;
+  }
+
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+  REQUIRE(ok);
 }
