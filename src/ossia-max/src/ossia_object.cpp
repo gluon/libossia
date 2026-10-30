@@ -69,6 +69,11 @@ void ossia_object::destroy(ossia_object* x)
 {
   ossia_max::instance().devices.remove_all(x);
 
+  // The global device stays: the servers this object exposed are stopped and
+  // their ports freed, while their network context still exists.
+  stop_exposing(*x->m_device, x->m_exposed);
+  x->m_exposed.clear();
+
   if(x->network_poll_clock)
   {
     clock_unset(x->network_poll_clock);

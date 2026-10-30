@@ -274,7 +274,17 @@ void device::register_children(device* xx)
   critical_exit(0);
 }
 
-void device::expose(device* x, t_symbol*, long argc, t_atom* argv)
+void device::expose(device* x, t_symbol* s, long argc, t_atom* argv)
+{
+  // What this object exposes, so that [ossia] can stop it when deleted.
+  const auto before = exposed_protocols(*x->m_device);
+  expose_impl(x, s, argc, argv);
+  for(auto* p : exposed_protocols(*x->m_device))
+    if(std::find(before.begin(), before.end(), p) == before.end())
+      x->m_exposed.push_back(p);
+}
+
+void device::expose_impl(device* x, t_symbol*, long argc, t_atom* argv)
 {
   if(argc && argv->a_type == A_SYM)
   {

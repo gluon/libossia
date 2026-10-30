@@ -2745,3 +2745,65 @@ TEST_CASE("v8connector_binds_follow_a_burst_of_leaves", "v8connector_binds_follo
   REQUIRE(longest < 1000);
   REQUIRE(http_errors == 0);
 }
+
+// [ossia] exposes the global device, which outlives it: deleting the object
+// stops the servers it exposed and frees their ports, so that another
+// [ossia] can expose on the same ports in the same Max.
+TEST_CASE("ossia_object_delete_frees_its_ports", "ossia_object_delete_frees_its_ports")
+{
+  ossia::net::generic_device global{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(global.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(global.get_protocol());
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  const std::string url = "ws://127.0.0.1:" + std::to_string(ws);
+
+  // what [ossia] does: its context, device::expose and its record
+  auto expose = [&](ossia::net::network_context_ptr ctx, std::vector<const ossia::net::protocol_base*>& exposed) {
+    const auto before = ossia::max_binding::exposed_protocols(global);
+    multiplex.expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+    for(auto* p : ossia::max_binding::exposed_protocols(global))
+      if(std::find(before.begin(), before.end(), p) == before.end())
+        exposed.push_back(p);
+  };
+  auto answers = [&](ossia::net::network_context_ptr ctx) {
+    ossia::max_binding::oscquery_connect_attempt attempt{url, "max"};
+    for(int i = 0; i < 10000 && !attempt.done(); i++)
+    {
+      ossia::max_binding::poll_device_network_context(*ctx);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto dev = attempt.done() ? attempt.take() : nullptr;
+    return dev && ossia::net::find_node(dev->get_root_node(), "/foo/bar") != nullptr;
+  };
+
+  // a first [ossia] exposes
+  auto ctx1 = ossia::max_binding::make_device_network_context();
+  std::vector<const ossia::net::protocol_base*> exposed1;
+  expose(ctx1, exposed1);
+  REQUIRE(exposed1.size() == 1);
+  INFO("step: first server answers");
+  REQUIRE(answers(ctx1));
+
+  // it is deleted (ossia_object::destroy)
+  ossia::max_binding::stop_exposing(global, exposed1);
+  ctx1.reset();
+  REQUIRE(ossia::max_binding::exposed_protocols(global).empty());
+
+  // another [ossia] exposes on the same ports
+  auto ctx2 = ossia::max_binding::make_device_network_context();
+  std::vector<const ossia::net::protocol_base*> exposed2;
+  bool exposed_again = true;
+  try
+  {
+    expose(ctx2, exposed2);
+  }
+  catch(const std::exception& e)
+  {
+    exposed_again = false;
+    UNSCOPED_INFO("second expose: " << e.what());
+  }
+  INFO("step: same ports exposed again");
+  REQUIRE(exposed_again);
+  REQUIRE(answers(ctx2));
+  ossia::max_binding::stop_exposing(global, exposed2);
+}

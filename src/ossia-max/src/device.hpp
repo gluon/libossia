@@ -19,12 +19,16 @@ class device : public device_base
 public:
   ossia::net::network_context_ptr network_context;
   void* network_poll_clock{};
+  // The protocols this object exposed (expose), stopped by [ossia] when it
+  // is deleted: the global device stays.
+  std::vector<const ossia::net::protocol_base*> m_exposed;
   using is_device = std::true_type;
 
   static void register_children(device*);
   static void loadbang(device*);
 
   static void expose(device* x, t_symbol*, long argc, t_atom* argv);
+  static void expose_impl(device* x, t_symbol*, long argc, t_atom* argv);
   static void name(device* x, t_symbol*, long argc, t_atom* argv);
   static void get_protocols(device* x);
   static void get_oscq_clients(device* x);
