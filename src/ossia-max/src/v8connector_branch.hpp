@@ -161,7 +161,9 @@ public:
   void set_resolution_context(
       std::vector<ossia::net::node_base*> parents,
       std::vector<ossia::net::device_base*> devices);
-  // Forget a device before it is destroyed.
+  // Forget a device before it is destroyed. A device destroyed without this
+  // call is forgotten anyway: the branch listens to the destruction of the
+  // root of every device given by set_resolution_context.
   void drop_device(ossia::net::device_base* dev);
   // Called when the number of parameters followed by a bound address changes.
   void set_binding_changed_callback(
@@ -219,12 +221,16 @@ private:
       const std::string& address, ossia::net::parameter_base* param, const ossia::value& v);
   void queue_current_value(const std::string& address, ossia::net::parameter_base* param);
   void on_node_removing(const ossia::net::node_base& n);
+  void watch_device(ossia::net::device_base& dev);
+  void unwatch_device(ossia::net::device_base& dev, bool root_alive);
+  void forget_device(ossia::net::device_base* dev, bool root_alive);
   void on_parameter_created(const ossia::net::parameter_base& p);
 
   ossia::net::node_base* m_node{};
   std::vector<leaf> m_leaves;
   std::vector<binding> m_bindings;
   std::vector<ossia::net::node_base*> m_parents;
+  std::vector<ossia::net::device_base*> m_parent_devices; // device of each parent
   std::vector<ossia::net::device_base*> m_devices;
   std::function<void(const std::string&, std::size_t)> m_binding_changed;
 
