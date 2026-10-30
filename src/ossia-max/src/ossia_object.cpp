@@ -1,3 +1,4 @@
+#include "device_network.hpp"
 #include "ossia_object.hpp"
 
 #include "ossia-max.hpp"
@@ -52,6 +53,12 @@ void* ossia_object::create(t_symbol* name, long argc, t_atom* argv)
 
   x->connect_slots();
 
+  // expose builds its servers on this context, as for ossia.device; without
+  // it, expose oscquery dereferenced a null context.
+  x->network_context = make_device_network_context();
+  x->network_poll_clock = clock_new(x, (method)device::asio_timer);
+  clock_delay(x->network_poll_clock, 10);
+
   // inhibit loadbang for ossia object
   x->m_registered = true;
 
@@ -61,6 +68,14 @@ void* ossia_object::create(t_symbol* name, long argc, t_atom* argv)
 void ossia_object::destroy(ossia_object* x)
 {
   ossia_max::instance().devices.remove_all(x);
+
+  if(x->network_poll_clock)
+  {
+    clock_unset(x->network_poll_clock);
+    clock_free((t_object*)x->network_poll_clock);
+    x->network_poll_clock = nullptr;
+  }
+  x->network_context.reset();
 
   x->disconnect_slots();
 

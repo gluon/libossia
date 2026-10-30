@@ -62,6 +62,7 @@ set(PROJECT_SRCS
     src/device.hpp
     src/device.cpp
     src/device_base.hpp
+    src/device_network.hpp
     src/device_base.cpp
     src/equals.cpp
     src/equals.hpp

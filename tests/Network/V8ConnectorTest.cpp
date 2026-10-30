@@ -30,6 +30,7 @@
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 
 #include <client_mirror.hpp>
+#include <device_network.hpp>
 #include <v8connector_branch.hpp>
 
 #include <arpa/inet.h>
@@ -2343,4 +2344,38 @@ TEST_CASE("v8connector_client_connects_to_same_process_server", "v8connector_cli
   // the main thread was never held
   REQUIRE(start_ms < 50);
   REQUIRE(longest < 50);
+}
+
+// expose oscquery sent to the global [ossia] object: the object now creates
+// and polls a network context as ossia.device does; before, the server was
+// built on a null context and Max crashed in websocketpp's init_asio.
+TEST_CASE("ossia_object_expose_oscquery", "ossia_object_expose_oscquery")
+{
+  // the global device of Max, as ossia_max creates it
+  ossia::net::generic_device global{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(global.get_root_node(), "/foo/bar"));
+
+  // ossia_object::create, then device::expose
+  auto ctx = ossia::max_binding::make_device_network_context();
+  const uint16_t ws = free_port(true);
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(global.get_protocol());
+  multiplex.expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), ws, false));
+
+  // the server answers: a client by URL reads the tree while device::asio_timer polls
+  ossia::max_binding::oscquery_connect_attempt attempt{"ws://127.0.0.1:" + std::to_string(ws), "max"};
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while(!attempt.done() && std::chrono::steady_clock::now() < deadline)
+  {
+    ossia::max_binding::poll_device_network_context(*ctx);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  INFO("step: client attempt done within 10 s");
+  REQUIRE(attempt.done());
+  auto dev = attempt.take();
+  INFO("error: " << attempt.error());
+  REQUIRE(dev != nullptr);
+  REQUIRE(ossia::net::find_node(dev->get_root_node(), "/foo/bar") != nullptr);
+  dev.reset();
+  multiplex.clear();
 }

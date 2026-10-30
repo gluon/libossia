@@ -1,5 +1,6 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
+#include "device_network.hpp"
 #include "device.hpp"
 
 #include "model.hpp"
@@ -103,9 +104,7 @@ void device::class_setup(t_class* c)
 
 void device::asio_timer(device* x)
 {
-  // Restarts the context and logs what a handler throws: an exception out of
-  // this poll, on Max's scheduler, would end Max
-  x->network_context->poll();
+  poll_device_network_context(*x->network_context);
   clock_delay(x->network_poll_clock, 10);
 }
 
@@ -150,7 +149,7 @@ void* device::create(t_symbol*, long argc, t_atom* argv)
     // process attr args, if any
     attr_args_process(x, argc - attrstart, argv + attrstart);
 
-    x->network_context = std::make_shared<ossia::net::network_context>();
+    x->network_context = make_device_network_context();
     x->network_poll_clock = clock_new(x, (method)asio_timer);
     clock_delay(x->network_poll_clock, 10);
 
