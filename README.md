@@ -66,6 +66,8 @@ function anything() { grid.dispatch(messagename, arrayfromargs(arguments)); }
 
 When the object is deleted and recreated (undo, paste), it sends `ready` and the helper replays the cells still declared, not the removed ones. `tests/Network/V8ConnectorHelperTest.js` runs this example outside Max: `node tests/Network/V8ConnectorHelperTest.js`.
 
+The package ships this recipe as a patcher, `examples/ossia.v8connector.grid.maxpat`: an 8 x 8 grid in a `v8ui` (`ossia.v8connector.grid.js`, connector `grid`), an `ossia.device` to expose on ports 7101 (OSC) and 7102 (OSCQuery), and a `jweb` (`ossia.v8connector.grid.html`) that shows the served tree live: it reads the tree over HTTP, then applies the `PATH_ADDED` and `PATH_REMOVED` messages of the server's WebSocket. Click `expose` once.
+
 **Who owns a parameter.** An instance removes only what it declared. `remove cell/3/4` sent to another instance is refused there, with `refused cell/3/4 unknown address 'cell/3/4'` on its left outlet, and the parameter stays. Each instance replays its own declarations on every `ready`, so a removal made by another instance would not last. To act on a parameter declared elsewhere, `bind` it and `set` it; to remove it, remove it from the script that declared it.
 
 **The name argument.** The argument is optional and chooses where the parameters go.
@@ -129,7 +131,7 @@ cmake -S . -B build-ossia-max -GNinja -DCMAKE_BUILD_TYPE=Release -DOSSIA_MAX_ONL
 cmake --build build-ossia-max --target install
 ```
 
-The package lands in `ossia-max-package/ossia-prism` under the build directory, or where `OSSIA_MAX_INSTALL_FOLDER` points. The headless test of the object's core is `tests/Network/V8ConnectorTest.cpp`, built with `OSSIA_TESTING`; the test of the helper is `tests/Network/V8ConnectorHelperTest.js`, run with Node.
+The package lands in `ossia-max-package/ossia-prism` under the build directory, or where `OSSIA_MAX_INSTALL_FOLDER` points. The headless test of the object's core is `tests/Network/V8ConnectorTest.cpp`, built with `OSSIA_TESTING`; the tests of the helper and of the grid example's script are `tests/Network/V8ConnectorHelperTest.js` and `V8ConnectorGridExampleTest.js`, run with Node.
 
 The text below is the upstream libossia README, unchanged.
 

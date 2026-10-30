@@ -47,6 +47,9 @@ RECETTES
     else { cells.add(a); grid.add(a, { type: "float", min: 0, max: 1, default: 0 }); }
   Si l'objet est supprimé puis recréé, il envoie ready et le helper rejoue
   les cases encore déclarées, pas celles retirées.
+  Exemple complet dans le paquet : examples/ossia.v8connector.grid.maxpat,
+  une grille 8 x 8, un ossia.device à exposer sur les ports 7101 et 7102
+  (un seul clic sur expose) et un jweb qui montre l'arbre servi en direct.
 - Qui possède un paramètre : une instance ne retire que ce qu'elle a
   déclaré. remove cell/3/4 envoyé à une autre instance y est refusé
   (refused cell/3/4 unknown address 'cell/3/4') et le paramètre reste :
