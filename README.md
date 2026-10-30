@@ -68,7 +68,12 @@ When the object is deleted and recreated (undo, paste), it sends `ready` and the
 
 **Who owns a parameter.** An instance removes only what it declared. `remove cell/3/4` sent to another instance is refused there, with `refused cell/3/4 unknown address 'cell/3/4'` on its left outlet, and the parameter stays. Each instance replays its own declarations on every `ready`, so a removal made by another instance would not last. To act on a parameter declared elsewhere, `bind` it and `set` it; to remove it, remove it from the script that declared it.
 
-**The name argument.** `[ossia.v8connector synth]`: the argument is required. It names the node that holds the instance's parameters, like the name of an `ossia.model`: under the enclosing `ossia.model` or `ossia.device` (or the global device), `add gain` creates `synth/gain`. It keeps the parameters of each instance apart: a second instance named `synth` in the same place becomes `synth.1`. Without an argument the object prints `ossia.v8connector needs a branch name as first argument` in the Max console. `bind` does not go through this node: its address is relative to the enclosing model or device, as for `ossia.remote`, so any instance follows the gain above with `bind synth/gain`.
+**The name argument.** The argument is optional and chooses where the parameters go.
+
+- `[ossia.v8connector synth]`: the argument names a node that holds the instance's parameters, like the name of an `ossia.model`. Under the enclosing `ossia.model` or `ossia.device` (or the global device), `add gain` creates `synth/gain`. It keeps the parameters of each instance apart: a second instance named `synth` in the same place becomes `synth.1`.
+- `[ossia.v8connector]`: no node of its own. `add gain` creates `gain` directly under the node of the enclosing `ossia.model`, or the root of the enclosing `ossia.device` or `ossia.client`, or the root of the global device, next to the `ossia.parameter` objects. An address already taken, by another instance or by an `ossia.parameter`, is refused with `refused gain already exists` and never renamed (an `ossia.parameter` in the same case creates `gain.1`). The instance removes only its own parameters, and only the nodes they created.
+
+`bind` does not go through the instance's node in either mode: its address is relative to the enclosing model or device, as for `ossia.remote`, so any instance follows `synth/gain` with `bind synth/gain`.
 
 ### Demo and help
 
@@ -86,20 +91,24 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 ### Differences from ossia 2.1.0
 
-State on 2026-10-29. "Fixed" means fixed in ossia-prism, not in ossia.
+State on 2026-10-30. "Fixed" means fixed in ossia-prism, not in ossia.
 
 Changed in ossia-prism:
 
 - **One `EXTENDED_TYPE` per parameter** (OSCQuery server, `src/ossia/network/oscquery/detail/json_writer_detail.cpp`, every object that publishes a parameter). libossia 2.1.0 describes a color by the `EXTENDED_TYPE` array of its components (`color.rgb.r`, `color.rgb.g`, ...), then writes the node's own extended type (`vecf`) as a second `EXTENDED_TYPE` key in the same object; a client that keeps the last duplicate key sees `vecf` and loses the color. In ossia-prism the node's extended type is not written when the parameter has a unit. Colors are still described by that array, not by `UNIT`; a parameter without a unit keeps its own extended type.
+- **`ossia.client` connected by name applies the tree changes** (`src/ossia-max/src/client.cpp`, `client_mirror.hpp`). In ossia 2.1.0, `connect <name>` (zeroconf) gets the tree once; the changes the server sends afterwards (`PATH_ADDED`, `PATH_REMOVED`, `ATTRIBUTES_CHANGED`) are only applied for a client connected by URL (`connect oscquery ws://host:port`), so a parameter added on the server never appears. ossia-prism polls the mirror in both cases, and removes a path the server removes, as for a connection by URL.
 - **`@clip none`**, the OSCQuery name of the free mode, is accepted by `ossia.v8connector` only; `ossia.parameter` still expects `free`.
+- **An address already taken** is refused by `ossia.v8connector` without a name (`refused <address> already exists`); `ossia.parameter`, in the same case, creates a sibling with a free name (`gain.1`).
 - Added: the `ossia.v8connector` object, the package name `ossia-prism`, the version `2.1.0+prism.N`.
+
+Fixed in `ossia.v8connector`:
+
+- **Crash when a followed device comes back** (`2.1.0+prism.4`). Max crashed twice in `ossia.v8connector`, in a patch whose `bind` addresses point to a remote device, while the object registered again. `ossia.client` clears its device before it announces its removal, so the object kept a pointer to a destroyed device and used it at the next registration; under AddressSanitizer the bench shows that use after free when a followed device is destroyed and a new one arrives under the same name. The object now notices the destruction of every device it knows by itself. The crash itself has not been reproduced in Max.
 
 Known defects, not fixed:
 
 - Sending `expose` on a port already in use, including a second `expose`, crashes Max (OSCQuery server of `ossia.device`). Use explicit, free ports, and `stop` before exposing again.
-- Max crashed twice in `ossia.v8connector` (in `branch::queue_current_value`, called when the object registers again), in a patch whose `bind` addresses point to a remote device: once 1.4 s after that device came back under the same name, once with no action on that device for 30 minutes. An earlier, identical return of the device did not crash. The cause is not established.
-- An `ossia.client` connected by name (`connect <name>`, zeroconf) gets the tree, but the tree changes sent afterwards by the server (`PATH_ADDED`, `ATTRIBUTES_CHANGED`) are not applied: a parameter added on the server does not appear. In the code, these commands are only run for a client connected by URL (`connect oscquery ws://host:port`).
-- The OSCQuery client sends one OSC message per value, never a bundle, even for values pushed together: 128 bound parameters changing at each frame give 128 WebSocket messages per frame. The server can send bundles.
+- The OSCQuery client sends one OSC message per value, never a bundle, even for values pushed together: 128 bound parameters changing at each frame give 128 WebSocket messages per frame. The server can send bundles; the client's `push_bundle` is not implemented in libossia 2.1.0 (`oscquery_mirror.cpp`), and the local protocol under the declared parameters sends a bundle one value at a time.
 - The server logs `remote_endpoint: Invalid argument` at each connection, with no effect seen on the served tree.
 - The access mode is not enforced by the server: a read-only parameter can be written over OSC.
 - The client cannot read some OSCQuery servers that are not ossia: it asks `?HOST_INFO=1` instead of `?HOST_INFO`, and does not read `chunked` HTTP replies.

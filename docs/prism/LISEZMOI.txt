@@ -1,4 +1,4 @@
-ossia-prism 2.1.0+prism.3
+ossia-prism 2.1.0+prism.4
 Paquet Max ossia (libossia 2.1.0) avec l'objet ossia.v8connector.
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
@@ -6,13 +6,15 @@ CONTENU
 - Tous les objets ossia.* du paquet ossia officiel 2.1.0.
 - ossia.v8connector : les paramètres déclarés par un script v8 ou v8ui
   rejoignent l'arbre ossia du patch, à côté des ossia.parameter.
-- Une seule modification de libossia : le serveur OSCQuery écrit une
-  seule clé EXTENDED_TYPE par paramètre. Une couleur reste décrite par le
+- Modifications d'ossia : le serveur OSCQuery écrit une seule clé
+  EXTENDED_TYPE par paramètre, et un ossia.client connecté par nom
+  applique les changements d'arbre du serveur (PATH_ADDED, PATH_REMOVED),
+  comme un client connecté par URL. Une couleur reste décrite par le
   tableau de ses composantes (color.rgb.r, color.rgb.g, ...), sans UNIT ;
   libossia 2.1.0 ajoutait une seconde clé EXTENDED_TYPE « vecf », qui
   masquait ce tableau pour un client gardant la dernière clé en double.
 - Plateformes : macOS universel (Apple Silicon et Intel) pour
-  2.1.0+prism.3 ; Windows x64 à venir, même version, ajouté plus tard à
+  2.1.0+prism.4 ; Windows x64 à venir, même version, ajouté plus tard à
   la Release.
 
 INSTALLATION
@@ -26,7 +28,7 @@ INSTALLATION
 4. macOS seulement, le paquet n'étant pas signé par Apple, dans le Terminal :
    xattr -dr com.apple.quarantine ~/Documents/Max\ 9/Packages/ossia-prism
 5. Relancer Max. À la création d'un ossia.v8connector, la console affiche
-   « ossia-prism 2.1.0+prism.3, PRISM CNRS ».
+   « ossia-prism 2.1.0+prism.4, PRISM CNRS ».
 
 PRISE EN MAIN
 - Aide : clic droit sur ossia.v8connector, Open Help (onglets Basic,
@@ -50,13 +52,16 @@ RECETTES
   (refused cell/3/4 unknown address 'cell/3/4') et le paramètre reste :
   son propriétaire rejoue ses déclarations à chaque ready. Pour agir sur
   un paramètre déclaré ailleurs : bind puis set.
-- L'argument est obligatoire : [ossia.v8connector synth] nomme le nœud
-  qui regroupe les paramètres de l'instance, sous le model ou le device
+- L'argument est facultatif. [ossia.v8connector synth] nomme le nœud qui
+  regroupe les paramètres de l'instance, sous le model ou le device
   englobant ; add gain crée synth/gain. Un second synth au même endroit
-  devient synth.1. Sans argument, la console affiche « ossia.v8connector
-  needs a branch name as first argument ». bind ne passe pas par ce nœud :
-  son adresse est relative au model ou au device englobant, comme pour
-  ossia.remote (bind synth/gain).
+  devient synth.1. [ossia.v8connector], sans argument, place add gain
+  directement sous le model ou le device englobant, à côté des
+  ossia.parameter. Une adresse déjà prise (autre instance, ossia.parameter)
+  est refusée, « refused gain already exists », jamais renommée ; un
+  ossia.parameter, lui, deviendrait gain.1. Dans les deux cas, bind ne
+  passe pas par l'instance : son adresse est relative au model ou au
+  device englobant, comme pour ossia.remote (bind synth/gain).
 
 MISE À JOUR
 - Ne pas mettre ossia à jour depuis le Package Manager : il réinstallerait
@@ -79,16 +84,6 @@ LIMITES CONNUES
 - Autres limites de l'objet : onglet Limits de l'aide.
 
 DÉFAUTS CONNUS
-- Max a planté deux fois dans ossia.v8connector (branch::queue_current_value,
-  appelé quand l'objet s'enregistre de nouveau), dans un patch dont les bind
-  visent un device distant : une fois 1,4 s après le retour de ce device sous
-  le même nom, une fois sans action sur ce device depuis 30 minutes. Un retour
-  identique, plus tôt, n'a pas planté. La cause n'est pas établie.
-- Un ossia.client connecté par nom (connect <nom>, zeroconf) reçoit l'arbre,
-  mais les changements envoyés ensuite par le serveur (PATH_ADDED,
-  ATTRIBUTES_CHANGED) ne sont pas appliqués : un paramètre ajouté sur le
-  serveur n'apparaît pas. Dans le code, ces commandes ne sont exécutées que
-  pour un client connecté par URL (connect oscquery ws://hôte:port).
 - Le client OSCQuery envoie un message OSC par valeur, jamais un bundle, même
   pour des valeurs poussées ensemble : 128 paramètres liés qui changent à
   chaque frame donnent 128 messages WebSocket par frame. Le serveur sait

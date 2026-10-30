@@ -884,12 +884,12 @@
                                     "fontname": "Lato Regular",
                                     "fontsize": 12.0,
                                     "id": "obj-9",
-                                    "linecount": 10,
+                                    "linecount": 12,
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 30.0, 520.0, 685.0, 150.0 ],
-                                    "text": "Who owns a parameter: an instance removes only what it declared. remove cell/3/4 sent to another instance is refused there (refused cell/3/4 unknown address 'cell/3/4') and the parameter stays: its owner replays its declarations on every ready, so a removal by another instance would not last. To act on a parameter declared elsewhere, bind it and set it.\n\nThe name argument is required: [ossia.v8connector synth] names the node that holds the parameters of the instance, under the enclosing ossia.model or ossia.device, and add gain creates synth/gain. A second synth in the same place becomes synth.1. Without it the object prints 'ossia.v8connector needs a branch name as first argument'. bind does not go through this node: its address is relative to the enclosing model or device, as for ossia.remote (bind synth/gain, from any instance)."
+                                    "patching_rect": [ 30.0, 520.0, 685.0, 180.0 ],
+                                    "text": "Who owns a parameter: an instance removes only what it declared. remove cell/3/4 sent to another instance is refused there (refused cell/3/4 unknown address 'cell/3/4') and the parameter stays: its owner replays its declarations on every ready, so a removal by another instance would not last. To act on a parameter declared elsewhere, bind it and set it.\n\nThe name argument is optional. [ossia.v8connector synth] names the node that holds the parameters of the instance, under the enclosing ossia.model or ossia.device: add gain creates synth/gain, and a second synth in the same place becomes synth.1. [ossia.v8connector] puts add gain directly under the enclosing model or device, next to the ossia.parameter objects; an address already taken is refused (refused gain already exists), never renamed, where an ossia.parameter would become gain.1. bind does not go through the instance: its address is relative to the enclosing model or device, as for ossia.remote."
                                 }
                             }
                         ],
