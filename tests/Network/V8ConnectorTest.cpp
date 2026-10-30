@@ -1017,3 +1017,160 @@ TEST_CASE("v8connector_client_by_name", "v8connector_client_by_name")
   net.join();
   REQUIRE(ok);
 }
+
+namespace
+{
+bool drained_refusal(branch& b, const std::string& address, const std::string& reason)
+{
+  for(auto& in : b.drain())
+    if(in.address == "refused")
+    {
+      const auto& l = in.value.get<std::vector<ossia::value>>();
+      if(l[0] == ossia::value(address) && l[1] == ossia::value(reason))
+        return true;
+    }
+  return false;
+}
+}
+
+// [ossia.v8connector] without a name: the leaves sit directly under the node
+// of the enclosing model, next to the ossia.parameter objects.
+TEST_CASE("v8connector_without_name", "v8connector_without_name")
+{
+  auto proto = std::make_unique<ossia::net::multiplex_protocol>();
+  ossia::net::generic_device dev{std::move(proto), "v8_shared"};
+  auto& root = dev.get_root_node();
+
+  // The node of an ossia.model, with an ossia.parameter and an empty child
+  // node made by another object.
+  auto* model = &ossia::net::create_node(root, "/synth");
+  {
+    auto* p = ossia::try_setup_parameter("float", ossia::net::create_node(*model, "manual"));
+    p->push_value(0.25f);
+    ossia::net::create_node(*model, "fx");
+  }
+
+  auto shared = [&](branch& b) {
+    b.set_owns_node(false);
+    b.set_node_factory([&]() -> ossia::net::node_base* { return model; });
+    b.set_resolution_context({&root}, {&dev});
+  };
+  branch a, b;
+  shared(a);
+  shared(b);
+  const auto gain = attrs({{"type", {S("float")}}, {"min", {-60}}, {"max", {6}}, {"default", {-12}}});
+
+  REQUIRE(a.declare("gain", gain).empty());
+  auto* a_gain = ossia::net::find_node(root, "/synth/gain");
+  REQUIRE(a_gain != nullptr);
+  REQUIRE(a_gain->get_parameter() != nullptr);
+  REQUIRE(a.node() == model);
+  a.drain();
+
+  SECTION("an address taken by another instance is refused, never renamed")
+  {
+    REQUIRE(!b.declare("gain", gain).empty());
+    REQUIRE(drained_refusal(b, "gain", "already exists"));
+    REQUIRE(b.size() == 0);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain.1") == nullptr);
+    REQUIRE(a_gain->get_parameter()->value() == ossia::value(-12.f));
+  }
+
+  SECTION("an address taken by an ossia.parameter is refused")
+  {
+    REQUIRE(!a.declare("manual", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    REQUIRE(drained_refusal(a, "manual", "already exists"));
+    REQUIRE(ossia::net::find_node(root, "/synth/manual")->get_parameter()->value()
+            == ossia::value(0.25f));
+  }
+
+  SECTION("for comparison, ossia.parameter renames: a second one becomes gain.1")
+  {
+    // object_base.cpp, case object_class::param: a node that already holds a
+    // parameter is replaced by create_node(parent, name), which picks a free name.
+    auto* n = &ossia::net::create_node(*a_gain->get_parent(), a_gain->get_name());
+    REQUIRE(n != a_gain);
+    REQUIRE(n->get_name() == "gain.1");
+  }
+
+  SECTION("remove takes only the leaves of its instance, and only the nodes it created")
+  {
+    REQUIRE(b.declare("env/attack", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    REQUIRE(b.declare("fx/mix", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    REQUIRE(ossia::net::find_node(root, "/synth/env/attack") != nullptr);
+    b.drain();
+
+    REQUIRE(!a.remove("env/attack"));
+    REQUIRE(drained_refusal(a, "env/attack", "unknown address 'env/attack'"));
+    REQUIRE(!b.remove("gain"));
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+
+    REQUIRE(b.remove("env/attack"));
+    REQUIRE(ossia::net::find_node(root, "/synth/env") == nullptr);
+    REQUIRE(b.remove("fx/mix"));
+    // fx existed before: it stays
+    REQUIRE(ossia::net::find_node(root, "/synth/fx") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/manual") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+  }
+
+  SECTION("the replay on ready does not conflict with itself")
+  {
+    REQUIRE(a.declare("gain", gain).empty());
+    for(auto& in : a.drain())
+      REQUIRE(in.address != "refused");
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == a_gain);
+    REQUIRE(ossia::net::find_node(root, "/synth/gain.1") == nullptr);
+  }
+
+  SECTION("detached, the instance leaves the node as it found it; an address taken meanwhile is refused on return")
+  {
+    REQUIRE(a.declare("env/attack", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    a.detach();
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") == nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/env") == nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/manual") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth/fx") != nullptr);
+    REQUIRE(ossia::net::find_node(root, "/synth") == model);
+
+    // an ossia.parameter takes gain while the instance is away
+    ossia::try_setup_parameter("float", ossia::net::create_node(*model, "gain"));
+    a.drain();
+    a.reattach();
+    REQUIRE(drained_refusal(a, "gain", "already exists"));
+    REQUIRE(a.size() == 1);
+    REQUIRE(ossia::net::find_node(root, "/synth/env/attack") != nullptr);
+  }
+
+  SECTION("the model registers again: the leaves come back under its new node")
+  {
+    root.remove_child("synth");
+    REQUIRE(!a.attached());
+    model = &ossia::net::create_node(root, "/synth");
+    a.reattach();
+    REQUIRE(ossia::net::find_node(root, "/synth/gain") != nullptr);
+  }
+}
+
+// Without a name and without an enclosing model, the leaves sit at the root of
+// the device, which the branch also knows for its bindings. The device goes away.
+TEST_CASE("v8connector_without_name_device_root", "v8connector_without_name_device_root")
+{
+  auto d = std::make_unique<ossia::net::generic_device>(
+      std::make_unique<ossia::net::multiplex_protocol>(), "v8_root");
+  branch a;
+  a.set_owns_node(false);
+  a.set_node_factory([&]() -> ossia::net::node_base* { return d ? &d->get_root_node() : nullptr; });
+  a.set_resolution_context({&d->get_root_node()}, {d.get()});
+  REQUIRE(a.declare("gain", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+  REQUIRE(ossia::net::find_node(d->get_root_node(), "/gain") != nullptr);
+  REQUIRE(a.bind("gain.1").empty());
+
+  d.reset();
+  REQUIRE(!a.attached());
+  // the branch no longer knows the device: a new context does not touch it
+  ossia::net::generic_device other{std::make_unique<ossia::net::multiplex_protocol>(), "other"};
+  a.set_resolution_context({&other.get_root_node()}, {&other});
+  REQUIRE(a.size() == 1);
+}

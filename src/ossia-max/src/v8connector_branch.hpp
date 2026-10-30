@@ -13,6 +13,11 @@
 // creates nothing. The host detaches the branch before the node disappears;
 // the declarations are kept, so that the next node recreates every leaf.
 //
+// A branch can also share a node it does not own (an ossia.model's node, the
+// root of a device): its leaves then sit next to the other parameters of that
+// node. A leaf whose address is taken is refused, never renamed; the branch
+// removes only the nodes it created, and removes its leaves when it detaches.
+//
 // A branch can also follow parameters that exist elsewhere (bind), the way
 // ossia.remote does: nothing is created, the subscription follows the
 // parameter when it disappears and comes back, and set pushes to it.
@@ -111,8 +116,12 @@ public:
   void reattach();
   // Attach to a node of the device tree and recreate every declared leaf.
   void attach(ossia::net::node_base& node);
-  // Forget the node and the leaves it holds. The declarations are kept.
+  // Forget the node and the leaves it holds. The declarations are kept. A
+  // branch that shares its node removes its leaves from it first.
   void detach();
+  // false: the node given by the factory belongs to someone else (see above).
+  // Set before the first attach.
+  void set_owns_node(bool owns) { m_owns_node = owns; }
   bool attached() const { return m_node != nullptr; }
   ossia::net::node_base* node() const { return m_node; }
 
@@ -192,6 +201,9 @@ private:
     leaf_spec spec;
     ossia::net::node_base* node{};
     ossia::net::parameter_base* param{};
+    // Shared node only: the topmost node this leaf created, nullptr if the
+    // leaf took a node that existed.
+    ossia::net::node_base* created{};
   };
 
   struct target
@@ -249,6 +261,8 @@ private:
   std::function<void()> m_wake;
   std::function<void()> m_node_lost;
   std::function<ossia::net::node_base*()> m_node_factory;
+  bool m_owns_node{true};
+  std::string m_attach_refusal; // reason of the last leaf refused by attach
 };
 
 }
