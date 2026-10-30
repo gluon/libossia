@@ -17,10 +17,12 @@ Published for macOS universal (Apple Silicon and Intel). Windows x64 to come: sa
 
 ### Changed
 
+- `ossia.client` connected by URL: `connect 1 ...` comes out a little after the `connect` message, when the connection made on its own thread is done (tens of milliseconds on a local network), no longer before `connect` returns.
 - With `@bundle 1`, the default, the values of `ossia.v8connector` reach the network at the end of the tick, in bundles, instead of one message as soon as each is set. A peer that decodes OSC bundles sees the same values; `@bundle 0` restores the previous frames.
 
 ### Fixed
 
+- `expose` sent to the global `[ossia]` object crashed Max (null network context), for instance on loading `examples/model_view_example.maxpat` or clicking `expose oscquery` in `examples/pattern-matching_examples.maxpat`. The defect existed in `2.1.0+prism.4` and in ossia 2.1.0. `[ossia]` now creates and polls its network context, as `ossia.device` does.
 - `ossia.client` connected by URL builds its device and reads the tree on a thread of its own. On the main thread, each attempt froze Max for up to 4.5 s, and a client could never connect to an `ossia.device` of the same Max, whose server that thread polls.
 - The OSCQuery client sends bundles: `push_bundle` and `push_raw_bundle` of its mirror were TODOs that sent nothing.
 - A device exposed through a multiplex (`ossia.device`) forwards a bundle to its protocols, instead of pushing its values one by one.
