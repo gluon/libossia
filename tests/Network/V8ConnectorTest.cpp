@@ -2274,3 +2274,73 @@ TEST_CASE("v8connector_load", "[.][load]")
   std::fflush(stdout);
   REQUIRE(received > 0);
 }
+
+namespace
+{
+// A server as ossia.device runs it in Max: no thread of its own, its network
+// context polled by the main thread between other work.
+struct main_thread_server
+{
+  ossia::net::network_context_ptr ctx = ossia::net::create_network_context();
+  std::unique_ptr<ossia::net::generic_device> dev;
+  uint16_t ws = free_port(true);
+  explicit main_thread_server(int leaves)
+  {
+    auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+    auto* multiplex = mp.get();
+    dev = std::make_unique<ossia::net::generic_device>(std::move(mp), "load_demo");
+    for(int i = 0; i < leaves; i++)
+      ossia::try_setup_parameter(
+          "float", ossia::net::create_node(dev->get_root_node(), "/load/p" + std::to_string(i)));
+    multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+        ctx, free_port(false), ws, false));
+  }
+  void poll()
+  {
+    ctx->context.poll();
+    ctx->context.restart();
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(ws); }
+};
+}
+
+// An ossia.client connected by URL to an ossia.device of the same Max: the
+// main thread polls the server and must not wait for the client. The attempt
+// runs on its own thread; the main thread only checks whether it is done.
+TEST_CASE("v8connector_client_connects_to_same_process_server", "v8connector_client_connects_to_same_process_server")
+{
+  main_thread_server server{3000};
+  for(int i = 0; i < 10; i++)
+  {
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  auto t0 = std::chrono::steady_clock::now();
+  ossia::max_binding::oscquery_connect_attempt attempt{server.url(), "load_demo"};
+  const auto start_ms
+      = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+
+  // the main thread's loop: poll the server, check the attempt
+  long long longest = 0;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while(!attempt.done() && std::chrono::steady_clock::now() < deadline)
+  {
+    const auto a = std::chrono::steady_clock::now();
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    longest = std::max<long long>(
+        longest, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - a).count());
+  }
+  INFO("step: attempt done within 10 s");
+  REQUIRE(attempt.done());
+  auto dev = attempt.take();
+  INFO("error: " << attempt.error());
+  REQUIRE(dev != nullptr);
+  auto* load = ossia::net::find_node(dev->get_root_node(), "/load");
+  REQUIRE(load != nullptr);
+  REQUIRE(load->children().size() == 3000);
+  // the main thread was never held
+  REQUIRE(start_ms < 50);
+  REQUIRE(longest < 50);
+}
