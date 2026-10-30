@@ -42,33 +42,44 @@
             {
                 "box": {
                     "id": "obj-3",
-                    "maxclass": "message",
-                    "numinlets": 2,
+                    "maxclass": "newobj",
+                    "numinlets": 1,
                     "numoutlets": 1,
-                    "outlettype": [ "" ],
-                    "patching_rect": [ 20.0, 105.0, 170.0, 22.0 ],
-                    "text": "expose oscquery 7301 7302"
+                    "outlettype": [ "bang" ],
+                    "patching_rect": [ 20.0, 100.0, 60.0, 22.0 ],
+                    "text": "loadbang"
                 }
             },
             {
                 "box": {
                     "id": "obj-4",
-                    "maxclass": "message",
-                    "numinlets": 2,
-                    "numoutlets": 1,
-                    "outlettype": [ "" ],
-                    "patching_rect": [ 200.0, 105.0, 35.0, 22.0 ],
-                    "text": "stop"
+                    "maxclass": "newobj",
+                    "numinlets": 1,
+                    "numoutlets": 2,
+                    "outlettype": [ "bang", "bang" ],
+                    "patching_rect": [ 20.0, 128.0, 40.0, 22.0 ],
+                    "text": "t b b"
                 }
             },
             {
                 "box": {
                     "id": "obj-5",
+                    "maxclass": "message",
+                    "numinlets": 2,
+                    "numoutlets": 1,
+                    "outlettype": [ "" ],
+                    "patching_rect": [ 260.0, 128.0, 170.0, 22.0 ],
+                    "text": "expose oscquery 7301 7302"
+                }
+            },
+            {
+                "box": {
+                    "id": "obj-24",
                     "maxclass": "newobj",
                     "numinlets": 1,
                     "numoutlets": 0,
                     "outlettype": [],
-                    "patching_rect": [ 20.0, 135.0, 130.0, 22.0 ],
+                    "patching_rect": [ 260.0, 156.0, 130.0, 22.0 ],
                     "text": "s load_demo_device"
                 }
             },
@@ -77,12 +88,12 @@
                     "fontname": "Lato Regular",
                     "fontsize": 12.0,
                     "id": "obj-6",
-                    "linecount": 3,
+                    "linecount": 4,
                     "maxclass": "comment",
                     "numinlets": 1,
                     "numoutlets": 0,
-                    "patching_rect": [ 250.0, 99.0, 470.0, 50.0 ],
-                    "text": "1. Click expose once: the emitter's device publishes on OSC port 7301 and OSCQuery port 7302. Exposing again on ports already in use fails and can crash Max: send stop before exposing again."
+                    "patching_rect": [ 440.0, 100.0, 300.0, 64.0 ],
+                    "text": "At load, the emitter's device exposes first (OSC 7301, OSCQuery 7302), then the client connects. Do not expose again: ports already in use can crash Max. Reopen the patcher instead."
                 }
             },
             {
@@ -93,7 +104,7 @@
                     "numoutlets": 1,
                     "outlettype": [ "int" ],
                     "parameter_enable": 0,
-                    "patching_rect": [ 20.0, 175.0, 24.0, 24.0 ]
+                    "patching_rect": [ 20.0, 195.0, 24.0, 24.0 ]
                 }
             },
             {
@@ -103,7 +114,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "outlettype": [],
-                    "patching_rect": [ 20.0, 210.0, 110.0, 22.0 ],
+                    "patching_rect": [ 20.0, 228.0, 110.0, 22.0 ],
                     "text": "s load_demo_run"
                 }
             },
@@ -115,8 +126,8 @@
                     "maxclass": "comment",
                     "numinlets": 1,
                     "numoutlets": 0,
-                    "patching_rect": [ 50.0, 177.0, 200.0, 21.0 ],
-                    "text": "2. Run: 3000 values per frame"
+                    "patching_rect": [ 50.0, 197.0, 200.0, 21.0 ],
+                    "text": "Run: 3000 values per frame"
                 }
             },
             {
@@ -127,7 +138,7 @@
                     "numoutlets": 1,
                     "outlettype": [ "int" ],
                     "parameter_enable": 0,
-                    "patching_rect": [ 260.0, 175.0, 24.0, 24.0 ]
+                    "patching_rect": [ 260.0, 195.0, 24.0, 24.0 ]
                 }
             },
             {
@@ -137,7 +148,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "outlettype": [],
-                    "patching_rect": [ 260.0, 210.0, 120.0, 22.0 ],
+                    "patching_rect": [ 260.0, 228.0, 120.0, 22.0 ],
                     "text": "s load_demo_bundle"
                 }
             },
@@ -149,8 +160,8 @@
                     "maxclass": "comment",
                     "numinlets": 1,
                     "numoutlets": 0,
-                    "patching_rect": [ 290.0, 177.0, 300.0, 21.0 ],
-                    "text": "3. @bundle of the emitter: 1 (bundles) or 0"
+                    "patching_rect": [ 290.0, 197.0, 300.0, 21.0 ],
+                    "text": "@bundle of the emitter: 1 (bundles) or 0"
                 }
             },
             {
@@ -160,7 +171,7 @@
                     "numinlets": 1,
                     "numoutlets": 1,
                     "outlettype": [ "bang" ],
-                    "patching_rect": [ 600.0, 210.0, 50.0, 22.0 ],
+                    "patching_rect": [ 600.0, 200.0, 60.0, 22.0 ],
                     "text": "loadbang"
                 }
             },
@@ -171,7 +182,7 @@
                     "numinlets": 2,
                     "numoutlets": 1,
                     "outlettype": [ "" ],
-                    "patching_rect": [ 600.0, 240.0, 30.0, 22.0 ],
+                    "patching_rect": [ 600.0, 228.0, 30.0, 22.0 ],
                     "text": "1"
                 }
             },
@@ -402,11 +413,11 @@
                 "box": {
                     "id": "obj-16",
                     "maxclass": "newobj",
-                    "numinlets": 1,
+                    "numinlets": 2,
                     "numoutlets": 1,
                     "outlettype": [ "bang" ],
-                    "patching_rect": [ 20.0, 260.0, 60.0, 22.0 ],
-                    "text": "loadbang"
+                    "patching_rect": [ 20.0, 160.0, 70.0, 22.0 ],
+                    "text": "delay 500"
                 }
             },
             {
@@ -452,7 +463,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "patching_rect": [ 270.0, 284.0, 450.0, 35.0 ],
-                    "text": "The receiver: an ossia.client connected by URL to the emitter's device; it retries every second until the device is exposed."
+                    "text": "The receiver: an ossia.client connected by URL to the emitter's device, after it exposed; the connection runs on its own thread, Max does not wait."
                 }
             },
             {
@@ -516,13 +527,25 @@
         "lines": [
             {
                 "patchline": {
-                    "destination": [ "obj-5", 0 ],
+                    "destination": [ "obj-4", 0 ],
                     "source": [ "obj-3", 0 ]
                 }
             },
             {
                 "patchline": {
                     "destination": [ "obj-5", 0 ],
+                    "source": [ "obj-4", 1 ]
+                }
+            },
+            {
+                "patchline": {
+                    "destination": [ "obj-24", 0 ],
+                    "source": [ "obj-5", 0 ]
+                }
+            },
+            {
+                "patchline": {
+                    "destination": [ "obj-16", 0 ],
                     "source": [ "obj-4", 0 ]
                 }
             },

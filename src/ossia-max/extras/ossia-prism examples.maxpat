@@ -9,7 +9,7 @@
             "modernui": 1
         },
         "classnamespace": "box",
-        "rect": [ 368.0, 158.0, 790.0, 450.0 ],
+        "rect": [ 368.0, 158.0, 790.0, 300.0 ],
         "showrootpatcherontab": 0,
         "showontab": 0,
         "boxes": [
@@ -35,7 +35,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "patching_rect": [ 20.0, 41.0, 640.0, 21.0 ],
-                    "text": "ossia-prism examples: click a message to open its patcher."
+                    "text": "ossia-prism examples of ossia.v8connector: click a message to open its patcher."
                 }
             },
             {
@@ -45,7 +45,7 @@
                     "numinlets": 1,
                     "numoutlets": 1,
                     "outlettype": [ "" ],
-                    "patching_rect": [ 20.0, 390.0, 55.0, 22.0 ],
+                    "patching_rect": [ 20.0, 240.0, 55.0, 22.0 ],
                     "text": "pcontrol"
                 }
             },
@@ -120,78 +120,6 @@
                     "patching_rect": [ 290.0, 174.0, 470.0, 35.0 ],
                     "text": "ossia.v8connector: 3000 parameters set at each frame and followed by a client in the same Max, drawn as a cloud of points; compare @bundle 1 and 0."
                 }
-            },
-            {
-                "box": {
-                    "id": "obj-16",
-                    "maxclass": "message",
-                    "numinlets": 2,
-                    "numoutlets": 1,
-                    "outlettype": [ "" ],
-                    "patching_rect": [ 20.0, 230.0, 260.0, 22.0 ],
-                    "text": "load model_view_example.maxpat"
-                }
-            },
-            {
-                "box": {
-                    "fontname": "Lato Regular",
-                    "fontsize": 12.0,
-                    "id": "obj-17",
-                    "linecount": 2,
-                    "maxclass": "comment",
-                    "numinlets": 1,
-                    "numoutlets": 0,
-                    "patching_rect": [ 290.0, 224.0, 470.0, 35.0 ],
-                    "text": "ossia.model, ossia.view and ossia.remote: a tree of models, and views and remotes that follow it."
-                }
-            },
-            {
-                "box": {
-                    "id": "obj-18",
-                    "maxclass": "message",
-                    "numinlets": 2,
-                    "numoutlets": 1,
-                    "outlettype": [ "" ],
-                    "patching_rect": [ 20.0, 280.0, 260.0, 22.0 ],
-                    "text": "load pattern-matching_examples.maxpat"
-                }
-            },
-            {
-                "box": {
-                    "fontname": "Lato Regular",
-                    "fontsize": 12.0,
-                    "id": "obj-19",
-                    "linecount": 2,
-                    "maxclass": "comment",
-                    "numinlets": 1,
-                    "numoutlets": 0,
-                    "patching_rect": [ 290.0, 274.0, 470.0, 35.0 ],
-                    "text": "ossia.remote with patterns: one remote follows several ossia.parameter objects."
-                }
-            },
-            {
-                "box": {
-                    "id": "obj-20",
-                    "maxclass": "message",
-                    "numinlets": 2,
-                    "numoutlets": 1,
-                    "outlettype": [ "" ],
-                    "patching_rect": [ 20.0, 330.0, 260.0, 22.0 ],
-                    "text": "load \"score client.maxpat\""
-                }
-            },
-            {
-                "box": {
-                    "fontname": "Lato Regular",
-                    "fontsize": 12.0,
-                    "id": "obj-21",
-                    "linecount": 2,
-                    "maxclass": "comment",
-                    "numinlets": 1,
-                    "numoutlets": 0,
-                    "patching_rect": [ 290.0, 324.0, 470.0, 35.0 ],
-                    "text": "ossia.client connected to score's default address and port, and score's parameters."
-                }
             }
         ],
         "lines": [
@@ -211,24 +139,6 @@
                 "patchline": {
                     "destination": [ "obj-3", 0 ],
                     "source": [ "obj-14", 0 ]
-                }
-            },
-            {
-                "patchline": {
-                    "destination": [ "obj-3", 0 ],
-                    "source": [ "obj-16", 0 ]
-                }
-            },
-            {
-                "patchline": {
-                    "destination": [ "obj-3", 0 ],
-                    "source": [ "obj-18", 0 ]
-                }
-            },
-            {
-                "patchline": {
-                    "destination": [ "obj-3", 0 ],
-                    "source": [ "obj-20", 0 ]
                 }
             }
         ],
