@@ -9,9 +9,14 @@
 #include <ossia/network/base/device.hpp>
 #include <ossia/network/oscquery/oscquery_mirror.hpp>
 
+#include <ossia/network/generic/generic_device.hpp>
+
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace ossia
 {
@@ -37,6 +42,34 @@ polled_oscquery_mirror(ossia::net::device_base& dev)
 // ws:// URL, within timeout_ms. Building a mirror on a server that is down
 // blocks the caller for 1.5 s before it fails; this costs timeout_ms at most.
 bool oscquery_server_reachable(std::string_view ws_url, int timeout_ms);
+
+// One attempt to connect a client to an OSCQuery server by URL, on a thread of
+// its own: building the mirror waits for the WebSocket (up to 1.5 s), reading
+// the tree waits for the server's answer (up to 3 s). Done on the main thread
+// of Max, these waits freeze Max, and a server of the same Max (an
+// ossia.device, whose network context the main thread polls) cannot answer
+// at all. The host checks done() from the main thread and takes the device.
+class oscquery_connect_attempt
+{
+public:
+  oscquery_connect_attempt(std::string ws_url, std::string device_name);
+  // Waits for the thread: at most the time of one attempt.
+  ~oscquery_connect_attempt();
+  oscquery_connect_attempt(const oscquery_connect_attempt&) = delete;
+  oscquery_connect_attempt& operator=(const oscquery_connect_attempt&) = delete;
+
+  bool done() const { return m_done; }
+  // After done(): the device, connected and its tree read, or nullptr.
+  std::shared_ptr<ossia::net::generic_device> take();
+  // After done(), when take() gives nullptr: why.
+  const std::string& error() const { return m_error; }
+
+private:
+  std::shared_ptr<ossia::net::generic_device> m_device;
+  std::string m_error;
+  std::atomic_bool m_done{false};
+  std::thread m_thread;
+};
 
 // The link of an ossia.client to an OSCQuery server reached by URL.
 //
