@@ -30,6 +30,7 @@
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 
 #include <client_mirror.hpp>
+#include <device_bundles.hpp>
 #include <device_network.hpp>
 #include <v8connector_branch.hpp>
 
@@ -2106,17 +2107,20 @@ TEST_CASE("zz_load_server", "[.]")
 }
 
 // The load bench, run by hand, one mode per run (each under 120 s):
-//   OSSIA_LOAD_MODE=bundle1|bundle0|changes1pct [OSSIA_LOAD_SECONDS=30]
+//   OSSIA_LOAD_MODE=bundle1|bundle0|changes1pct|remote1|remote0 [OSSIA_LOAD_SECONDS=30]
 //   ossia_V8ConnectorTest "[load]"
 // 3000 leaves of a server in another process, bound through a client by URL,
 // all set at each tick, 60 ticks per second. With changes1pct, all are set at
-// each tick but 1 % change, with the repetition filter on.
+// each tick but 1 % change, with the repetition filter on. With remote1 and
+// remote0, the 3000 leaves are pushed as ossia.remote pushes them, through
+// the bundles of the client's device (@bundle 1) or one by one (@bundle 0).
 TEST_CASE("v8connector_load", "[.][load]")
 {
   const std::string mode = std::getenv("OSSIA_LOAD_MODE") ? std::getenv("OSSIA_LOAD_MODE") : "bundle1";
   const int seconds = std::getenv("OSSIA_LOAD_SECONDS") ? std::atoi(std::getenv("OSSIA_LOAD_SECONDS")) : 30;
   const int n = 3000, rate = 60, ticks = seconds * rate;
-  const bool bundle = mode != "bundle0";
+  const bool remote = mode.rfind("remote", 0) == 0;
+  const bool bundle = mode != "bundle0" && mode != "remote0";
   const bool one_percent = mode == "changes1pct";
 
   const uint16_t osc = free_port(false), ws = free_port(true);
@@ -2161,18 +2165,25 @@ TEST_CASE("v8connector_load", "[.][load]")
   ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
   branch b;
   b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  // the ossia.remote objects, and the bundles of their ossia.client
+  ossia::max_binding::device_bundle_queue queue{*client};
+  queue.set_mode(bundle ? 1 : 0);
+  std::vector<ossia::net::parameter_base*> remotes;
   std::vector<std::string> addresses;
   for(int i = 0; i < n; i++)
   {
     addresses.push_back("load_server:/load/p" + std::to_string(i));
-    REQUIRE(b.bind(addresses.back()).empty());
+    remotes.push_back(
+        ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i))->get_parameter());
+    if(!remote)
+      REQUIRE(b.bind(addresses.back()).empty());
     if(one_percent)
       ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i))
           ->get_parameter()
           ->set_repetition_filter(ossia::repetition_filter::ON);
   }
   INFO("step: 3000 binds resolved");
-  REQUIRE(b.bound_count(addresses[n - 1]) == 1);
+  REQUIRE((remote || b.bound_count(addresses[n - 1]) == 1));
   b.drain();
   b.set_bundle(bundle);
 
@@ -2193,10 +2204,17 @@ TEST_CASE("v8connector_load", "[.][load]")
     {
       if(!one_percent || i % 100 == k % 100)
         current[i] = float(k + 1);
-      b.set(addresses[i], {current[i]});
+      if(!remote)
+        b.set(addresses[i], {current[i]});
+      // what object_base::push_parameter_value does
+      else if(!ossia::max_binding::device_bundle_queue::push_if_active(*remotes[i], current[i]))
+        remotes[i]->push_value(current[i]);
     }
     expected += one_percent ? std::size_t(n / 100) : std::size_t(n);
-    b.flush();
+    if(!remote)
+      b.flush();
+    else
+      queue.flush();
     tick_ns[k] = now_ns() - t0;
   }
   std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -2379,6 +2397,133 @@ TEST_CASE("ossia_object_expose_oscquery", "ossia_object_expose_oscquery")
   REQUIRE(ossia::net::find_node(dev->get_root_node(), "/foo/bar") != nullptr);
   dev.reset();
   multiplex.clear();
+}
+
+// The bundles of ossia.device and ossia.client: what the objects of a device
+// push during a tick leaves at its end, in OSC bundles, nothing merged.
+TEST_CASE("device_bundles", "device_bundles")
+{
+  const int n = 3000;
+  sink_server server{n};
+  auto leaf = [&](ossia::net::device_base& d, int i) {
+    return ossia::net::find_node(d.get_root_node(), "/load/p" + std::to_string(i))->get_parameter();
+  };
+  // what object_base::push_parameter_value now does
+  auto push = [](ossia::max_binding::device_bundle_queue&, ossia::net::parameter_base& p, ossia::value v) {
+    if(!ossia::max_binding::device_bundle_queue::push_if_active(p, v))
+      p.push_value(v);
+  };
+
+  SECTION("ossia.parameter: 3000 values of a tick reach a client of the device in datagrams of at most 1400 bytes")
+  {
+    udp_sink client_sink{free_port(false)};
+    raw_client client{server.url()};
+    REQUIRE(client.ws.connected());
+    client.stream_to(client_sink.socket.local_endpoint().port());
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    REQUIRE(ossia::max_binding::bundles_by_default(server.dev->get_protocol()));
+
+    ossia::max_binding::device_bundle_queue q{*server.dev};
+    for(int i = 0; i < n; i++)
+      push(q, *leaf(*server.dev, i), float(i));
+    REQUIRE(q.flush() == std::size_t(n));
+    const bool all = client_sink.wait_messages(n, 3000);
+    std::lock_guard lock{client_sink.mutex};
+    std::size_t largest = 0;
+    for(auto size : client_sink.datagrams)
+      largest = std::max(largest, size);
+    INFO("datagrams " << client_sink.datagrams.size() << ", largest " << largest);
+    REQUIRE(all);
+    REQUIRE(client_sink.messages.size() == std::size_t(n));
+    REQUIRE(largest <= 1400);
+    REQUIRE(client_sink.datagrams.size() < std::size_t(n) / 20);
+  }
+
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  server.sink.clear();
+
+  SECTION("ossia.remote: 3000 values of a tick leave through the client's mirror in bundles")
+  {
+    REQUIRE(ossia::max_binding::bundles_by_default(client->get_protocol()));
+    ossia::max_binding::device_bundle_queue q{*client};
+    for(int i = 0; i < n; i++)
+      push(q, *leaf(*client, i), float(i));
+    REQUIRE(q.flush() == std::size_t(n));
+    REQUIRE(server.sink.wait_messages(n, 3000));
+    std::lock_guard lock{server.sink.mutex};
+    for(auto size : server.sink.datagrams)
+      REQUIRE(size <= 1400);
+    REQUIRE(server.sink.datagrams.size() < std::size_t(n) / 20);
+  }
+
+  SECTION("two values on the same address in a tick both leave, in order, impulses included")
+  {
+    ossia::max_binding::device_bundle_queue q{*client};
+    auto* p0 = leaf(*client, 0);
+    auto* p1 = leaf(*client, 1);
+    auto* bang = ossia::net::find_node(client->get_root_node(), "/bang")->get_parameter();
+    push(q, *p0, 1.f);
+    push(q, *bang, ossia::impulse{});
+    push(q, *p1, 3.f);
+    push(q, *p0, 2.f);
+    push(q, *bang, ossia::impulse{});
+    REQUIRE(q.flush() == 5);
+    REQUIRE(server.sink.wait_messages(5, 3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.datagrams.size() == 1);
+    REQUIRE(server.sink.messages.size() == 5);
+    const std::vector<std::pair<std::string, float>> expected{
+        {"/load/p0", 1.f}, {"/bang", 0.f}, {"/load/p1", 3.f}, {"/load/p0", 2.f}, {"/bang", 0.f}};
+    REQUIRE(server.sink.messages == expected);
+  }
+
+  SECTION("a parameter removed before the flush is not sent")
+  {
+    ossia::max_binding::device_bundle_queue q{*client};
+    push(q, *leaf(*client, 0), 1.f);
+    push(q, *leaf(*client, 1), 2.f);
+    client->get_root_node().find_child("load")->remove_child("p0");
+    REQUIRE(q.flush() == 1);
+    REQUIRE(server.sink.wait_messages(1, 3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.messages.size() == 1);
+    REQUIRE(server.sink.messages[0].first == "/load/p1");
+  }
+
+  SECTION("@bundle 0, as 2.1.0+prism.4: one datagram per value")
+  {
+    ossia::max_binding::device_bundle_queue q{*client};
+    q.set_mode(0);
+    for(int i = 0; i < n; i++)
+      push(q, *leaf(*client, i), float(i));
+    REQUIRE(q.size() == 0);
+    REQUIRE(server.sink.wait_messages(n, 5000));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.datagrams.size() == std::size_t(n));
+  }
+
+  client.reset();
+}
+
+TEST_CASE("device_bundles_default", "device_bundles_default")
+{
+  // a device without OSCQuery server, and a plain OSC client: no bundles by default
+  ossia::net::generic_device local{std::make_unique<ossia::net::multiplex_protocol>(), "local"};
+  REQUIRE(!ossia::max_binding::bundles_by_default(local.get_protocol()));
+
+  auto ctx = ossia::net::create_network_context();
+  ossia::net::osc_protocol_configuration conf;
+  ossia::net::udp_configuration udp;
+  udp.local = ossia::net::inbound_socket_configuration{"127.0.0.1", free_port(false)};
+  udp.remote = ossia::net::outbound_socket_configuration{"127.0.0.1", free_port(false)};
+  conf.transport = udp;
+  ossia::net::generic_device osc{ossia::net::make_osc_protocol(ctx, conf), "osc"};
+  REQUIRE(!ossia::max_binding::bundles_by_default(osc.get_protocol()));
 }
 
 // Bundles of values: each element carries its own value, so a parameter may

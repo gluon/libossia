@@ -145,6 +145,15 @@
 			</description>
 		</attribute>
 
+		<attribute name="bundle" get="1" set="1" type="int" size="1">
+			<digest>
+				Send the values of a tick in OSC bundles
+			</digest>
+			<description>
+				The <at>bundle</at> attribute groups what the objects of this device (<o>ossia.parameter</o>, <o>ossia.remote</o>, <o>ossia.view</o>) push during a tick of the scheduler: the values leave at the end of the tick, in OSC bundles of at most 1400 bytes over UDP, in order, nothing merged (two values of one address both leave). -1 (default): bundles when the device speaks OSCQuery; 0: one message per value; 1: always. <o>ossia.v8connector</o> groups its own values (its <at>bundle</at> attribute).
+			</description>
+		</attribute>
+
 		<attribute name="reconnect" get="1" set="1" type="boolean" size="1">
 			<digest>
 				Reconnect when the server goes away

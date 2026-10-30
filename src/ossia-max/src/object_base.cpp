@@ -1,5 +1,6 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
+#include <ossia-max/src/device_bundles.hpp>
 #include <ossia/detail/algorithms.hpp>
 #include <ossia/detail/string_map.hpp>
 #include <ossia/network/common/complex_type.hpp>
@@ -936,7 +937,10 @@ void object_base::push_parameter_value(
 
     if(!m_local_mute)
     {
-      param->push_value(val);
+      // The device of the parameter may send the values of the tick
+      // together, at its end (@bundle of ossia.device and ossia.client).
+      if(!device_bundle_queue::push_if_active(*param, val))
+        param->push_value(val);
     }
 
     lock.lock();
