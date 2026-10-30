@@ -2582,3 +2582,93 @@ TEST_CASE("oscquery_value_bundles", "oscquery_value_bundles")
     REQUIRE(client_sink.messages[1234] == std::pair<std::string, float>{"/load/p1234", 1234.f});
   }
 }
+
+// ossia.client connected by URL: its poll runs on the scheduler thread
+// (oscquery_link::tick applies the mirror's commands), while a connect or a
+// disconnect on the main thread destroys the device. unwatch() must not
+// return while a tick runs on the old mirror.
+TEST_CASE("oscquery_link_unwatch_waits_for_tick", "oscquery_link_unwatch_waits_for_tick")
+{
+  sink_server server{50};
+  // the server's tree keeps changing: the mirror always has commands to apply
+  std::atomic_bool churn{true};
+  std::thread changes([&] {
+    int k = 0;
+    while(churn)
+    {
+      auto& root = server.dev->get_root_node();
+      const std::string name = "c" + std::to_string(k++ % 20);
+      if(auto* n = root.find_child(name))
+        root.remove_child(*n);
+      else
+        ossia::try_setup_parameter("float", ossia::net::create_node(root, "/" + name));
+      std::this_thread::sleep_for(std::chrono::microseconds(300));
+    }
+  });
+
+  bool ok = true;
+  for(int round = 0; round < 20 && ok; round++)
+  {
+    auto client = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+        "td_bench");
+    ok = client->get_protocol().update(client->get_root_node());
+    if(!ok)
+      break;
+    ossia::max_binding::oscquery_link link{ossia::max_binding::oscquery_link::host{
+        [](int) {}, [] {}, [] {}, [] { return false; }}};
+    link.watch(*client, server.url(), 1);
+
+    // the scheduler's clock
+    std::atomic_bool polling{true};
+    std::thread scheduler([&] {
+      while(polling)
+        link.tick();
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20 + round));
+
+    // the main thread: connect or disconnect
+    link.unwatch();
+    client.reset();
+
+    polling = false;
+    scheduler.join();
+  }
+  // Deterministic: the tick is held inside (its schedule callback runs under
+  // the link's lock); unwatch returns only once that tick has ended.
+  if(ok)
+  {
+    auto client = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+        "td_bench");
+    ok = client->get_protocol().update(client->get_root_node());
+    std::atomic_bool in_tick{false}, tick_done{false};
+    ossia::max_binding::oscquery_link link{ossia::max_binding::oscquery_link::host{
+        [&](int) {
+      if(tick_done)
+        return;
+      in_tick = true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      tick_done = true;
+        },
+        [] {}, [] {}, [] { return false; }}};
+    link.watch(*client, server.url(), 1);
+    // watch scheduled once; the next schedule comes from the tick
+    tick_done = false;
+    in_tick = false;
+    std::thread scheduler([&] { link.tick(); });
+    for(int i = 0; i < 200 && !in_tick; i++)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const bool entered = in_tick;
+    link.unwatch();
+    const bool waited = tick_done;
+    client.reset();
+    scheduler.join();
+    INFO("step: a tick held inside, then unwatch");
+    REQUIRE(entered);
+    REQUIRE(waited);
+  }
+  churn = false;
+  changes.join();
+  REQUIRE(ok);
+}
