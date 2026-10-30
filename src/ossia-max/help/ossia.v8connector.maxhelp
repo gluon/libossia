@@ -876,7 +876,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 30.0, 470.0, 638.0, 35.0 ],
-                                    "text": "macOS universal (x86_64 and arm64) for 2.1.0+prism.3; Windows x64 to come, same version, added to the Release later. The OSCQuery server is the one of ossia.device."
+                                    "text": "macOS universal (x86_64 and arm64) for 2.1.0+prism.4; Windows x64 to come, same version, added to the Release later. The OSCQuery server is the one of ossia.device."
                                 }
                             },
                             {
