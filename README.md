@@ -110,6 +110,7 @@ Fixed in `ossia.v8connector`:
 
 Known defects, not fixed:
 
+- The OSCQuery server of libossia (`oscquery_asio::oscquery_server_protocol`, the one of `ossia.device`) frees its sockets before they are closed when it is destroyed while its network thread runs: the destructor (`src/ossia/protocols/oscquery/oscquery_server_asio.cpp:856`) posts the close of its UDP socket to that thread, then frees the socket before the close has run. AddressSanitizer reports this use after free in a test that stops a server and exposes another one in the same process; destroyed from its own network thread, the server blocks instead. Not observed as such in Max.
 - Sending `expose` on a port already in use, including a second `expose`, crashes Max (OSCQuery server of `ossia.device`). Use explicit, free ports, and `stop` before exposing again.
 - The OSCQuery client sends one OSC message per value, never a bundle, even for values pushed together: 128 bound parameters changing at each frame give 128 WebSocket messages per frame. The server can send bundles; the client's `push_bundle` is not implemented in libossia 2.1.0 (`oscquery_mirror.cpp`), and the local protocol under the declared parameters sends a bundle one value at a time.
 - The server logs `remote_endpoint: Invalid argument` at each connection, with no effect seen on the served tree.

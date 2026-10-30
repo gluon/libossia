@@ -90,6 +90,12 @@ LIMITES CONNUES
 - Autres limites de l'objet : onglet Limits de l'aide.
 
 DÉFAUTS CONNUS
+- Serveur OSCQuery de libossia (celui d'ossia.device) : détruit pendant
+  que son thread réseau tourne, il libère ses sockets avant leur
+  fermeture (destructeur, oscquery_server_asio.cpp:856) : la fermeture de
+  sa socket UDP, confiée à ce thread, s'exécute après la libération.
+  AddressSanitizer le voit dans un test qui arrête un serveur et en expose
+  un autre dans le même processus. Pas observé tel quel dans Max.
 - Le client OSCQuery envoie un message OSC par valeur, jamais un bundle, même
   pour des valeurs poussées ensemble : 128 paramètres liés qui changent à
   chaque frame donnent 128 messages WebSocket par frame. Le serveur sait
