@@ -27,6 +27,7 @@
 #include <ossia/protocols/oscquery/oscquery_server_asio.hpp>
 
 #include "include_catch.hpp"
+#include <ossia/network/oscquery/detail/json_writer.hpp>
 
 #include <v8connector_branch.hpp>
 
@@ -40,6 +41,18 @@
 #include <thread>
 
 using namespace ossia::max_binding::v8connector_detail;
+
+namespace
+{
+// Drain a branch after a refused call: the queue holds exactly that refusal.
+void expect_refused(branch& b, const char* address)
+{
+  auto in = b.drain();
+  REQUIRE(in.size() == 1);
+  REQUIRE(in[0].address == "refused");
+  REQUIRE(in[0].value.get<std::vector<ossia::value>>()[0] == ossia::value(std::string(address)));
+}
+}
 
 namespace
 {
@@ -186,7 +199,9 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
   {
     // as ossia-max outputs the defaults of its parameters after they registered
     auto in = b1.drain();
-    REQUIRE(in.size() == 3);
+    REQUIRE(in.size() == 4); // the three defaults, then the refusal of the second gain
+    REQUIRE(in[3].address == "refused");
+    in.pop_back();
     REQUIRE(in[0].address == "gain");
     REQUIRE(in[0].value == ossia::value(-12.f));
     REQUIRE(in[1].address == "voices");
@@ -236,7 +251,9 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
     REQUIRE(b1.drain().empty());
 
     REQUIRE(!b1.set("nothere", {1}).empty());
+    expect_refused(b1, "nothere");
     REQUIRE(!b1.set("pos", {1}).empty());
+    expect_refused(b1, "pos");
     REQUIRE(b1.set("pos", {0.5f, -0.5f}).empty());
 
     int wakes = 0;
@@ -389,6 +406,7 @@ TEST_CASE("v8connector_tree", "v8connector_tree")
     REQUIRE(lost == 1);
     REQUIRE(!b1.attached());
     REQUIRE(!b1.set("gain", {0}).empty());
+    expect_refused(b1, "gain");
 
     auto& bn3 = ossia::net::create_node(root, "/synth");
     REQUIRE(bn3.osc_address() == "/synth");
@@ -481,6 +499,7 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     REQUIRE(in.size() == 1);
     REQUIRE(in[0].value == ossia::value(6.f));
     REQUIRE(!b.set("synth/gain", {S("loud")}).empty());
+    expect_refused(b, "synth/gain");
 
     // another source pushes out of range straight on the parameter, as an
     // ossia.remote does: both instances output the bounded value
@@ -497,6 +516,7 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     // unbind: nothing flows any more, the parameter is untouched
     REQUIRE(b.unbind("synth/gain"));
     REQUIRE(!b.unbind("synth/gain"));
+    expect_refused(b, "synth/gain");
     REQUIRE(a.set("gain", {0}).empty());
     REQUIRE(b.drain().empty());
     REQUIRE(ossia::net::find_node(root, "/synth/gain") != nullptr);
@@ -511,6 +531,7 @@ TEST_CASE("v8connector_bind", "v8connector_bind")
     REQUIRE(b.bound_count("synth/gain") == 0);
     REQUIRE(changes.back() == std::make_pair(std::string("synth/gain"), std::size_t(0)));
     REQUIRE(!b.set("synth/gain", {1}).empty());
+    expect_refused(b, "synth/gain");
 
     REQUIRE(a.add(gain).empty());
     REQUIRE(b.bound_count("synth/gain") == 1);
@@ -675,5 +696,157 @@ TEST_CASE("v8connector_node_on_first_add", "v8connector_node_on_first_add")
     REQUIRE(asked == 2);
     REQUIRE(b.attached());
     REQUIRE(ossia::net::find_node(root, "/mirror/x") != nullptr);
+  }
+}
+
+namespace
+{
+std::string served(const ossia::net::node_base& n)
+{
+  return ossia::oscquery::json_writer::query_namespace(n).GetString();
+}
+
+bool is_refusal(const inbound& in, const std::string& address)
+{
+  if(in.address != "refused" || in.value.get_type() != ossia::val_type::LIST)
+    return false;
+  const auto& l = in.value.get<std::vector<ossia::value>>();
+  return l.size() == 2 && l[0] == ossia::value(address)
+         && l[1].get_type() == ossia::val_type::STRING
+         && !l[1].get<std::string>().empty();
+}
+}
+
+TEST_CASE("v8connector_units_clip_refusals", "v8connector_units_clip_refusals")
+{
+  auto proto = std::make_unique<ossia::net::multiplex_protocol>();
+  ossia::net::generic_device dev{std::move(proto), "v8_units"};
+  auto& root = dev.get_root_node();
+  branch b;
+  b.set_node_factory([&]() -> ossia::net::node_base* {
+    return &ossia::net::create_node(root, "/types");
+  });
+  b.set_resolution_context({&root}, {&dev});
+
+  SECTION("color units are kept by the parameter, after creation and after re-registration")
+  {
+    // the atoms the helper sends for these two declarations
+    REQUIRE(b.declare("color", attrs({{"type", {S("vec3f")}}, {"min", {0}}, {"max", {1}},
+                                      {"unit", {S("color.rgb")}}, {"default", {1, 0.5f, 0}}})).empty());
+    REQUIRE(b.declare("rgba", attrs({{"type", {S("vec4f")}}, {"min", {0}}, {"max", {1}},
+                                     {"unit", {S("color.rgba")}}, {"default", {0, 0.5f, 1, 1}}})).empty());
+    auto check = [&] {
+      auto* c = ossia::net::find_node(root, "/types/color")->get_parameter();
+      auto* r = ossia::net::find_node(root, "/types/rgba")->get_parameter();
+      REQUIRE(ossia::get_pretty_unit_text(c->get_unit()) == "color.rgb");
+      REQUIRE(c->get_value_type() == ossia::val_type::VEC3F);
+      REQUIRE(ossia::get_pretty_unit_text(r->get_unit()) == "color.rgba");
+      REQUIRE(r->get_value_type() == ossia::val_type::VEC4F);
+      REQUIRE(c->value() == ossia::value(ossia::make_vec(1.f, 0.5f, 0.f)));
+    };
+    check();
+    // the parent registers again: its node is destroyed, then recreated
+    b.detach();
+    root.remove_child(*ossia::net::find_node(root, "/types"));
+    b.reattach();
+    check();
+  }
+
+  SECTION("a leaf is served with a single EXTENDED_TYPE")
+  {
+    REQUIRE(b.declare("color", attrs({{"type", {S("vec3f")}}, {"min", {0}}, {"max", {1}},
+                                      {"unit", {S("color.rgb")}}, {"default", {1, 0.5f, 0}}})).empty());
+    REQUIRE(b.declare("rgba", attrs({{"type", {S("vec4f")}}, {"min", {0}}, {"max", {1}},
+                                     {"unit", {S("color.rgba")}}, {"default", {0, 0.5f, 1, 1}}})).empty());
+    REQUIRE(b.declare("plain", attrs({{"type", {S("vec3f")}}, {"min", {0}}, {"max", {1}}})).empty());
+    // a second EXTENDED_TYPE key would hide the first from clients that keep
+    // the last duplicate key
+    auto check = [&](const char* address, const char* extended_type) {
+      const auto json = served(*ossia::net::find_node(root, address));
+      INFO(json);
+      const auto first = json.find("\"EXTENDED_TYPE\"");
+      REQUIRE(first != std::string::npos);
+      REQUIRE(json.find("\"EXTENDED_TYPE\"", first + 1) == std::string::npos);
+      REQUIRE(json.find(std::string("\"EXTENDED_TYPE\":") + extended_type) != std::string::npos);
+      REQUIRE(json.find("\"UNIT\"") == std::string::npos);
+    };
+    auto check_all = [&] {
+      // a color is described by the array of its components
+      check("/types/color", "[\"color.rgb.r\",\"color.rgb.g\",\"color.rgb.b\"]");
+      check("/types/rgba", "[\"color.rgb.r\",\"color.rgb.g\",\"color.rgb.b\",\"color.rgb.a\"]");
+      // without a unit, the node's own extended type
+      check("/types/plain", "\"vecf\"");
+    };
+    check_all();
+    // the parent registers again: same form
+    b.detach();
+    root.remove_child(*ossia::net::find_node(root, "/types"));
+    b.reattach();
+    check_all();
+  }
+
+  SECTION("a type the unit would change is refused, with the reason")
+  {
+    REQUIRE(!b.declare("rgb", attrs({{"type", {S("vec4f")}}, {"min", {0}}, {"max", {1}},
+                                     {"unit", {S("color.rgb")}}})).empty());
+    REQUIRE(!b.declare("g", attrs({{"type", {S("int")}}, {"min", {-60}}, {"max", {6}},
+                                   {"unit", {S("gain.db")}}})).empty());
+    auto in = b.drain();
+    REQUIRE(in.size() == 2);
+    REQUIRE(is_refusal(in[0], "rgb"));
+    const auto reason = in[0].value.get<std::vector<ossia::value>>()[1].get<std::string>();
+    REQUIRE(reason.find("requires type 'vec3f'") != std::string::npos);
+    REQUIRE(is_refusal(in[1], "g"));
+    REQUIRE(ossia::net::find_node(root, "/types") == nullptr); // nothing created
+    REQUIRE(b.size() == 0);
+  }
+
+  SECTION("clip none is accepted as the free mode and served CLIPMODE none")
+  {
+    REQUIRE(b.declare("x", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}},
+                                  {"clip", {S("none")}}})).empty());
+    auto* p = ossia::net::find_node(root, "/types/x")->get_parameter();
+    REQUIRE(p->get_bounding() == ossia::bounding_mode::FREE);
+    REQUIRE(served(*ossia::net::find_node(root, "/types/x")).find("\"CLIPMODE\":\"none\"")
+            != std::string::npos);
+    // replaying the same declaration with "none" or "free" is the same leaf
+    REQUIRE(b.declare("x", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}},
+                                  {"clip", {S("free")}}})).empty());
+    REQUIRE(b.size() == 1);
+    REQUIRE(!b.declare("y", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}},
+                                   {"clip", {S("sometimes")}}})).empty());
+  }
+
+  SECTION("every refusal is queued as refused <address> <reason>, nothing is created")
+  {
+    b.drain();
+    REQUIRE(!b.declare("cutoff", attrs({{"type", {S("float")}}})).empty()); // no range
+    auto in = b.drain();
+    REQUIRE(in.size() == 1);
+    REQUIRE(is_refusal(in[0], "cutoff"));
+    REQUIRE(ossia::net::find_node(root, "/types/cutoff") == nullptr);
+    REQUIRE(b.size() == 0);
+
+    REQUIRE(b.declare("gain", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1}}})).empty());
+    b.drain();
+    REQUIRE(!b.declare("gain", attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {2}}})).empty());
+    REQUIRE(!b.set("nothere", {1}).empty());
+    REQUIRE(!b.set("gain", {S("loud")}).empty());
+    REQUIRE(!b.remove("nothere"));
+    REQUIRE(!b.unbind("nothere"));
+    REQUIRE(!b.bind("gain").empty()); // declared by add in this instance
+    in = b.drain();
+    REQUIRE(in.size() == 6);
+    REQUIRE(is_refusal(in[0], "gain"));
+    REQUIRE(is_refusal(in[1], "nothere"));
+    REQUIRE(is_refusal(in[2], "gain"));
+    REQUIRE(is_refusal(in[3], "nothere"));
+    REQUIRE(is_refusal(in[4], "nothere"));
+    REQUIRE(is_refusal(in[5], "gain"));
+    // a refusal wakes the host like a value does
+    int wakes = 0;
+    b.set_wake_callback([&] { ++wakes; });
+    b.refuse("z", "reason");
+    REQUIRE(wakes == 1);
   }
 }

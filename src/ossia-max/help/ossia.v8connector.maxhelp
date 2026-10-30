@@ -276,7 +276,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 12.5, 560.0, 536.0, 64.0 ],
-                                    "text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors."
+                                    "text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors. Every refusal also comes out here: refused <address> <reason>."
                                 }
                             },
                             {
@@ -425,7 +425,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 580.0, 530.0, 363.0, 64.0 ],
-                                    "text": "Attributes of add use the names of ossia.parameter: @type (required), @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe."
+                                    "text": "Attributes of add use the names of ossia.parameter: @type (required), @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe. @clip none is the free mode. A unit imposes its type: @type vec4f @unit color.rgb is refused."
                                 }
                             },
                             {
@@ -726,6 +726,19 @@
                                     "patching_rect": [ 30.0, 655.0, 55.0, 22.0 ],
                                     "text": "pcontrol"
                                 }
+                            },
+                            {
+                                "box": {
+                                    "fontname": "Lato Regular",
+                                    "fontsize": 12.0,
+                                    "id": "obj-8",
+                                    "linecount": 10,
+                                    "maxclass": "comment",
+                                    "numinlets": 1,
+                                    "numoutlets": 0,
+                                    "patching_rect": [ 30.0, 685.0, 900.0, 137.0 ],
+                                    "text": "Recipe, add and remove from a script: a v8ui grid where a click creates cell/x/y and a second click removes it. The helper sends add and remove itself, through the scripting name; the left outlet is patched into the script only to receive values, ready and refused.\nconst grid = new OssiaConnector(\"grid\"), cells = new Set();   // [ossia.v8connector grid]\nfunction toggle(x, y) {\n  const a = \"cell/\" + x + \"/\" + y;\n  if (cells.has(a)) { cells.delete(a); grid.remove(a); }   // sends: remove cell/3/4\n  else { cells.add(a); grid.add(a, { type: \"float\", min: 0, max: 1, default: 0 }); }   // sends: add cell/3/4 @type float @min 0 @max 1 @default 0\n}\nOn ready (object deleted and recreated), the helper replays the cells still declared, not the removed ones."
+                                }
                             }
                         ],
                         "lines": [
@@ -824,7 +837,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 30.0, 320.0, 685.0, 35.0 ],
-                                    "text": "'ready' is a reserved address: the object sends it on its left outlet once registered, the helper replays its declarations on it. A parameter cannot be named ready."
+                                    "text": "'ready' and 'refused' are reserved addresses: the object sends ready on its left outlet once registered (the helper replays its declarations), and refused <address> <reason> for every refusal. No parameter can be named ready or refused."
                                 }
                             },
                             {
@@ -863,7 +876,20 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 30.0, 470.0, 638.0, 35.0 ],
-                                    "text": "macOS universal (x86_64 and arm64). Windows is not built. The OSCQuery server is the one of ossia.device, unchanged."
+                                    "text": "macOS universal (x86_64 and arm64) for 2.1.0+prism.3; Windows x64 to come, same version, added to the Release later. The OSCQuery server is the one of ossia.device."
+                                }
+                            },
+                            {
+                                "box": {
+                                    "fontname": "Lato Regular",
+                                    "fontsize": 12.0,
+                                    "id": "obj-9",
+                                    "linecount": 10,
+                                    "maxclass": "comment",
+                                    "numinlets": 1,
+                                    "numoutlets": 0,
+                                    "patching_rect": [ 30.0, 520.0, 685.0, 150.0 ],
+                                    "text": "Who owns a parameter: an instance removes only what it declared. remove cell/3/4 sent to another instance is refused there (refused cell/3/4 unknown address 'cell/3/4') and the parameter stays: its owner replays its declarations on every ready, so a removal by another instance would not last. To act on a parameter declared elsewhere, bind it and set it.\n\nThe name argument is required: [ossia.v8connector synth] names the node that holds the parameters of the instance, under the enclosing ossia.model or ossia.device, and add gain creates synth/gain. A second synth in the same place becomes synth.1. Without it the object prints 'ossia.v8connector needs a branch name as first argument'. bind does not go through this node: its address is relative to the enclosing model or device, as for ossia.remote (bind synth/gain, from any instance)."
                                 }
                             }
                         ],
