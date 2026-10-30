@@ -77,9 +77,27 @@ The package ships this recipe as a patcher, `examples/ossia.v8connector.grid.max
 
 `bind` does not go through the instance's node in either mode: its address is relative to the enclosing model or device, as for `ossia.remote`, so any instance follows `synth/gain` with `bind synth/gain`.
 
+#### Bundles
+
+With `@bundle 1` (the default), the values an instance sets during a tick leave together at the end of the tick, in OSC bundles: to a bound server through the client's OSCQuery mirror, which splits them into datagrams of at most 1400 bytes over UDP and sends one bundle over the WebSocket (`@critical`); to the clients of the device that serves the declared parameters, in bundles of at most 1400 bytes. A parameter set several times in a tick leaves once, with its last value; with `@repetitions 0`, a value equal to the current one does not leave. `@bundle 0` sends one message per value, as `2.1.0+prism.4` did, for comparison or for a peer that would refuse bundles. TouchDesigner's OSCQuery component (prism-td-oscquery) decodes bundles, as server and as client.
+
+Load bench (`v8connector_load` in `tests/Network/V8ConnectorTest.cpp`, run by hand): a server in another process, 3000 leaves bound through a client by URL on the same Mac, the time of each value measured from the start of the tick that set it to its arrival on the server's UDP port.
+
+| 3000 leaves, 60 ticks per second, 30 s | `@bundle 1` | `@bundle 0` | `@bundle 1`, 1 % change |
+|---|---|---|---|
+| values per tick | 3000 | 3000 | 30 |
+| datagrams per tick | 53 | 3000 | 1 |
+| bytes per tick (OSC payload) | 72 848 | 60 000 | 736 |
+| largest datagram | 1384 | 20 | 736 |
+| latency p50 / p99 | 1.65 / 2.30 ms | 4.19 / 9.79 ms | 0.78 / 1.39 ms |
+| lost values | 0 | 0 | 0 |
+| time in the tick p50 / p99 / max | 1.81 / 2.52 / 29.47 ms | 8.58 / 11.54 / 23.63 ms | 0.81 / 1.30 / 4.99 ms |
+
+`examples/ossia.v8connector.load.maxpat` shows the same load in Max: an emitter sets 3000 leaves at each frame, a client in the same Max follows them and draws them as a cloud of points, with a toggle for `@bundle`.
+
 ### Demo and help
 
-The demo patcher `examples/ossia.v8connector.demo.maxpat` mixes, in one tree, an `ossia.parameter` placed by hand, a `v8ui` that declares its parameters through the object and a second `v8ui` that binds to them, with `ossia.remote` objects listening to the same addresses.
+The Extras menu of Max lists `ossia-prism examples`, which opens each example of the package in one click. The demo patcher `examples/ossia.v8connector.demo.maxpat` mixes, in one tree, an `ossia.parameter` placed by hand, a `v8ui` that declares its parameters through the object and a second `v8ui` that binds to them, with `ossia.remote` objects listening to the same addresses.
 
 ![Demo patcher](docs/prism/demo.png)
 
@@ -93,13 +111,14 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 ### Differences from ossia 2.1.0
 
-State on 2026-10-30. "Fixed" means fixed in ossia-prism, not in ossia.
+State on 2026-10-30, `2.1.0+prism.5`. "Fixed" means fixed in ossia-prism, not in ossia.
 
 Changed in ossia-prism:
 
 - **One `EXTENDED_TYPE` per parameter** (OSCQuery server, `src/ossia/network/oscquery/detail/json_writer_detail.cpp`, every object that publishes a parameter). libossia 2.1.0 describes a color by the `EXTENDED_TYPE` array of its components (`color.rgb.r`, `color.rgb.g`, ...), then writes the node's own extended type (`vecf`) as a second `EXTENDED_TYPE` key in the same object; a client that keeps the last duplicate key sees `vecf` and loses the color. In ossia-prism the node's extended type is not written when the parameter has a unit. Colors are still described by that array, not by `UNIT`; a parameter without a unit keeps its own extended type.
 - **`ossia.client` connected by name applies the tree changes** (`src/ossia-max/src/client.cpp`, `client_mirror.hpp`). In ossia 2.1.0, `connect <name>` (zeroconf) gets the tree once; the changes the server sends afterwards (`PATH_ADDED`, `PATH_REMOVED`, `ATTRIBUTES_CHANGED`) are only applied for a client connected by URL (`connect oscquery ws://host:port`), so a parameter added on the server never appears. ossia-prism polls the mirror in both cases, and removes a path the server removes, as for a connection by URL.
 - **`ossia.client` connected by URL reconnects** (`client.cpp`, `client_mirror.hpp`). In ossia 2.1.0, once the server's WebSocket goes down (the server stopped), the client receives nothing more, reports nothing and never reconnects, while its own sends still leave over UDP. ossia-prism reports the loss with `connect 0 <parameters>` on the outlet, tries again every second on the main thread until the server answers on its port, connects as the first time (tree read again, every followed parameter subscribes again with `LISTEN`), then sends `connect 1 <parameters>`. `@reconnect 0` turns the attempts off.
+- **Bundles** (`2.1.0+prism.5`). In ossia 2.1.0 the OSCQuery client's `push_bundle` and `push_raw_bundle` are TODOs that send nothing (`src/ossia/network/oscquery/oscquery_mirror.cpp`), and a device exposed through a multiplex (as `ossia.device` does) pushes a bundle one value at a time (`src/ossia/network/local/local.cpp`), so a script's values left one message each. Two commits of the core, `oscquery: the client sends bundles` and `oscquery: a multiplexed device forwards bundles to its protocols`, make them send OSC bundles; `ossia.v8connector` groups the values of a tick (`@bundle`). `ossia.parameter` and `ossia.remote` still send one message per value.
 - **`@clip none`**, the OSCQuery name of the free mode, is accepted by `ossia.v8connector` only; `ossia.parameter` still expects `free`.
 - **An address already taken** is refused by `ossia.v8connector` without a name (`refused <address> already exists`); `ossia.parameter`, in the same case, creates a sibling with a free name (`gain.1`).
 - Added: the `ossia.v8connector` object, the package name `ossia-prism`, the version `2.1.0+prism.N`.
@@ -112,7 +131,6 @@ Known defects, not fixed:
 
 - The OSCQuery server of libossia (`oscquery_asio::oscquery_server_protocol`, the one of `ossia.device`) frees its sockets before they are closed when it is destroyed while its network thread runs: the destructor (`src/ossia/protocols/oscquery/oscquery_server_asio.cpp:856`) posts the close of its UDP socket to that thread, then frees the socket before the close has run. AddressSanitizer reports this use after free in a test that stops a server and exposes another one in the same process; destroyed from its own network thread, the server blocks instead. Not observed as such in Max.
 - Sending `expose` on a port already in use, including a second `expose`, crashes Max (OSCQuery server of `ossia.device`). Use explicit, free ports, and `stop` before exposing again.
-- The OSCQuery client sends one OSC message per value, never a bundle, even for values pushed together: 128 bound parameters changing at each frame give 128 WebSocket messages per frame. The server can send bundles; the client's `push_bundle` is not implemented in libossia 2.1.0 (`oscquery_mirror.cpp`), and the local protocol under the declared parameters sends a bundle one value at a time.
 - The server logs `remote_endpoint: Invalid argument` at each connection, with no effect seen on the served tree.
 - The access mode is not enforced by the server: a read-only parameter can be written over OSC.
 - The client cannot read some OSCQuery servers that are not ossia: it asks `?HOST_INFO=1` instead of `?HOST_INFO`, and does not read `chunked` HTTP replies.

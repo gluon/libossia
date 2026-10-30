@@ -858,12 +858,12 @@
                                     "fontname": "Lato Regular",
                                     "fontsize": 12.0,
                                     "id": "obj-7",
-                                    "linecount": 2,
+                                    "linecount": 3,
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 30.0, 420.0, 685.0, 35.0 ],
-                                    "text": "Values leave bounded to the parameter's range then filtered (mute, enable, repetitions), like the outlet of every ossia object; the parameter itself stores what it was given, like ossia.parameter."
+                                    "patching_rect": [ 30.0, 420.0, 685.0, 50.0 ],
+                                    "text": "Values leave bounded to the parameter's range then filtered (mute, enable, repetitions), like the outlet of every ossia object; the parameter itself stores what it was given, like ossia.parameter. With @bundle 1 (the default), the values set during a tick leave together at its end, in OSC bundles; @bundle 0 sends one message per value."
                                 }
                             },
                             {
@@ -876,7 +876,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 30.0, 470.0, 638.0, 35.0 ],
-                                    "text": "macOS universal (x86_64 and arm64) for 2.1.0+prism.4; Windows x64 to come, same version, added to the Release later. The OSCQuery server is the one of ossia.device."
+                                    "text": "macOS universal (x86_64 and arm64) for 2.1.0+prism.5; Windows x64 to come, same version, added to the Release later. The OSCQuery server is the one of ossia.device."
                                 }
                             },
                             {

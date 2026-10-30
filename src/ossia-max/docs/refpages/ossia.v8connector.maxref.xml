@@ -176,6 +176,15 @@
 
 	<!--ATTRIBUTES-->
 	<attributelist>
+		<attribute name="bundle" get="1" set="1" type="int" size="1">
+			<digest>
+				Send the values of a tick together, in OSC bundles
+			</digest>
+			<description>
+				The <at>bundle</at> attribute (default: 1) groups the values this instance sets during a tick: they leave together at the end of the tick, in OSC bundles, through the protocol of each parameter (a client's OSCQuery mirror splits them under 1400 bytes over UDP, the server of a device gets bundles of at most 1400 bytes). A parameter set several times in a tick leaves once, with its last value; with @repetitions 0, a value equal to the current one does not leave. 0 sends one message per value.
+			</description>
+		</attribute>
+
 		<attribute name="description" get="1" set="1" type="atom" size="1">
 			<digest>
 				Set description to node
