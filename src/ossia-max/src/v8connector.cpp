@@ -41,6 +41,11 @@ extern "C" void ossia_v8connector_setup()
   CLASS_ATTR_STYLE(c, "recall_safe", 0, "onoff");
   CLASS_ATTR_LABEL(c, "recall_safe", 0, "Recall safe");
 
+  CLASS_ATTR_LONG(c, "bundle", 0, v8connector, m_bundle);
+  CLASS_ATTR_STYLE(c, "bundle", 0, "onoff");
+  CLASS_ATTR_LABEL(
+      c, "bundle", 0, "Send the values set during a tick together, in OSC bundles");
+
   CLASS_ATTR_LONG(c, "trim_address", 0, object_base, m_trim_addr);
   CLASS_ATTR_STYLE(c, "trim_address", 0, "onoff");
   CLASS_ATTR_LABEL(
@@ -539,6 +544,9 @@ void v8connector::set(v8connector* x, t_symbol*, long argc, t_atom* argv)
   for(long i = 1; i < argc; ++i)
     values.push_back(atom_to_scalar(argv[i]));
 
+  // @bundle may have changed since the last set; turned off, the values
+  // queued so far leave first.
+  x->m_branch.set_bundle(x->m_bundle > 0);
   if(auto err = x->m_branch.set(atom_getsym(argv)->s_name, values); !err.empty())
     x->report_error("set: " + err);
 }
@@ -562,6 +570,8 @@ void v8connector::drain(v8connector* x)
 {
   if(x->m_dead)
     return;
+  // The end of the tick: what was set since the last drain leaves together.
+  x->m_branch.flush();
   for(const auto& in : x->m_branch.drain())
   {
     x->m_atoms.clear();

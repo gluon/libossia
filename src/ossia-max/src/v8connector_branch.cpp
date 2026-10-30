@@ -11,6 +11,8 @@
 #include <ossia/network/common/value_bounding.hpp>
 #include <ossia/network/dataspace/dataspace_visitors.hpp>
 #include <ossia/network/domain/domain.hpp>
+#include <ossia/network/oscquery/detail/osc_writer.hpp>
+#include <ossia/network/oscquery/oscquery_mirror.hpp>
 #include <ossia/network/value/impulse.hpp>
 #include <ossia/network/value/vec.hpp>
 
@@ -929,7 +931,7 @@ std::string branch::set_impl(std::string_view address, const scalars& values)
 
     pushing_scope guard{this, &values};
     // Stored as sent, as ossia.parameter does; bounded on output.
-    l->param->push_value(std::move(v));
+    push(*l->param, std::move(v));
     return {};
   }
 
@@ -943,12 +945,116 @@ std::string branch::set_impl(std::string_view address, const scalars& values)
       ossia::value v;
       if(auto err = scalars_to_value(*t.param, values, v); !err.empty())
         return b->address + ": " + err;
-      t.param->push_value(std::move(v));
+      push(*t.param, std::move(v));
     }
     return {};
   }
 
   return "unknown address '" + std::string(address) + "'";
+}
+
+bool branch::push(ossia::net::parameter_base& param, ossia::value&& v)
+{
+  if(!m_bundle)
+  {
+    param.push_value(std::move(v));
+    return true;
+  }
+  // Only what changes leaves, as the parameter's repetition filter says.
+  if(param.get_repetition_filter() == ossia::repetition_filter::ON && param.value() == v)
+    return false;
+  param.set_value(std::move(v));
+  if(m_outgoing_set.insert(&param).second)
+  {
+    m_outgoing.push_back(&param);
+    if(m_outgoing.size() == 1 && m_wake)
+      m_wake();
+  }
+  return true;
+}
+
+void branch::set_bundle(bool on)
+{
+  if(m_bundle && !on)
+    flush();
+  m_bundle = on;
+}
+
+namespace
+{
+constexpr std::size_t osc_bundle_header_size = 16; // "#bundle\0" and the time tag
+constexpr std::size_t osc_udp_bundle_limit = 1400;
+}
+
+std::size_t branch::flush()
+{
+  if(m_outgoing.empty())
+    return 0;
+  std::vector<ossia::net::parameter_base*> queued;
+  queued.swap(m_outgoing);
+  m_outgoing_set.clear();
+
+  // Only the parameters this branch still holds: a leaf removed or a bound
+  // parameter gone since its set is not sent.
+  std::unordered_set<const ossia::net::parameter_base*> live;
+  for(const auto& l : m_leaves)
+    if(l.param)
+      live.insert(l.param);
+  for(const auto& b : m_bindings)
+    for(const auto& t : b.targets)
+      if(t.param)
+        live.insert(t.param);
+
+  // One group per protocol, in the order of the first set.
+  std::vector<std::pair<ossia::net::protocol_base*, std::vector<const ossia::net::parameter_base*>>>
+      groups;
+  std::size_t sent = 0;
+  for(auto* p : queued)
+  {
+    if(!live.count(p))
+      continue;
+    auto* proto = &p->get_node().get_device().get_protocol();
+    auto it = std::find_if(groups.begin(), groups.end(), [proto](const auto& g) {
+      return g.first == proto;
+    });
+    if(it == groups.end())
+    {
+      groups.push_back({proto, {}});
+      it = groups.end() - 1;
+    }
+    it->second.push_back(p);
+    sent++;
+  }
+
+  for(auto& [proto, params] : groups)
+  {
+    // A client's mirror splits its bundles itself, by transport.
+    if(dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(proto))
+    {
+      proto->push_bundle(params);
+      continue;
+    }
+    // Other protocols send what they are given as one bundle: groups of at
+    // most 1400 bytes of messages.
+    std::vector<const ossia::net::parameter_base*> group;
+    std::size_t size = osc_bundle_header_size;
+    for(auto* p : params)
+    {
+      const auto message
+          = 4 + ossia::oscquery::osc_writer::to_message(*p, p->value()).size();
+      if(!group.empty() && size + message > osc_udp_bundle_limit)
+      {
+        proto->push_bundle(group);
+        group.clear();
+        size = osc_bundle_header_size;
+      }
+      group.push_back(p);
+      size += message;
+    }
+    if(!group.empty())
+      proto->push_bundle(group);
+  }
+  return sent;
 }
 
 std::vector<std::string> branch::addresses() const
