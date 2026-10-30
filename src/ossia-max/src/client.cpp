@@ -4,6 +4,7 @@
 
 #include "ZeroconfMinuitListener.hpp"
 #include "ZeroconfOscqueryListener.hpp"
+#include "client_mirror.hpp"
 #include "device.hpp"
 #include "model.hpp"
 #include "ossia-max.hpp"
@@ -363,6 +364,11 @@ void client::connect(client* x)
       else
       {
         x->m_zeroconf = true;
+        // Poll the mirror as for a connection by URL, or the tree changes the
+        // server sends are never applied.
+        x->m_oscq_protocol = polled_oscquery_mirror(*x->m_device);
+        if(x->m_oscq_protocol)
+          clock_set(x->m_poll_clock, 1);
       }
 
       A_SETSYM(connection_status + 1, gensym(name.c_str()));
