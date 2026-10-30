@@ -850,3 +850,95 @@ TEST_CASE("v8connector_units_clip_refusals", "v8connector_units_clip_refusals")
     REQUIRE(wakes == 1);
   }
 }
+
+// A device that a branch follows disappears and comes back under the same
+// name, as an ossia.client connected by name does when the zeroconf
+// announcement of its server goes away and comes back. The host gives the
+// branch the new device, as it does when a device is created; it does not
+// tell the branch that the old one is gone, because ossia-max's client clears
+// its device before announcing the removal.
+TEST_CASE("v8connector_device_return", "v8connector_device_return")
+{
+  // The server: leaves under /bench, served over OSCQuery.
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "td_bench"};
+  std::vector<ossia::net::parameter_base*> leaves;
+  for(int i = 0; i < 4; i++)
+  {
+    auto& n = ossia::net::create_node(server.get_root_node(), "/bench/p" + std::to_string(i));
+    auto* p = ossia::try_setup_parameter("float", n);
+    p->set_domain(ossia::make_domain(0.f, 1.f));
+    p->push_value(0.f);
+    leaves.push_back(p);
+  }
+  const uint16_t osc = free_port(false);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  // The global device of Max, where the instance registers.
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  auto& max_root = max_dev.get_root_node();
+
+  auto connect = [&] {
+    auto d = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+            "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+        "td_bench");
+    REQUIRE(d->get_protocol().update(d->get_root_node()));
+    return d;
+  };
+
+  // The server pushes the value until the branch receives it: a client that
+  // has just connected may not be known to the server yet.
+  auto received = [](branch& b, ossia::net::parameter_base& p, const ossia::value& v) {
+    for(int i = 0; i < 400; i++)
+    {
+      if(i % 20 == 0)
+        p.push_value(v);
+      for(auto& in : b.drain())
+        if(in.address == "td_bench:/bench/p0" && in.value == v)
+          return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
+  };
+
+  branch b;
+  std::shared_ptr<ossia::net::generic_device> client = connect();
+  b.set_resolution_context({&max_root}, {&max_dev, client.get()});
+  REQUIRE(b.bind("td_bench:/bench/p0").empty());
+  REQUIRE(b.bound_count("td_bench:/bench/p0") == 1);
+
+  for(int cycle = 0; cycle < 20; cycle++)
+  {
+    INFO("cycle " << cycle);
+    // The device goes away; the host does not call drop_device.
+    client.reset();
+    REQUIRE(b.bound_count("td_bench:/bench/p0") == 0);
+
+    // It comes back under the same name: the host registers the instance
+    // again with the devices it knows.
+    client = connect();
+    b.set_resolution_context({&max_root}, {&max_dev, client.get()});
+    REQUIRE(b.bound_count("td_bench:/bench/p0") == 1);
+
+    // Values are received again.
+    const bool ok = received(b, *leaves[0], ossia::value((cycle + 1) / 32.f));
+    if(!ok)
+    {
+      client.reset();
+      ossia::net::stop_network_context(*ctx);
+      net.join();
+    }
+    REQUIRE(ok);
+  }
+
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+}

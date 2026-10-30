@@ -571,7 +571,7 @@ branch::~branch()
   for(auto& b : m_bindings)
     release(b);
   for(auto* dev : m_devices)
-    dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+    unwatch_device(*dev, true);
 }
 
 void branch::set_node_factory(std::function<ossia::net::node_base*()> factory)
@@ -1045,22 +1045,55 @@ void branch::set_resolution_context(
     std::vector<ossia::net::device_base*> devices)
 {
   for(auto* dev : m_devices)
-    dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+    unwatch_device(*dev, true);
   m_parents = std::move(parents);
+  m_parent_devices.clear();
+  for(auto* n : m_parents)
+    m_parent_devices.push_back(&n->get_device());
   m_devices = std::move(devices);
   for(auto* dev : m_devices)
-    dev->on_parameter_created.connect<&branch::on_parameter_created>(this);
+    watch_device(*dev);
   resolve_bindings();
+}
+
+// The branch listens to the destruction of the root of every device it knows,
+// so that it never keeps a device the host forgot to drop: ossia-max's client
+// clears its device before it announces the removal.
+void branch::watch_device(ossia::net::device_base& dev)
+{
+  dev.on_parameter_created.connect<&branch::on_parameter_created>(this);
+  dev.get_root_node().about_to_be_deleted.connect<&branch::on_node_removing>(this);
+}
+
+void branch::unwatch_device(ossia::net::device_base& dev, bool root_alive)
+{
+  dev.on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+  if(root_alive)
+    dev.get_root_node().about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
 }
 
 void branch::drop_device(ossia::net::device_base* dev)
 {
+  forget_device(dev, true);
+}
+
+void branch::forget_device(ossia::net::device_base* dev, bool root_alive)
+{
   auto it = std::find(m_devices.begin(), m_devices.end(), dev);
   if(it == m_devices.end())
     return;
-  dev->on_parameter_created.disconnect<&branch::on_parameter_created>(this);
+  unwatch_device(*dev, root_alive);
   m_devices.erase(it);
-  std::erase_if(m_parents, [dev](ossia::net::node_base* n) { return &n->get_device() == dev; });
+  // The parents of a device being destroyed may already be gone: their device
+  // was noted when they were given.
+  for(std::size_t i = m_parents.size(); i-- > 0;)
+  {
+    if(m_parent_devices[i] == dev)
+    {
+      m_parents.erase(m_parents.begin() + i);
+      m_parent_devices.erase(m_parent_devices.begin() + i);
+    }
+  }
   for(auto& b : m_bindings)
   {
     const auto before = b.targets.size();
@@ -1191,6 +1224,15 @@ void branch::on_node_removing(const ossia::net::node_base& n)
     std::erase_if(b.targets, [&n](const target& t) { return t.node == &n; });
     if(b.targets.size() != before && m_binding_changed)
       m_binding_changed(b.address, b.targets.size());
+  }
+
+  // A node without parent is the root of its device: the device is being
+  // destroyed, its children are already gone. Forget it without touching the
+  // signal being emitted nor calling the device, which is half destroyed.
+  if(!n.get_parent())
+  {
+    forget_device(&n.get_device(), false);
+    return;
   }
 
   // The node is being destroyed: forget it without touching its signals.
