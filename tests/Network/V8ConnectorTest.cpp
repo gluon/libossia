@@ -1846,3 +1846,121 @@ TEST_CASE("oscquery_multiplex_push_bundle", "oscquery_multiplex_push_bundle")
   REQUIRE(client_sink.datagrams.size() == 1);
   REQUIRE(client_sink.messages.size() == std::size_t(n));
 }
+
+// The sets of a branch during a tick leave at flush in OSC bundles: through a
+// client's mirror to a bound server, and through a served device to its
+// clients. Only what changes leaves; with bundles off, one message per value.
+TEST_CASE("v8connector_bundles", "v8connector_bundles")
+{
+  const int n = 3000;
+  sink_server server{n};
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  std::vector<std::string> addresses;
+  for(int i = 0; i < n; i++)
+  {
+    addresses.push_back("td_bench:/load/p" + std::to_string(i));
+    REQUIRE(b.bind(addresses.back()).empty());
+  }
+  REQUIRE(b.bound_count(addresses[2999]) == 1);
+  b.drain();
+  server.sink.clear();
+
+  auto tick = [&](auto value_of) {
+    for(int i = 0; i < n; i++)
+      REQUIRE(b.set(addresses[i], {value_of(i)}).empty());
+  };
+  auto settle = [] { std::this_thread::sleep_for(std::chrono::milliseconds(200)); };
+
+  SECTION("3000 sets of one tick leave at flush, in datagrams of at most 1400 bytes")
+  {
+    b.set_bundle(true);
+    tick([](int i) { return float(i); });
+    settle();
+    {
+      std::lock_guard lock{server.sink.mutex};
+      REQUIRE(server.sink.messages.empty());
+    }
+    REQUIRE(b.flush() == std::size_t(n));
+    REQUIRE(server.sink.wait_messages(n, 3000));
+    std::lock_guard lock{server.sink.mutex};
+    INFO("datagrams " << server.sink.datagrams.size());
+    REQUIRE(server.sink.messages.size() == std::size_t(n));
+    for(auto size : server.sink.datagrams)
+      REQUIRE(size <= 1400);
+    REQUIRE(server.sink.datagrams.size() < std::size_t(n) / 20);
+  }
+
+  SECTION("only what changes leaves, as the repetition filter says")
+  {
+    for(int i = 0; i < n; i++)
+      ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i))
+          ->get_parameter()
+          ->set_repetition_filter(ossia::repetition_filter::ON);
+    b.set_bundle(true);
+    // every value differs from the one the parameter holds
+    tick([](int i) { return float(i) + 1000.f; });
+    REQUIRE(b.flush() == std::size_t(n));
+    REQUIRE(server.sink.wait_messages(n, 3000));
+    server.sink.clear();
+    // 1 % changes
+    tick([](int i) { return i % 100 == 0 ? float(i) + 1000.5f : float(i) + 1000.f; });
+    REQUIRE(b.flush() == std::size_t(n / 100));
+    REQUIRE(server.sink.wait_messages(n / 100, 3000));
+    settle();
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.messages.size() == std::size_t(n / 100));
+    REQUIRE(server.sink.datagrams.size() == 1);
+  }
+
+  SECTION("bundles off: one datagram per value, as before")
+  {
+    b.set_bundle(false);
+    tick([](int i) { return float(i); });
+    REQUIRE(b.flush() == 0);
+    REQUIRE(server.sink.wait_messages(n, 5000));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.datagrams.size() == std::size_t(n));
+  }
+
+  client.reset();
+}
+
+TEST_CASE("v8connector_bundles_served_leaves", "v8connector_bundles_served_leaves")
+{
+  const int n = 300;
+  sink_server server{0};
+  udp_sink client_sink{free_port(false)};
+  raw_client client{server.url()};
+  REQUIRE(client.ws.connected());
+  client.stream_to(client_sink.socket.local_endpoint().port());
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  branch b;
+  auto& root = server.dev->get_root_node();
+  b.set_node_factory([&]() -> ossia::net::node_base* { return &ossia::net::create_node(root, "/synth"); });
+  b.set_resolution_context({&root}, {server.dev.get()});
+  for(int i = 0; i < n; i++)
+    REQUIRE(b.declare("p" + std::to_string(i), attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1000}}}))
+                .empty());
+  b.drain();
+  b.set_bundle(true);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  client_sink.clear();
+
+  for(int i = 0; i < n; i++)
+    REQUIRE(b.set("p" + std::to_string(i), {float(i)}).empty());
+  REQUIRE(b.flush() == std::size_t(n));
+  const bool all = client_sink.wait_messages(n, 3000);
+  std::lock_guard lock{client_sink.mutex};
+  INFO("datagrams " << client_sink.datagrams.size() << ", messages " << client_sink.messages.size());
+  REQUIRE(all);
+  for(auto size : client_sink.datagrams)
+    REQUIRE(size <= 1400);
+  REQUIRE(client_sink.datagrams.size() < std::size_t(n) / 20);
+}

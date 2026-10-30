@@ -32,6 +32,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -150,6 +151,19 @@ public:
   // differs from what was sent (clip, type conversion).
   std::string set(std::string_view address, const scalars& values);
 
+  // Bundles: when on, set stores the value and queues the parameter instead
+  // of sending it; flush sends what was queued since the last flush, in OSC
+  // bundles, one group per protocol: a client's OSCQuery mirror splits them
+  // itself under 1400 bytes over UDP, other protocols (an OSCQuery server
+  // under a multiplex) get groups of at most 1400 bytes of messages. A value
+  // equal to the parameter's current one is not queued when the parameter's
+  // repetition filter is on. Off (the default here), set sends at once.
+  void set_bundle(bool on);
+  bool bundle() const { return m_bundle; }
+  // Main thread, from the host's deferred queue. Returns the number of
+  // parameters sent.
+  std::size_t flush();
+
   // Follow a parameter that exists elsewhere. The address follows the rules of
   // ossia.remote: relative to the parents given by set_resolution_context,
   // absolute ("/a/b") in the parents' device, or global ("device:/a/b");
@@ -263,6 +277,13 @@ private:
   std::function<ossia::net::node_base*()> m_node_factory;
   bool m_owns_node{true};
   std::string m_attach_refusal; // reason of the last leaf refused by attach
+
+  // Parameters set since the last flush, each once, in the order of their
+  // first set; the value sent is the one they hold at flush.
+  bool m_bundle{false};
+  std::vector<ossia::net::parameter_base*> m_outgoing;
+  std::unordered_set<ossia::net::parameter_base*> m_outgoing_set;
+  bool push(ossia::net::parameter_base& param, ossia::value&& v);
 };
 
 }
