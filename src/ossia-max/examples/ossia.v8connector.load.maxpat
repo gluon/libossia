@@ -52,23 +52,12 @@
             },
             {
                 "box": {
-                    "id": "obj-4",
-                    "maxclass": "newobj",
-                    "numinlets": 1,
-                    "numoutlets": 2,
-                    "outlettype": [ "bang", "bang" ],
-                    "patching_rect": [ 20.0, 128.0, 40.0, 22.0 ],
-                    "text": "t b b"
-                }
-            },
-            {
-                "box": {
                     "id": "obj-5",
                     "maxclass": "message",
                     "numinlets": 2,
                     "numoutlets": 1,
                     "outlettype": [ "" ],
-                    "patching_rect": [ 260.0, 128.0, 170.0, 22.0 ],
+                    "patching_rect": [ 20.0, 128.0, 170.0, 22.0 ],
                     "text": "expose oscquery 7301 7302"
                 }
             },
@@ -79,7 +68,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "outlettype": [],
-                    "patching_rect": [ 260.0, 156.0, 130.0, 22.0 ],
+                    "patching_rect": [ 20.0, 156.0, 130.0, 22.0 ],
                     "text": "s load_demo_device"
                 }
             },
@@ -93,7 +82,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "patching_rect": [ 440.0, 100.0, 300.0, 64.0 ],
-                    "text": "At load, the emitter's device exposes first (OSC 7301, OSCQuery 7302), then the client connects. Do not expose again: ports already in use can crash Max. Reopen the patcher instead."
+                    "text": "At load, the emitter's device exposes (OSC 7301, OSCQuery 7302). The client connects when the emitter sends declared: its 3000 leaves exist, the client reads the whole tree at once. Do not expose again: reopen the patcher instead."
                 }
             },
             {
@@ -344,15 +333,26 @@
                             },
                             {
                                 "box": {
+                                    "id": "obj-13",
+                                    "maxclass": "newobj",
+                                    "numinlets": 1,
+                                    "numoutlets": 0,
+                                    "outlettype": [],
+                                    "patching_rect": [ 260.0, 240.0, 140.0, 22.0 ],
+                                    "text": "s load_demo_declared"
+                                }
+                            },
+                            {
+                                "box": {
                                     "fontname": "Lato Regular",
                                     "fontsize": 12.0,
                                     "id": "obj-12",
-                                    "linecount": 2,
+                                    "linecount": 3,
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 20.0, 300.0, 520.0, 35.0 ],
-                                    "text": "The script reaches the connector by its scripting name, load_emitter; the connector's left outlet comes back into it for ready."
+                                    "patching_rect": [ 20.0, 300.0, 520.0, 50.0 ],
+                                    "text": "The script reaches the connector by its scripting name, load_emitter; the connector's left outlet comes back into it for ready. It sends declared once its 3000 leaves exist on the device."
                                 }
                             }
                         ],
@@ -404,6 +404,12 @@
                                     "destination": [ "obj-11", 0 ],
                                     "source": [ "obj-10", 1 ]
                                 }
+                            },
+                            {
+                                "patchline": {
+                                    "destination": [ "obj-13", 0 ],
+                                    "source": [ "obj-7", 0 ]
+                                }
                             }
                         ]
                     }
@@ -413,11 +419,22 @@
                 "box": {
                     "id": "obj-16",
                     "maxclass": "newobj",
-                    "numinlets": 2,
+                    "numinlets": 0,
                     "numoutlets": 1,
-                    "outlettype": [ "bang" ],
-                    "patching_rect": [ 20.0, 160.0, 70.0, 22.0 ],
-                    "text": "delay 500"
+                    "outlettype": [ "" ],
+                    "patching_rect": [ 20.0, 262.0, 140.0, 22.0 ],
+                    "text": "r load_demo_declared"
+                }
+            },
+            {
+                "box": {
+                    "id": "obj-25",
+                    "maxclass": "newobj",
+                    "numinlets": 2,
+                    "numoutlets": 2,
+                    "outlettype": [ "bang", "bang" ],
+                    "patching_rect": [ 170.0, 262.0, 70.0, 22.0 ],
+                    "text": "onebang 1"
                 }
             },
             {
@@ -444,17 +461,6 @@
             },
             {
                 "box": {
-                    "id": "obj-19",
-                    "maxclass": "newobj",
-                    "numinlets": 1,
-                    "numoutlets": 0,
-                    "outlettype": [],
-                    "patching_rect": [ 20.0, 350.0, 110.0, 22.0 ],
-                    "text": "print load_view"
-                }
-            },
-            {
-                "box": {
                     "fontname": "Lato Regular",
                     "fontsize": 12.0,
                     "id": "obj-20",
@@ -463,7 +469,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "patching_rect": [ 270.0, 284.0, 450.0, 35.0 ],
-                    "text": "The receiver: an ossia.client connected by URL to the emitter's device, after it exposed; the connection runs on its own thread, Max does not wait."
+                    "text": "The receiver: an ossia.client connected by URL to the emitter's device once the emitter declared its leaves; the connection runs on its own thread."
                 }
             },
             {
@@ -527,14 +533,8 @@
         "lines": [
             {
                 "patchline": {
-                    "destination": [ "obj-4", 0 ],
-                    "source": [ "obj-3", 0 ]
-                }
-            },
-            {
-                "patchline": {
                     "destination": [ "obj-5", 0 ],
-                    "source": [ "obj-4", 1 ]
+                    "source": [ "obj-3", 0 ]
                 }
             },
             {
@@ -545,8 +545,14 @@
             },
             {
                 "patchline": {
-                    "destination": [ "obj-16", 0 ],
-                    "source": [ "obj-4", 0 ]
+                    "destination": [ "obj-25", 0 ],
+                    "source": [ "obj-16", 0 ]
+                }
+            },
+            {
+                "patchline": {
+                    "destination": [ "obj-17", 0 ],
+                    "source": [ "obj-25", 0 ]
                 }
             },
             {
@@ -575,20 +581,8 @@
             },
             {
                 "patchline": {
-                    "destination": [ "obj-17", 0 ],
-                    "source": [ "obj-16", 0 ]
-                }
-            },
-            {
-                "patchline": {
                     "destination": [ "obj-18", 0 ],
                     "source": [ "obj-17", 0 ]
-                }
-            },
-            {
-                "patchline": {
-                    "destination": [ "obj-19", 0 ],
-                    "source": [ "obj-18", 0 ]
                 }
             },
             {

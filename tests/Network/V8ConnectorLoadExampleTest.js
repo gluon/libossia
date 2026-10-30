@@ -32,6 +32,8 @@ function load(script, args, connectorName) {
     post: () => {},
     messagename: "",
     arrayfromargs: (a) => Array.prototype.slice.call(a),
+    sent: [],
+    outlet: function () { context.sent.push(Array.prototype.slice.call(arguments)); },
     Task: function (fn) { this.fn = fn; this.interval = 0; this.repeat = () => {}; this.schedule = () => {}; this.cancel = () => {}; tasks.push(this); },
   };
   context.require = () => {
@@ -60,6 +62,21 @@ test("the emitter declares 3000 leaves, then sets them all at each bang", () => 
   connector.received = [];
   context.bang();
   assert.notDeepStrictEqual(connector.received[0], sets[0]); // the values move
+});
+
+test("the emitter announces declared once its leaves exist, in either order", () => {
+  // declared first, then the connector registers
+  let e = load("ossia.v8connector.load.emitter.js", ["load_emitter", 3000], "load_emitter");
+  e.context.loadbang();
+  assert.deepStrictEqual(e.context.sent, []);
+  e.outlet("ready");
+  assert.deepStrictEqual(e.context.sent, [[0, "declared"]]);
+  // the connector registered first
+  e = load("ossia.v8connector.load.emitter.js", ["load_emitter", 3000], "load_emitter");
+  e.outlet("ready");
+  assert.deepStrictEqual(e.context.sent, []);
+  e.context.loadbang();
+  assert.deepStrictEqual(e.context.sent, [[0, "declared"]]);
 });
 
 test("the emitter replays its leaves on ready", () => {

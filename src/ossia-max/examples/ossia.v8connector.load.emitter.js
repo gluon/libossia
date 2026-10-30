@@ -6,6 +6,12 @@
 // The connector sends the values set during a tick together, in OSC bundles
 // (@bundle 1), or one message per value (@bundle 0).
 //
+// Once the leaves exist on the device, the script sends "declared" from its
+// outlet: a client should connect only then, and read the whole tree at once
+// instead of receiving 3000 leaves one by one. They exist when the script has
+// declared them and the connector has sent "ready" (it creates the declared
+// leaves before sending it), in either order.
+//
 // Patch: [ossia.v8connector load] with the scripting name "load_emitter",
 // its left outlet into [v8 ossia.v8connector.load.emitter.js load_emitter 3000].
 // Arguments, after the script name:
@@ -26,12 +32,20 @@ const addresses = [];
 for (let i = 0; i < N; i++) addresses.push("p" + i);
 
 let phase = 0;
+let declared = false;
+let registered = false;
+
+function announce() {
+  if (declared && registered) outlet(0, "declared");
+}
 
 function declareAll() {
   if (!conn) return;
   const spec = {};
   for (const a of addresses) spec[a] = { type: "float", min: 0, max: 1, default: 0.5 };
   conn.declare(spec);
+  declared = true;
+  announce();
 }
 
 function loadbang() { declareAll(); }
@@ -48,4 +62,8 @@ function bang() {
 // "ready", "refused" and the values changed elsewhere come back here.
 function anything() {
   if (conn) conn.dispatch(messagename, arrayfromargs(arguments));
+  if (messagename === "ready") {
+    registered = true;
+    announce();
+  }
 }
