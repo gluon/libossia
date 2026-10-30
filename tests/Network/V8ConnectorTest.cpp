@@ -2672,3 +2672,76 @@ TEST_CASE("oscquery_link_unwatch_waits_for_tick", "oscquery_link_unwatch_waits_f
   changes.join();
   REQUIRE(ok);
 }
+
+#include <spdlog/sinks/callback_sink.h>
+
+// A client connected before the server declares its leaves, with 3000 binds
+// waiting (the load example in Max): each leaf arrives alone (PATH_ADDED,
+// then ATTRIBUTES_CHANGED and an HTTP request for its value). The poll must
+// not stall: before, every creation resolved every waiting binding again,
+// 15 s in one run_commands, while the server of the same Max, polled by
+// that thread, let the HTTP requests time out.
+TEST_CASE("v8connector_binds_follow_a_burst_of_leaves", "v8connector_binds_follow_a_burst_of_leaves")
+{
+  std::atomic_int http_errors{0};
+  auto sink = std::make_shared<spdlog::sinks::callback_sink_mt>([&](const spdlog::details::log_msg& m) {
+    if(std::string_view(m.payload.data(), m.payload.size()).find("HTTP Error") != std::string_view::npos)
+      http_errors++;
+  });
+  ossia::logger().sinks().push_back(sink);
+
+  const int n = 3000;
+  main_thread_server server{0};
+  for(int i = 0; i < 10; i++)
+  {
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ossia::max_binding::oscquery_connect_attempt attempt{server.url(), "load_demo"};
+  for(int i = 0; i < 10000 && !attempt.done(); i++)
+  {
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  auto client = attempt.take();
+  REQUIRE(client);
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+
+  branch b;
+  b.set_resolution_context({&client->get_root_node()}, {client.get()});
+  for(int i = 0; i < n; i++)
+    REQUIRE(b.bind("load/p" + std::to_string(i)).empty());
+
+  // the emitter declares its leaves after the connection
+  for(int i = 0; i < n; i++)
+    ossia::try_setup_parameter(
+        "float", ossia::net::create_node(server.dev->get_root_node(), "/load/p" + std::to_string(i)));
+
+  // the main thread polls the server, the client's clock its mirror
+  long long longest = 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto deadline = t0 + std::chrono::seconds(30);
+  while(b.bound_count("load/p" + std::to_string(n - 1)) == 0 && std::chrono::steady_clock::now() < deadline)
+  {
+    server.poll();
+    const auto a = std::chrono::steady_clock::now();
+    mirror->run_commands();
+    longest = std::max<long long>(
+        longest, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - a).count());
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  const auto total
+      = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+  std::size_t bound = 0;
+  for(int i = 0; i < n; i++)
+    bound += b.bound_count("load/p" + std::to_string(i));
+  client.reset();
+  auto& sinks = ossia::logger().sinks();
+  sinks.erase(std::remove(sinks.begin(), sinks.end(), sink), sinks.end());
+
+  INFO("bound " << bound << " in " << total << " ms, longest run_commands " << longest << " ms, HTTP errors " << http_errors);
+  REQUIRE(bound == std::size_t(n));
+  REQUIRE(total < 10000);
+  REQUIRE(longest < 1000);
+  REQUIRE(http_errors == 0);
+}

@@ -271,6 +271,11 @@ private:
   using address_index = std::unordered_map<std::string, std::size_t, address_hash, std::equal_to<>>;
   address_index m_leaf_index;
   address_index m_binding_index;
+  // Bindings by the last component of their address, and the bindings with
+  // a pattern: a parameter created can only satisfy those.
+  std::unordered_map<std::string, std::vector<std::size_t>> m_binding_by_name;
+  std::vector<std::size_t> m_pattern_bindings;
+  void index_binding(std::size_t i);
   void reindex_leaves();
   void reindex_bindings();
   std::vector<ossia::net::device_base*> m_parent_devices; // device of each parent
