@@ -47,7 +47,7 @@
                     "numoutlets": 1,
                     "outlettype": [ "" ],
                     "patching_rect": [ 20.0, 105.0, 170.0, 22.0 ],
-                    "text": "expose oscquery 7201 7202"
+                    "text": "expose oscquery 7301 7302"
                 }
             },
             {
@@ -82,7 +82,7 @@
                     "numinlets": 1,
                     "numoutlets": 0,
                     "patching_rect": [ 250.0, 99.0, 470.0, 50.0 ],
-                    "text": "1. Click expose once: the emitter's device publishes on OSC port 7201 and OSCQuery port 7202. Exposing again on ports already in use fails and can crash Max: send stop before exposing again."
+                    "text": "1. Click expose once: the emitter's device publishes on OSC port 7301 and OSCQuery port 7302. Exposing again on ports already in use fails and can crash Max: send stop before exposing again."
                 }
             },
             {
@@ -417,7 +417,7 @@
                     "numoutlets": 1,
                     "outlettype": [ "" ],
                     "patching_rect": [ 20.0, 290.0, 230.0, 22.0 ],
-                    "text": "connect oscquery ws://127.0.0.1:7202"
+                    "text": "connect oscquery ws://127.0.0.1:7302"
                 }
             },
             {
