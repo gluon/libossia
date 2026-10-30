@@ -7,9 +7,12 @@ CONTENU
 - ossia.v8connector : les paramètres déclarés par un script v8 ou v8ui
   rejoignent l'arbre ossia du patch, à côté des ossia.parameter.
 - Modifications d'ossia : le serveur OSCQuery écrit une seule clé
-  EXTENDED_TYPE par paramètre, et un ossia.client connecté par nom
+  EXTENDED_TYPE par paramètre ; un ossia.client connecté par nom
   applique les changements d'arbre du serveur (PATH_ADDED, PATH_REMOVED),
-  comme un client connecté par URL. Une couleur reste décrite par le
+  comme un client connecté par URL ; un ossia.client connecté par URL
+  signale la perte du serveur (connect 0 ...), se reconnecte seul quand il
+  revient (connect 1 ..., arbre relu, abonnements renvoyés), ce que
+  @reconnect 0 désactive. Une couleur reste décrite par le
   tableau de ses composantes (color.rgb.r, color.rgb.g, ...), sans UNIT ;
   libossia 2.1.0 ajoutait une seconde clé EXTENDED_TYPE « vecf », qui
   masquait ce tableau pour un client gardant la dernière clé en double.
