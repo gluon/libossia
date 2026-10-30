@@ -1,4 +1,4 @@
-ossia-prism 2.1.0+prism.4
+ossia-prism 2.1.0+prism.5
 Paquet Max ossia (libossia 2.1.0) avec l'objet ossia.v8connector.
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
@@ -6,18 +6,26 @@ CONTENU
 - Tous les objets ossia.* du paquet ossia officiel 2.1.0.
 - ossia.v8connector : les paramètres déclarés par un script v8 ou v8ui
   rejoignent l'arbre ossia du patch, à côté des ossia.parameter.
+- Corrections d'ossia aussi : un clic sur connect d'un ossia.client
+  connecté par URL ne fait plus planter Max (le poll et connect ne
+  tournent plus en même temps) ; supprimer [ossia] arrête les serveurs
+  qu'il a exposés et libère leurs ports.
 - Modifications d'ossia : le serveur OSCQuery écrit une seule clé
   EXTENDED_TYPE par paramètre ; un ossia.client connecté par nom
   applique les changements d'arbre du serveur (PATH_ADDED, PATH_REMOVED),
   comme un client connecté par URL ; un ossia.client connecté par URL
   signale la perte du serveur (connect 0 ...), se reconnecte seul quand il
   revient (connect 1 ..., arbre relu, abonnements renvoyés), ce que
-  @reconnect 0 désactive. Une couleur reste décrite par le
+  @reconnect 0 désactive ; la connexion par URL se fait sur un thread à
+  part, sans figer Max, y compris vers un ossia.device du même Max ; un
+  client OSCQuery envoie des bundles OSC
+  (push_bundle), et un device exposé les transmet à son serveur. Une
+  couleur reste décrite par le
   tableau de ses composantes (color.rgb.r, color.rgb.g, ...), sans UNIT ;
   libossia 2.1.0 ajoutait une seconde clé EXTENDED_TYPE « vecf », qui
   masquait ce tableau pour un client gardant la dernière clé en double.
 - Plateformes : macOS universel (Apple Silicon et Intel) pour
-  2.1.0+prism.4 ; Windows x64 à venir, même version, ajouté plus tard à
+  2.1.0+prism.5 ; Windows x64 à venir, même version, ajouté plus tard à
   la Release.
 
 INSTALLATION
@@ -36,11 +44,29 @@ INSTALLATION
 PRISE EN MAIN
 - Aide : clic droit sur ossia.v8connector, Open Help (onglets Basic,
   Script, Limits).
-- Démo : examples/ossia.v8connector.demo.maxpat dans le paquet.
+- Menu Extras de Max : « ossia-prism examples » ouvre chaque exemple
+  d'ossia.v8connector (demo, grid, load) en un clic.
+- Démo : examples/ossia.v8connector.demo.maxpat dans le paquet ; charge :
+  examples/ossia.v8connector.load.maxpat (3000 paramètres par frame,
+  @bundle 1 ou 0).
 - Helper JavaScript : javascript/ossia.v8connector.js (declare, set,
   bind, on).
 
 RECETTES
+- Bundles : avec @bundle 1 (par défaut), les valeurs qu'une instance pose
+  pendant un tick partent ensemble en bundles OSC (sous 1400 octets en
+  UDP), seulement celles qui changent quand @repetitions vaut 0 ;
+  @bundle 0 envoie un message par valeur, comme 2.1.0+prism.4. Au banc,
+  3000 valeurs par tick à 60 Hz : 53 datagrammes au lieu de 3000,
+  latence médiane 1,65 ms au lieu de 4,19 ms.
+  Tous les objets aussi : ce que poussent ossia.parameter, ossia.remote
+  ou ossia.view pendant un tick part en bundles par leur ossia.device ou
+  ossia.client, sans fusion (deux valeurs d'une même adresse partent
+  toutes deux, dans l'ordre). @bundle de ossia.device et ossia.client :
+  -1 (par défaut) en OSCQuery seulement, 0 jamais, 1 toujours ; l'OSC
+  simple et Minuit restent sans bundle par défaut. Au banc, avec des
+  ossia.remote : 53 datagrammes par tick au lieu de 3000, latence médiane
+  0,79 ms au lieu de 3,59 ms.
 - Ajouter et retirer depuis un script : le helper envoie lui-même add et
   remove, en trouvant l'objet par son nom de scripting (varname, dans
   l'inspecteur), sans câble. Le câble de la sortie gauche vers le script
@@ -96,10 +122,6 @@ DÉFAUTS CONNUS
   sa socket UDP, confiée à ce thread, s'exécute après la libération.
   AddressSanitizer le voit dans un test qui arrête un serveur et en expose
   un autre dans le même processus. Pas observé tel quel dans Max.
-- Le client OSCQuery envoie un message OSC par valeur, jamais un bundle, même
-  pour des valeurs poussées ensemble : 128 paramètres liés qui changent à
-  chaque frame donnent 128 messages WebSocket par frame. Le serveur sait
-  envoyer des bundles.
 
 LIENS
 - Paquets Max : https://docs.cycling74.com/userguide/packages/

@@ -32,6 +32,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -150,6 +152,19 @@ public:
   // differs from what was sent (clip, type conversion).
   std::string set(std::string_view address, const scalars& values);
 
+  // Bundles: when on, set stores the value and queues the parameter instead
+  // of sending it; flush sends what was queued since the last flush, in OSC
+  // bundles, one group per protocol: a client's OSCQuery mirror splits them
+  // itself under 1400 bytes over UDP, other protocols (an OSCQuery server
+  // under a multiplex) get groups of at most 1400 bytes of messages. A value
+  // equal to the parameter's current one is not queued when the parameter's
+  // repetition filter is on. Off (the default here), set sends at once.
+  void set_bundle(bool on);
+  bool bundle() const { return m_bundle; }
+  // Main thread, from the host's deferred queue. Returns the number of
+  // parameters sent.
+  std::size_t flush();
+
   // Follow a parameter that exists elsewhere. The address follows the rules of
   // ossia.remote: relative to the parents given by set_resolution_context,
   // absolute ("/a/b") in the parents' device, or global ("device:/a/b");
@@ -242,6 +257,27 @@ private:
   std::vector<leaf> m_leaves;
   std::vector<binding> m_bindings;
   std::vector<ossia::net::node_base*> m_parents;
+
+  // Index of each address in m_leaves and m_bindings: a script sets
+  // thousands of addresses per tick.
+  struct address_hash
+  {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view s) const noexcept
+    {
+      return std::hash<std::string_view>{}(s);
+    }
+  };
+  using address_index = std::unordered_map<std::string, std::size_t, address_hash, std::equal_to<>>;
+  address_index m_leaf_index;
+  address_index m_binding_index;
+  // Bindings by the last component of their address, and the bindings with
+  // a pattern: a parameter created can only satisfy those.
+  std::unordered_map<std::string, std::vector<std::size_t>> m_binding_by_name;
+  std::vector<std::size_t> m_pattern_bindings;
+  void index_binding(std::size_t i);
+  void reindex_leaves();
+  void reindex_bindings();
   std::vector<ossia::net::device_base*> m_parent_devices; // device of each parent
   std::vector<ossia::net::device_base*> m_devices;
   std::function<void(const std::string&, std::size_t)> m_binding_changed;
@@ -263,6 +299,13 @@ private:
   std::function<ossia::net::node_base*()> m_node_factory;
   bool m_owns_node{true};
   std::string m_attach_refusal; // reason of the last leaf refused by attach
+
+  // Parameters set since the last flush, each once, in the order of their
+  // first set; the value sent is the one they hold at flush.
+  bool m_bundle{false};
+  std::vector<ossia::net::parameter_base*> m_outgoing;
+  std::unordered_set<ossia::net::parameter_base*> m_outgoing_set;
+  bool push(ossia::net::parameter_base& param, ossia::value&& v);
 };
 
 }

@@ -4,6 +4,37 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [2.1.0+prism.5]
+
+Published for macOS universal (Apple Silicon and Intel). Windows x64 to come: same version, added to the Release later.
+
+### Added
+
+- `ossia.device` and `ossia.client`: attribute `@bundle` (default -1: on when the device speaks OSCQuery, off for plain OSC and Minuit). What `ossia.parameter`, `ossia.remote` and `ossia.view` push during a tick of the scheduler leaves at its end, in OSC bundles of at most 1400 bytes over UDP; nothing is merged, two values of one address both leave, in order.
+- `ossia.v8connector`: attribute `@bundle` (default 1). The values an instance sets during a tick leave together at the end of the tick, in OSC bundles of at most 1400 bytes over UDP; a parameter set several times leaves once with its last value, and with `@repetitions 0` a value equal to the current one does not leave. `@bundle 0` sends one message per value, as before.
+- `examples/ossia.v8connector.load.maxpat`: 3000 parameters set at each frame and followed by a client in the same Max, drawn as a cloud of points, with a toggle for `@bundle`.
+- Extras menu: `ossia-prism examples` opens each example of `ossia.v8connector` (demo, grid, load) in one click.
+- A load bench (`v8connector_load`), whose results are in the README.
+
+### Changed
+
+- Frames on the network, by default with OSCQuery: the values of `ossia.parameter`, `ossia.remote` and `ossia.view` leave at the end of the scheduler's tick in OSC bundles, no longer one message each as soon as they are pushed. A peer that decodes OSC bundles sees the same values in the same order; `@bundle 0` on the `ossia.device` or `ossia.client` restores the previous frames.
+- `ossia.client` connected by URL: `connect 1 ...` comes out a little after the `connect` message, when the connection made on its own thread is done (tens of milliseconds on a local network), no longer before `connect` returns.
+- With `@bundle 1`, the default, the values of `ossia.v8connector` reach the network at the end of the tick, in bundles, instead of one message as soon as each is set. A peer that decodes OSC bundles sees the same values; `@bundle 0` restores the previous frames.
+
+### Fixed
+
+- Clicking `connect` on an `ossia.client` connected by URL could crash Max: its poll, on the scheduler thread, applied the tree changes of the mirror that `connect`, on the main thread, was destroying. The poll and `connect`, `disconnect` and the end of a connection no longer run at once. The race was there in `2.1.0+prism.4` and in ossia 2.1.0.
+- Deleting the global `[ossia]` object stops the servers it exposed and frees their ports: exposing again on the same ports works. Before, they stayed on the global device, unpolled.
+- `ossia.v8connector`: a parameter created resolves again only the bindings it can satisfy. With 3000 binds waiting and 3000 parameters arriving one by one, every creation resolved every binding: 15 s in one poll of the client, Max frozen, the client's HTTP requests timing out.
+- The load example connects its client once the emitter has declared its leaves (a `declared` message), instead of 500 ms after load; `[print load_view]`, which flooded the console, is gone.
+- `expose` sent to the global `[ossia]` object crashed Max (null network context), for instance on loading `examples/model_view_example.maxpat` or clicking `expose oscquery` in `examples/pattern-matching_examples.maxpat`. The defect existed in `2.1.0+prism.4` and in ossia 2.1.0. `[ossia]` now creates and polls its network context, as `ossia.device` does.
+- `ossia.client` connected by URL builds its device and reads the tree on a thread of its own. On the main thread, each attempt froze Max for up to 4.5 s, and a client could never connect to an `ossia.device` of the same Max, whose server that thread polls.
+- The OSCQuery client sends bundles: `push_bundle` and `push_raw_bundle` of its mirror were TODOs that sent nothing.
+- A device exposed through a multiplex (`ossia.device`) forwards a bundle to its protocols, instead of pushing its values one by one.
+- The OSCQuery client and server send bundles of values in which a parameter may come several times (`push_bundle` of `bundle_element`), instead of setting and pushing each value again.
+- `ossia.v8connector` finds an address through an index: setting 3000 bound addresses took 9.1 ms per tick with bundles, 17.6 ms without, now 1.8 ms and 8.6 ms.
+
 ## [2.1.0+prism.4] - 2026-10-30
 
 Published for macOS universal (Apple Silicon and Intel). Windows x64 to come: same version, added to the Release later.

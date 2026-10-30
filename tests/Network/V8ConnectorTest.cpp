@@ -30,6 +30,8 @@
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 
 #include <client_mirror.hpp>
+#include <device_bundles.hpp>
+#include <device_network.hpp>
 #include <v8connector_branch.hpp>
 
 #include <arpa/inet.h>
@@ -1596,4 +1598,1212 @@ TEST_CASE("v8connector_client_reconnects", "v8connector_client_reconnects")
     REQUIRE(cancelled);
     client.reset();
   }
+}
+
+#include <ossia/protocols/osc/osc_factory.hpp>
+
+#include <boost/asio/ip/udp.hpp>
+#include <boost/endian/conversion.hpp>
+
+#include <oscpack/osc/OscReceivedElements.h>
+
+#include <atomic>
+#include <mutex>
+
+namespace
+{
+// What an OSCQuery client sends over UDP, as received: every datagram, and
+// the messages it holds (a bundle is opened). The server below announces this
+// port in HOST_INFO and does not listen to it itself.
+struct udp_sink
+{
+  boost::asio::io_context ctx;
+  boost::asio::ip::udp::socket socket{ctx};
+  std::thread thread;
+  std::mutex mutex;
+  std::vector<std::size_t> datagrams;              // size of each datagram
+  std::vector<std::pair<std::string, float>> messages; // address, first float
+  std::atomic_bool running{true};
+
+  explicit udp_sink(uint16_t port)
+  {
+    socket.open(boost::asio::ip::udp::v4());
+    socket.bind({boost::asio::ip::make_address("0.0.0.0"), port});
+    socket.non_blocking(true);
+    thread = std::thread([this] {
+      std::vector<char> buf(65536);
+      while(running)
+      {
+        boost::system::error_code ec;
+        boost::asio::ip::udp::endpoint from;
+        auto n = socket.receive_from(boost::asio::buffer(buf), from, 0, ec);
+        if(ec)
+        {
+          std::this_thread::sleep_for(std::chrono::microseconds(200));
+          continue;
+        }
+        std::lock_guard lock{mutex};
+        datagrams.push_back(n);
+        decode(buf.data(), n);
+      }
+    });
+  }
+  ~udp_sink()
+  {
+    running = false;
+    thread.join();
+  }
+  void decode(const char* data, std::size_t size)
+  {
+    try
+    {
+      oscpack::ReceivedPacket p{data, (oscpack::osc_bundle_element_size_t)size};
+      if(p.IsBundle())
+      {
+        oscpack::ReceivedBundle b{p};
+        for(auto it = b.ElementsBegin(); it != b.ElementsEnd(); ++it)
+          decode(it->Contents(), it->Size());
+      }
+      else
+      {
+        oscpack::ReceivedMessage m{p};
+        float v = 0.f;
+        if(m.ArgumentCount() > 0 && m.ArgumentsBegin()->IsFloat())
+          v = m.ArgumentsBegin()->AsFloat();
+        messages.emplace_back(m.AddressPattern(), v);
+      }
+    }
+    catch(...)
+    {
+    }
+  }
+  void clear()
+  {
+    std::lock_guard lock{mutex};
+    datagrams.clear();
+    messages.clear();
+  }
+  // Waits until n messages arrived, or the time is up.
+  bool wait_messages(std::size_t n, int ms)
+  {
+    for(int i = 0; i < ms / 5; i++)
+    {
+      {
+        std::lock_guard lock{mutex};
+        if(messages.size() >= n)
+          return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::lock_guard lock{mutex};
+    return messages.size() >= n;
+  }
+};
+
+// An OSCQuery server whose OSC port is read by a udp_sink.
+struct sink_server
+{
+  ossia::net::network_context_ptr ctx = ossia::net::create_network_context();
+  ossia::net::multiplex_protocol* multiplex{};
+  std::unique_ptr<ossia::net::generic_device> dev;
+  uint16_t osc = free_port(false);
+  uint16_t ws = free_port(true);
+  udp_sink sink{osc};
+  std::thread net;
+
+  explicit sink_server(int leaves)
+  {
+    auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+    multiplex = mp.get();
+    dev = std::make_unique<ossia::net::generic_device>(std::move(mp), "td_bench");
+    for(int i = 0; i < leaves; i++)
+    {
+      auto& n = ossia::net::create_node(dev->get_root_node(), "/load/p" + std::to_string(i));
+      auto* p = ossia::try_setup_parameter("float", n);
+      p->set_domain(ossia::make_domain(0.f, 1000000.f));
+    }
+    ossia::try_setup_parameter("impulse", ossia::net::create_node(dev->get_root_node(), "/bang"));
+    multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol_base>(
+        ctx,
+        std::vector<ossia::net::osc_server_configuration>{
+            ossia::net::udp_server_configuration{{{"0.0.0.0"}, osc}}},
+        ws, false));
+    net = std::thread([this] { ctx->run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+  ~sink_server()
+  {
+    ossia::net::stop_network_context(*ctx);
+    net.join();
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(ws); }
+};
+}
+
+// The client's push_bundle sends the values of many parameters in OSC
+// bundles: over UDP, no datagram above 1400 bytes.
+TEST_CASE("oscquery_mirror_push_bundle", "oscquery_mirror_push_bundle")
+{
+  const int n = 3000;
+  sink_server server{n};
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+
+  std::vector<const ossia::net::parameter_base*> params;
+  for(int i = 0; i < n; i++)
+  {
+    auto* node = ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i));
+    REQUIRE(node);
+    auto* p = node->get_parameter();
+    p->set_value(ossia::value(float(i)));
+    params.push_back(p);
+  }
+  server.sink.clear();
+
+  const bool sent = client->get_protocol().push_bundle(params);
+  const bool all = server.sink.wait_messages(n, 3000);
+  std::lock_guard lock{server.sink.mutex};
+  INFO("datagrams " << server.sink.datagrams.size() << ", messages " << server.sink.messages.size());
+  REQUIRE(sent);
+  REQUIRE(all);
+  REQUIRE(server.sink.messages.size() == std::size_t(n));
+  for(auto size : server.sink.datagrams)
+    REQUIRE(size <= 1400);
+  REQUIRE(server.sink.datagrams.size() < std::size_t(n) / 20);
+  REQUIRE(server.sink.messages[1234].first == "/load/p1234");
+  REQUIRE(server.sink.messages[1234].second == 1234.f);
+}
+
+#include <ossia/network/sockets/websocket_client.hpp>
+
+namespace
+{
+// A client of an OSCQuery server reduced to its WebSocket: it counts the
+// binary frames the server sends, and can ask the server to send its values
+// over UDP to a port of the test (START_OSC_STREAMING).
+struct raw_client
+{
+  std::atomic_int binary_frames{0};
+  ossia::net::websocket_client ws{
+      [this](auto, websocketpp::frame::opcode::value op, const std::string&) {
+    if(op == websocketpp::frame::opcode::value::BINARY)
+      binary_frames++;
+      }};
+  std::thread thread;
+
+  explicit raw_client(const std::string& url)
+  {
+    thread = std::thread([this, url] {
+      try
+      {
+        ws.connect_and_run(url);
+      }
+      catch(...)
+      {
+      }
+    });
+    for(int i = 0; i < 400 && !ws.connected(); i++)
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ~raw_client()
+  {
+    ws.stop();
+    thread.join();
+  }
+  void stream_to(uint16_t udp_port)
+  {
+    auto msg = ossia::oscquery::json_writer::start_osc_streaming(udp_port, 0);
+    ws.send_message(std::string(msg.GetString(), msg.GetSize()));
+  }
+};
+}
+
+// An OSCQuery server under a multiplex sends a bundle as one OSC bundle to
+// each client; before, the multiplex pushed its values one by one.
+TEST_CASE("oscquery_multiplex_push_bundle", "oscquery_multiplex_push_bundle")
+{
+  const int n = 40;
+  sink_server server{n};
+  udp_sink client_sink{free_port(false)};
+  raw_client client{server.url()};
+  REQUIRE(client.ws.connected());
+  client.stream_to(client_sink.socket.local_endpoint().port());
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  std::vector<const ossia::net::parameter_base*> params;
+  for(int i = 0; i < n; i++)
+  {
+    auto* p = ossia::net::find_node(server.dev->get_root_node(), "/load/p" + std::to_string(i))
+                  ->get_parameter();
+    p->set_value(ossia::value(float(i)));
+    params.push_back(p);
+  }
+  client_sink.clear();
+  server.dev->get_protocol().push_bundle(params);
+  const bool all = client_sink.wait_messages(n, 3000);
+  std::lock_guard lock{client_sink.mutex};
+  INFO("datagrams " << client_sink.datagrams.size() << ", messages " << client_sink.messages.size());
+  REQUIRE(all);
+  REQUIRE(client_sink.datagrams.size() == 1);
+  REQUIRE(client_sink.messages.size() == std::size_t(n));
+}
+
+// The sets of a branch during a tick leave at flush in OSC bundles: through a
+// client's mirror to a bound server, and through a served device to its
+// clients. Only what changes leaves; with bundles off, one message per value.
+TEST_CASE("v8connector_bundles", "v8connector_bundles")
+{
+  const int n = 3000;
+  sink_server server{n};
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  std::vector<std::string> addresses;
+  for(int i = 0; i < n; i++)
+  {
+    addresses.push_back("td_bench:/load/p" + std::to_string(i));
+    REQUIRE(b.bind(addresses.back()).empty());
+  }
+  REQUIRE(b.bound_count(addresses[2999]) == 1);
+  b.drain();
+  server.sink.clear();
+
+  auto tick = [&](auto value_of) {
+    for(int i = 0; i < n; i++)
+      REQUIRE(b.set(addresses[i], {value_of(i)}).empty());
+  };
+  auto settle = [] { std::this_thread::sleep_for(std::chrono::milliseconds(200)); };
+
+  SECTION("3000 sets of one tick leave at flush, in datagrams of at most 1400 bytes")
+  {
+    b.set_bundle(true);
+    tick([](int i) { return float(i); });
+    settle();
+    {
+      std::lock_guard lock{server.sink.mutex};
+      REQUIRE(server.sink.messages.empty());
+    }
+    REQUIRE(b.flush() == std::size_t(n));
+    REQUIRE(server.sink.wait_messages(n, 3000));
+    std::lock_guard lock{server.sink.mutex};
+    INFO("datagrams " << server.sink.datagrams.size());
+    REQUIRE(server.sink.messages.size() == std::size_t(n));
+    for(auto size : server.sink.datagrams)
+      REQUIRE(size <= 1400);
+    REQUIRE(server.sink.datagrams.size() < std::size_t(n) / 20);
+  }
+
+  SECTION("only what changes leaves, as the repetition filter says")
+  {
+    for(int i = 0; i < n; i++)
+      ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i))
+          ->get_parameter()
+          ->set_repetition_filter(ossia::repetition_filter::ON);
+    b.set_bundle(true);
+    // every value differs from the one the parameter holds
+    tick([](int i) { return float(i) + 1000.f; });
+    REQUIRE(b.flush() == std::size_t(n));
+    REQUIRE(server.sink.wait_messages(n, 3000));
+    server.sink.clear();
+    // 1 % changes
+    tick([](int i) { return i % 100 == 0 ? float(i) + 1000.5f : float(i) + 1000.f; });
+    REQUIRE(b.flush() == std::size_t(n / 100));
+    REQUIRE(server.sink.wait_messages(n / 100, 3000));
+    settle();
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.messages.size() == std::size_t(n / 100));
+    REQUIRE(server.sink.datagrams.size() == 1);
+  }
+
+  SECTION("bundles off: one datagram per value, as before")
+  {
+    b.set_bundle(false);
+    tick([](int i) { return float(i); });
+    REQUIRE(b.flush() == 0);
+    REQUIRE(server.sink.wait_messages(n, 5000));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.datagrams.size() == std::size_t(n));
+  }
+
+  client.reset();
+}
+
+// Leaves declared under a served device (ossia.device): the bundle leaves
+// through the OSCQuery server, which sends what it is given as one datagram.
+// The branch hands it groups of at most 1400 bytes.
+TEST_CASE("v8connector_bundles_served_leaves", "v8connector_bundles_served_leaves")
+{
+  const int n = 3000;
+  sink_server server{0};
+  udp_sink client_sink{free_port(false)};
+  raw_client client{server.url()};
+  REQUIRE(client.ws.connected());
+  client.stream_to(client_sink.socket.local_endpoint().port());
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  branch b;
+  auto& root = server.dev->get_root_node();
+  b.set_node_factory([&]() -> ossia::net::node_base* { return &ossia::net::create_node(root, "/synth"); });
+  b.set_resolution_context({&root}, {server.dev.get()});
+  for(int i = 0; i < n; i++)
+    REQUIRE(b.declare("p" + std::to_string(i), attrs({{"type", {S("float")}}, {"min", {0}}, {"max", {1000}}}))
+                .empty());
+  b.drain();
+  b.set_bundle(true);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  client_sink.clear();
+
+  for(int i = 0; i < n; i++)
+    REQUIRE(b.set("p" + std::to_string(i), {float(i)}).empty());
+  REQUIRE(b.flush() == std::size_t(n));
+  const bool all = client_sink.wait_messages(n, 3000);
+  std::lock_guard lock{client_sink.mutex};
+  std::size_t largest = 0;
+  for(auto size : client_sink.datagrams)
+    largest = std::max(largest, size);
+  INFO("datagrams " << client_sink.datagrams.size() << ", messages " << client_sink.messages.size()
+                    << ", largest " << largest);
+  REQUIRE(all);
+  REQUIRE(client_sink.messages.size() == std::size_t(n));
+  REQUIRE(largest <= 1400);
+  REQUIRE(client_sink.datagrams.size() < std::size_t(n) / 20);
+}
+
+#include <csignal>
+#include <cstring>
+#include <cstdio>
+
+namespace
+{
+std::atomic_bool g_load_server_stop{false};
+void load_server_on_term(int)
+{
+  g_load_server_stop = true;
+}
+
+int64_t now_ns()
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+// One value as the load server received it.
+struct load_arrival
+{
+  uint32_t leaf;
+  float tick;
+  int64_t ns;
+};
+// One datagram as the load server received it.
+struct load_datagram
+{
+  uint32_t size;
+  int64_t ns;
+};
+}
+
+// The load server, run in its own process by the load bench (hidden from the
+// normal runs). 3000 leaves; it announces OSC_LOAD_OSC in HOST_INFO and reads
+// that port itself; on SIGTERM it writes what it received to OSSIA_LOAD_OUT.
+TEST_CASE("zz_load_server", "[.]")
+{
+  const char* osc_s = std::getenv("OSSIA_LOAD_OSC");
+  const char* ws_s = std::getenv("OSSIA_LOAD_WS");
+  const char* out_s = std::getenv("OSSIA_LOAD_OUT");
+  REQUIRE(osc_s);
+  REQUIRE(ws_s);
+  REQUIRE(out_s);
+  std::signal(SIGTERM, load_server_on_term);
+  const uint16_t osc = std::atoi(osc_s);
+
+  auto ctx = ossia::net::create_network_context();
+  auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = mp.get();
+  ossia::net::generic_device dev{std::move(mp), "load_server"};
+  for(int i = 0; i < 3000; i++)
+  {
+    auto& n = ossia::net::create_node(dev.get_root_node(), "/load/p" + std::to_string(i));
+    ossia::try_setup_parameter("float", n)->set_domain(ossia::make_domain(0.f, 1000000.f));
+  }
+  multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol_base>(
+      ctx,
+      std::vector<ossia::net::osc_server_configuration>{
+          ossia::net::udp_server_configuration{{{"0.0.0.0"}, osc}}},
+      std::atoi(ws_s), false));
+  std::thread net([&] { ctx->run(); });
+
+  std::vector<load_arrival> arrivals;
+  arrivals.reserve(6'000'000);
+  std::vector<load_datagram> datagrams;
+  datagrams.reserve(400'000);
+
+  boost::asio::io_context uctx;
+  boost::asio::ip::udp::socket socket{uctx};
+  socket.open(boost::asio::ip::udp::v4());
+  socket.set_option(boost::asio::socket_base::receive_buffer_size(8 * 1024 * 1024));
+  socket.bind({boost::asio::ip::make_address("0.0.0.0"), osc});
+  socket.non_blocking(true);
+
+  std::function<void(const char*, std::size_t, int64_t)> decode;
+  decode = [&](const char* data, std::size_t size, int64_t ns) {
+    oscpack::ReceivedPacket p{data, (oscpack::osc_bundle_element_size_t)size};
+    if(p.IsBundle())
+    {
+      oscpack::ReceivedBundle b{p};
+      for(auto it = b.ElementsBegin(); it != b.ElementsEnd(); ++it)
+        decode(it->Contents(), it->Size(), ns);
+      return;
+    }
+    oscpack::ReceivedMessage m{p};
+    const char* addr = m.AddressPattern();
+    const char* digits = std::strrchr(addr, 'p');
+    if(!digits || m.ArgumentCount() < 1 || !m.ArgumentsBegin()->IsFloat())
+      return;
+    arrivals.push_back({uint32_t(std::atoi(digits + 1)), m.ArgumentsBegin()->AsFloat(), ns});
+  };
+
+  std::vector<char> buf(65536);
+  // 5 minutes at most on its own
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(5);
+  while(!g_load_server_stop && std::chrono::steady_clock::now() < deadline)
+  {
+    boost::system::error_code ec;
+    boost::asio::ip::udp::endpoint from;
+    auto n = socket.receive_from(boost::asio::buffer(buf), from, 0, ec);
+    if(ec)
+    {
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+      continue;
+    }
+    const auto ns = now_ns();
+    datagrams.push_back({uint32_t(n), ns});
+    try
+    {
+      decode(buf.data(), n, ns);
+    }
+    catch(...)
+    {
+    }
+  }
+
+  if(FILE* f = std::fopen(out_s, "wb"))
+  {
+    const uint64_t na = arrivals.size(), nd = datagrams.size();
+    std::fwrite(&na, sizeof(na), 1, f);
+    std::fwrite(arrivals.data(), sizeof(load_arrival), na, f);
+    std::fwrite(&nd, sizeof(nd), 1, f);
+    std::fwrite(datagrams.data(), sizeof(load_datagram), nd, f);
+    std::fclose(f);
+  }
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+}
+
+// The load bench, run by hand, one mode per run (each under 120 s):
+//   OSSIA_LOAD_MODE=bundle1|bundle0|changes1pct|remote1|remote0 [OSSIA_LOAD_SECONDS=30]
+//   ossia_V8ConnectorTest "[load]"
+// 3000 leaves of a server in another process, bound through a client by URL,
+// all set at each tick, 60 ticks per second. With changes1pct, all are set at
+// each tick but 1 % change, with the repetition filter on. With remote1 and
+// remote0, the 3000 leaves are pushed as ossia.remote pushes them, through
+// the bundles of the client's device (@bundle 1) or one by one (@bundle 0).
+TEST_CASE("v8connector_load", "[.][load]")
+{
+  const std::string mode = std::getenv("OSSIA_LOAD_MODE") ? std::getenv("OSSIA_LOAD_MODE") : "bundle1";
+  const int seconds = std::getenv("OSSIA_LOAD_SECONDS") ? std::atoi(std::getenv("OSSIA_LOAD_SECONDS")) : 30;
+  const int n = 3000, rate = 60, ticks = seconds * rate;
+  const bool remote = mode.rfind("remote", 0) == 0;
+  const bool bundle = mode != "bundle0" && mode != "remote0";
+  const bool one_percent = mode == "changes1pct";
+
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  const std::string out = "/tmp/ossia_v8connector_load_" + std::to_string(getpid()) + ".bin";
+  std::remove(out.c_str());
+  setenv("OSSIA_LOAD_OSC", std::to_string(osc).c_str(), 1);
+  setenv("OSSIA_LOAD_WS", std::to_string(ws).c_str(), 1);
+  setenv("OSSIA_LOAD_OUT", out.c_str(), 1);
+  const auto exe = self_path();
+  const char* argv[] = {exe.c_str(), "zz_load_server", nullptr};
+  pid_t pid{};
+  REQUIRE(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, const_cast<char**>(argv), environ) == 0);
+  struct reaper
+  {
+    pid_t pid;
+    ~reaper()
+    {
+      if(pid)
+      {
+        kill(pid, SIGKILL);
+        waitpid(pid, nullptr, 0);
+      }
+    }
+  } reap{pid};
+
+  const std::string url = "ws://127.0.0.1:" + std::to_string(ws);
+  bool up = false;
+  for(int i = 0; i < 100 && !up; i++)
+  {
+    up = ossia::max_binding::oscquery_server_reachable(url, 100);
+    if(!up)
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  INFO("step: load server up");
+  REQUIRE(up);
+
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url, free_port(false)),
+      "load_server");
+  INFO("step: client reads the tree");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  branch b;
+  b.set_resolution_context({&max_dev.get_root_node()}, {&max_dev, client.get()});
+  // the ossia.remote objects, and the bundles of their ossia.client
+  ossia::max_binding::device_bundle_queue queue{*client};
+  queue.set_mode(bundle ? 1 : 0);
+  std::vector<ossia::net::parameter_base*> remotes;
+  std::vector<std::string> addresses;
+  for(int i = 0; i < n; i++)
+  {
+    addresses.push_back("load_server:/load/p" + std::to_string(i));
+    remotes.push_back(
+        ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i))->get_parameter());
+    if(!remote)
+      REQUIRE(b.bind(addresses.back()).empty());
+    if(one_percent)
+      ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i))
+          ->get_parameter()
+          ->set_repetition_filter(ossia::repetition_filter::ON);
+  }
+  INFO("step: 3000 binds resolved");
+  REQUIRE((remote || b.bound_count(addresses[n - 1]) == 1));
+  b.drain();
+  b.set_bundle(bundle);
+
+  // Tick k sends the value k + 1 (exact in a float) to every leaf, or, with
+  // changes1pct, to the 1 % of the leaves whose turn it is.
+  std::vector<int64_t> tick_start(ticks), tick_ns(ticks);
+  std::vector<float> current(n, 0.f);
+  std::size_t expected = 0;
+  const auto period = std::chrono::nanoseconds(1'000'000'000 / rate);
+  auto next = std::chrono::steady_clock::now();
+  for(int k = 0; k < ticks; k++)
+  {
+    std::this_thread::sleep_until(next);
+    next += period;
+    const auto t0 = now_ns();
+    tick_start[k] = t0;
+    for(int i = 0; i < n; i++)
+    {
+      if(!one_percent || i % 100 == k % 100)
+        current[i] = float(k + 1);
+      if(!remote)
+        b.set(addresses[i], {current[i]});
+      // what object_base::push_parameter_value does
+      else if(!ossia::max_binding::device_bundle_queue::push_if_active(*remotes[i], current[i]))
+        remotes[i]->push_value(current[i]);
+    }
+    expected += one_percent ? std::size_t(n / 100) : std::size_t(n);
+    if(!remote)
+      b.flush();
+    else
+      queue.flush();
+    tick_ns[k] = now_ns() - t0;
+  }
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  kill(pid, SIGTERM);
+  int status = 0;
+  waitpid(pid, &status, 0);
+  reap.pid = 0;
+  client.reset();
+
+  // What the server received
+  std::vector<load_arrival> arrivals;
+  std::vector<load_datagram> datagrams;
+  {
+    FILE* f = std::fopen(out.c_str(), "rb");
+    INFO("step: load server results");
+    REQUIRE(f);
+    uint64_t na = 0, nd = 0;
+    std::fread(&na, sizeof(na), 1, f);
+    arrivals.resize(na);
+    std::fread(arrivals.data(), sizeof(load_arrival), na, f);
+    std::fread(&nd, sizeof(nd), 1, f);
+    datagrams.resize(nd);
+    std::fread(datagrams.data(), sizeof(load_datagram), nd, f);
+    std::fclose(f);
+    std::remove(out.c_str());
+  }
+
+  // Latency of each value: from the start of the tick that set it to its
+  // arrival. Only the values of the measured ticks count (k + 1 in 1..ticks).
+  std::vector<double> latency_ms;
+  latency_ms.reserve(arrivals.size());
+  std::vector<uint8_t> seen;
+  if(!one_percent)
+    seen.assign(std::size_t(n) * ticks, 0);
+  std::size_t received = 0;
+  for(const auto& a : arrivals)
+  {
+    const int k = int(a.tick) - 1;
+    if(k < 0 || k >= ticks || a.leaf >= uint32_t(n))
+      continue;
+    if(one_percent && int(a.leaf % 100) != k % 100)
+      continue;
+    if(!one_percent)
+    {
+      auto& s = seen[std::size_t(k) * n + a.leaf];
+      if(s)
+        continue;
+      s = 1;
+    }
+    received++;
+    latency_ms.push_back((a.ns - tick_start[k]) / 1e6);
+  }
+  auto pct = [](std::vector<double> v, double p) {
+    if(v.empty())
+      return 0.;
+    std::sort(v.begin(), v.end());
+    return v[std::min(v.size() - 1, std::size_t(p * (v.size() - 1)))];
+  };
+  std::vector<double> tick_ms(ticks);
+  for(int k = 0; k < ticks; k++)
+    tick_ms[k] = tick_ns[k] / 1e6;
+  uint64_t bytes = 0;
+  std::size_t max_size = 0;
+  for(const auto& d : datagrams)
+  {
+    bytes += d.size;
+    max_size = std::max<std::size_t>(max_size, d.size);
+  }
+  const double lost = expected ? 100. * double(expected - std::min(expected, received)) / expected : 0.;
+
+  std::printf(
+      "LOAD mode=%s ticks=%d values/tick=%.0f datagrams/tick=%.1f bytes/tick=%.0f max_datagram=%zu "
+      "latency_p50=%.2fms latency_p99=%.2fms lost=%.3f%% tick_p50=%.2fms tick_p99=%.2fms tick_max=%.2fms\n",
+      mode.c_str(), ticks, double(expected) / ticks, double(datagrams.size()) / ticks,
+      double(bytes) / ticks, max_size, pct(latency_ms, 0.5), pct(latency_ms, 0.99), lost,
+      pct(tick_ms, 0.5), pct(tick_ms, 0.99), pct(tick_ms, 1.0));
+  std::fflush(stdout);
+  REQUIRE(received > 0);
+}
+
+namespace
+{
+// A server as ossia.device runs it in Max: no thread of its own, its network
+// context polled by the main thread between other work.
+struct main_thread_server
+{
+  ossia::net::network_context_ptr ctx = ossia::net::create_network_context();
+  std::unique_ptr<ossia::net::generic_device> dev;
+  uint16_t ws = free_port(true);
+  explicit main_thread_server(int leaves)
+  {
+    auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+    auto* multiplex = mp.get();
+    dev = std::make_unique<ossia::net::generic_device>(std::move(mp), "load_demo");
+    for(int i = 0; i < leaves; i++)
+      ossia::try_setup_parameter(
+          "float", ossia::net::create_node(dev->get_root_node(), "/load/p" + std::to_string(i)));
+    multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+        ctx, free_port(false), ws, false));
+  }
+  void poll()
+  {
+    ctx->context.poll();
+    ctx->context.restart();
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(ws); }
+};
+}
+
+// An ossia.client connected by URL to an ossia.device of the same Max: the
+// main thread polls the server and must not wait for the client. The attempt
+// runs on its own thread; the main thread only checks whether it is done.
+TEST_CASE("v8connector_client_connects_to_same_process_server", "v8connector_client_connects_to_same_process_server")
+{
+  main_thread_server server{3000};
+  for(int i = 0; i < 10; i++)
+  {
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  auto t0 = std::chrono::steady_clock::now();
+  ossia::max_binding::oscquery_connect_attempt attempt{server.url(), "load_demo"};
+  const auto start_ms
+      = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+
+  // the main thread's loop: poll the server, check the attempt
+  long long longest = 0;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while(!attempt.done() && std::chrono::steady_clock::now() < deadline)
+  {
+    const auto a = std::chrono::steady_clock::now();
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    longest = std::max<long long>(
+        longest, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - a).count());
+  }
+  INFO("step: attempt done within 10 s");
+  REQUIRE(attempt.done());
+  auto dev = attempt.take();
+  INFO("error: " << attempt.error());
+  REQUIRE(dev != nullptr);
+  auto* load = ossia::net::find_node(dev->get_root_node(), "/load");
+  REQUIRE(load != nullptr);
+  REQUIRE(load->children().size() == 3000);
+  // the main thread was never held
+  REQUIRE(start_ms < 50);
+  REQUIRE(longest < 50);
+}
+
+// expose oscquery sent to the global [ossia] object: the object now creates
+// and polls a network context as ossia.device does; before, the server was
+// built on a null context and Max crashed in websocketpp's init_asio.
+TEST_CASE("ossia_object_expose_oscquery", "ossia_object_expose_oscquery")
+{
+  // the global device of Max, as ossia_max creates it
+  ossia::net::generic_device global{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(global.get_root_node(), "/foo/bar"));
+
+  // ossia_object::create, then device::expose
+  auto ctx = ossia::max_binding::make_device_network_context();
+  const uint16_t ws = free_port(true);
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(global.get_protocol());
+  multiplex.expose_to(
+      std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), ws, false));
+
+  // the server answers: a client by URL reads the tree while device::asio_timer polls
+  ossia::max_binding::oscquery_connect_attempt attempt{"ws://127.0.0.1:" + std::to_string(ws), "max"};
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while(!attempt.done() && std::chrono::steady_clock::now() < deadline)
+  {
+    ossia::max_binding::poll_device_network_context(*ctx);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  INFO("step: client attempt done within 10 s");
+  REQUIRE(attempt.done());
+  auto dev = attempt.take();
+  INFO("error: " << attempt.error());
+  REQUIRE(dev != nullptr);
+  REQUIRE(ossia::net::find_node(dev->get_root_node(), "/foo/bar") != nullptr);
+  dev.reset();
+  multiplex.clear();
+}
+
+// The bundles of ossia.device and ossia.client: what the objects of a device
+// push during a tick leaves at its end, in OSC bundles, nothing merged.
+TEST_CASE("device_bundles", "device_bundles")
+{
+  const int n = 3000;
+  sink_server server{n};
+  auto leaf = [&](ossia::net::device_base& d, int i) {
+    return ossia::net::find_node(d.get_root_node(), "/load/p" + std::to_string(i))->get_parameter();
+  };
+  // what object_base::push_parameter_value now does
+  auto push = [](ossia::max_binding::device_bundle_queue&, ossia::net::parameter_base& p, ossia::value v) {
+    if(!ossia::max_binding::device_bundle_queue::push_if_active(p, v))
+      p.push_value(v);
+  };
+
+  SECTION("ossia.parameter: 3000 values of a tick reach a client of the device in datagrams of at most 1400 bytes")
+  {
+    udp_sink client_sink{free_port(false)};
+    raw_client client{server.url()};
+    REQUIRE(client.ws.connected());
+    client.stream_to(client_sink.socket.local_endpoint().port());
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    REQUIRE(ossia::max_binding::bundles_by_default(server.dev->get_protocol()));
+
+    ossia::max_binding::device_bundle_queue q{*server.dev};
+    for(int i = 0; i < n; i++)
+      push(q, *leaf(*server.dev, i), float(i));
+    REQUIRE(q.flush() == std::size_t(n));
+    const bool all = client_sink.wait_messages(n, 3000);
+    std::lock_guard lock{client_sink.mutex};
+    std::size_t largest = 0;
+    for(auto size : client_sink.datagrams)
+      largest = std::max(largest, size);
+    INFO("datagrams " << client_sink.datagrams.size() << ", largest " << largest);
+    REQUIRE(all);
+    REQUIRE(client_sink.messages.size() == std::size_t(n));
+    REQUIRE(largest <= 1400);
+    REQUIRE(client_sink.datagrams.size() < std::size_t(n) / 20);
+  }
+
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  server.sink.clear();
+
+  SECTION("ossia.remote: 3000 values of a tick leave through the client's mirror in bundles")
+  {
+    REQUIRE(ossia::max_binding::bundles_by_default(client->get_protocol()));
+    ossia::max_binding::device_bundle_queue q{*client};
+    for(int i = 0; i < n; i++)
+      push(q, *leaf(*client, i), float(i));
+    REQUIRE(q.flush() == std::size_t(n));
+    REQUIRE(server.sink.wait_messages(n, 3000));
+    std::lock_guard lock{server.sink.mutex};
+    for(auto size : server.sink.datagrams)
+      REQUIRE(size <= 1400);
+    REQUIRE(server.sink.datagrams.size() < std::size_t(n) / 20);
+  }
+
+  SECTION("two values on the same address in a tick both leave, in order, impulses included")
+  {
+    ossia::max_binding::device_bundle_queue q{*client};
+    auto* p0 = leaf(*client, 0);
+    auto* p1 = leaf(*client, 1);
+    auto* bang = ossia::net::find_node(client->get_root_node(), "/bang")->get_parameter();
+    push(q, *p0, 1.f);
+    push(q, *bang, ossia::impulse{});
+    push(q, *p1, 3.f);
+    push(q, *p0, 2.f);
+    push(q, *bang, ossia::impulse{});
+    REQUIRE(q.flush() == 5);
+    REQUIRE(server.sink.wait_messages(5, 3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.datagrams.size() == 1);
+    REQUIRE(server.sink.messages.size() == 5);
+    const std::vector<std::pair<std::string, float>> expected{
+        {"/load/p0", 1.f}, {"/bang", 0.f}, {"/load/p1", 3.f}, {"/load/p0", 2.f}, {"/bang", 0.f}};
+    REQUIRE(server.sink.messages == expected);
+  }
+
+  SECTION("a parameter removed before the flush is not sent")
+  {
+    ossia::max_binding::device_bundle_queue q{*client};
+    push(q, *leaf(*client, 0), 1.f);
+    push(q, *leaf(*client, 1), 2.f);
+    client->get_root_node().find_child("load")->remove_child("p0");
+    REQUIRE(q.flush() == 1);
+    REQUIRE(server.sink.wait_messages(1, 3000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.messages.size() == 1);
+    REQUIRE(server.sink.messages[0].first == "/load/p1");
+  }
+
+  SECTION("@bundle 0, as 2.1.0+prism.4: one datagram per value")
+  {
+    ossia::max_binding::device_bundle_queue q{*client};
+    q.set_mode(0);
+    for(int i = 0; i < n; i++)
+      push(q, *leaf(*client, i), float(i));
+    REQUIRE(q.size() == 0);
+    REQUIRE(server.sink.wait_messages(n, 5000));
+    std::lock_guard lock{server.sink.mutex};
+    REQUIRE(server.sink.datagrams.size() == std::size_t(n));
+  }
+
+  client.reset();
+}
+
+TEST_CASE("device_bundles_default", "device_bundles_default")
+{
+  // a device without OSCQuery server, and a plain OSC client: no bundles by default
+  ossia::net::generic_device local{std::make_unique<ossia::net::multiplex_protocol>(), "local"};
+  REQUIRE(!ossia::max_binding::bundles_by_default(local.get_protocol()));
+
+  auto ctx = ossia::net::create_network_context();
+  ossia::net::osc_protocol_configuration conf;
+  ossia::net::udp_configuration udp;
+  udp.local = ossia::net::inbound_socket_configuration{"127.0.0.1", free_port(false)};
+  udp.remote = ossia::net::outbound_socket_configuration{"127.0.0.1", free_port(false)};
+  conf.transport = udp;
+  ossia::net::generic_device osc{ossia::net::make_osc_protocol(ctx, conf), "osc"};
+  REQUIRE(!ossia::max_binding::bundles_by_default(osc.get_protocol()));
+}
+
+// Bundles of values: each element carries its own value, so a parameter may
+// come several times. The client's mirror and the OSCQuery server send them;
+// the server splits them under 1400 bytes.
+TEST_CASE("oscquery_value_bundles", "oscquery_value_bundles")
+{
+  const int n = 3000;
+  sink_server server{n};
+
+  SECTION("client: the values of the elements, in order")
+  {
+    auto client = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+        "td_bench");
+    REQUIRE(client->get_protocol().update(client->get_root_node()));
+    auto* p0 = ossia::net::find_node(client->get_root_node(), "/load/p0")->get_parameter();
+    std::vector<ossia::bundle_element> elements{{p0, 1.f}, {p0, 2.f}, {p0, 3.f}};
+    server.sink.clear();
+    REQUIRE(client->get_protocol().push_bundle(std::span<ossia::bundle_element>(elements)));
+    REQUIRE(server.sink.wait_messages(3, 3000));
+    std::lock_guard lock{server.sink.mutex};
+    const std::vector<std::pair<std::string, float>> expected{
+        {"/load/p0", 1.f}, {"/load/p0", 2.f}, {"/load/p0", 3.f}};
+    REQUIRE(server.sink.messages == expected);
+    REQUIRE(server.sink.datagrams.size() == 1);
+  }
+
+  SECTION("server: 3000 values in datagrams of at most 1400 bytes")
+  {
+    udp_sink client_sink{free_port(false)};
+    raw_client client{server.url()};
+    REQUIRE(client.ws.connected());
+    client.stream_to(client_sink.socket.local_endpoint().port());
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::vector<ossia::bundle_element> elements;
+    for(int i = 0; i < n; i++)
+      elements.push_back(
+          {ossia::net::find_node(server.dev->get_root_node(), "/load/p" + std::to_string(i))->get_parameter(),
+           float(i)});
+    ossia::oscquery_asio::oscquery_server_protocol_base* proto{};
+    static_cast<ossia::net::multiplex_protocol&>(server.dev->get_protocol())
+        .for_each_protocol([&](ossia::net::protocol_base& p) {
+      proto = dynamic_cast<ossia::oscquery_asio::oscquery_server_protocol_base*>(&p);
+        });
+    REQUIRE(proto);
+    REQUIRE(proto->push_bundle(std::span<ossia::bundle_element>(elements)));
+    const bool all = client_sink.wait_messages(n, 3000);
+    std::lock_guard lock{client_sink.mutex};
+    std::size_t largest = 0;
+    for(auto size : client_sink.datagrams)
+      largest = std::max(largest, size);
+    INFO("datagrams " << client_sink.datagrams.size() << ", largest " << largest);
+    REQUIRE(all);
+    REQUIRE(largest <= 1400);
+    REQUIRE(client_sink.messages[1234] == std::pair<std::string, float>{"/load/p1234", 1234.f});
+  }
+}
+
+// ossia.client connected by URL: its poll runs on the scheduler thread
+// (oscquery_link::tick applies the mirror's commands), while a connect or a
+// disconnect on the main thread destroys the device. unwatch() must not
+// return while a tick runs on the old mirror.
+TEST_CASE("oscquery_link_unwatch_waits_for_tick", "oscquery_link_unwatch_waits_for_tick")
+{
+  sink_server server{50};
+  // the server's tree keeps changing: the mirror always has commands to apply
+  std::atomic_bool churn{true};
+  std::thread changes([&] {
+    int k = 0;
+    while(churn)
+    {
+      auto& root = server.dev->get_root_node();
+      const std::string name = "c" + std::to_string(k++ % 20);
+      if(auto* n = root.find_child(name))
+        root.remove_child(*n);
+      else
+        ossia::try_setup_parameter("float", ossia::net::create_node(root, "/" + name));
+      std::this_thread::sleep_for(std::chrono::microseconds(300));
+    }
+  });
+
+  bool ok = true;
+  for(int round = 0; round < 20 && ok; round++)
+  {
+    auto client = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+        "td_bench");
+    ok = client->get_protocol().update(client->get_root_node());
+    if(!ok)
+      break;
+    ossia::max_binding::oscquery_link link{ossia::max_binding::oscquery_link::host{
+        [](int) {}, [] {}, [] {}, [] { return false; }}};
+    link.watch(*client, server.url(), 1);
+
+    // the scheduler's clock
+    std::atomic_bool polling{true};
+    std::thread scheduler([&] {
+      while(polling)
+        link.tick();
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(20 + round));
+
+    // the main thread: connect or disconnect
+    link.unwatch();
+    client.reset();
+
+    polling = false;
+    scheduler.join();
+  }
+  // Deterministic: the tick is held inside (its schedule callback runs under
+  // the link's lock); unwatch returns only once that tick has ended.
+  if(ok)
+  {
+    auto client = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+        "td_bench");
+    ok = client->get_protocol().update(client->get_root_node());
+    std::atomic_bool in_tick{false}, tick_done{false};
+    ossia::max_binding::oscquery_link link{ossia::max_binding::oscquery_link::host{
+        [&](int) {
+      if(tick_done)
+        return;
+      in_tick = true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      tick_done = true;
+        },
+        [] {}, [] {}, [] { return false; }}};
+    link.watch(*client, server.url(), 1);
+    // watch scheduled once; the next schedule comes from the tick
+    tick_done = false;
+    in_tick = false;
+    std::thread scheduler([&] { link.tick(); });
+    for(int i = 0; i < 200 && !in_tick; i++)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const bool entered = in_tick;
+    link.unwatch();
+    const bool waited = tick_done;
+    client.reset();
+    scheduler.join();
+    INFO("step: a tick held inside, then unwatch");
+    REQUIRE(entered);
+    REQUIRE(waited);
+  }
+  churn = false;
+  changes.join();
+  REQUIRE(ok);
+}
+
+#include <spdlog/sinks/callback_sink.h>
+
+// A client connected before the server declares its leaves, with 3000 binds
+// waiting (the load example in Max): each leaf arrives alone (PATH_ADDED,
+// then ATTRIBUTES_CHANGED and an HTTP request for its value). The poll must
+// not stall: before, every creation resolved every waiting binding again,
+// 15 s in one run_commands, while the server of the same Max, polled by
+// that thread, let the HTTP requests time out.
+TEST_CASE("v8connector_binds_follow_a_burst_of_leaves", "v8connector_binds_follow_a_burst_of_leaves")
+{
+  std::atomic_int http_errors{0};
+  auto sink = std::make_shared<spdlog::sinks::callback_sink_mt>([&](const spdlog::details::log_msg& m) {
+    if(std::string_view(m.payload.data(), m.payload.size()).find("HTTP Error") != std::string_view::npos)
+      http_errors++;
+  });
+  ossia::logger().sinks().push_back(sink);
+
+  const int n = 3000;
+  main_thread_server server{0};
+  for(int i = 0; i < 10; i++)
+  {
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  ossia::max_binding::oscquery_connect_attempt attempt{server.url(), "load_demo"};
+  for(int i = 0; i < 10000 && !attempt.done(); i++)
+  {
+    server.poll();
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  auto client = attempt.take();
+  REQUIRE(client);
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+
+  branch b;
+  b.set_resolution_context({&client->get_root_node()}, {client.get()});
+  for(int i = 0; i < n; i++)
+    REQUIRE(b.bind("load/p" + std::to_string(i)).empty());
+
+  // the emitter declares its leaves after the connection
+  for(int i = 0; i < n; i++)
+    ossia::try_setup_parameter(
+        "float", ossia::net::create_node(server.dev->get_root_node(), "/load/p" + std::to_string(i)));
+
+  // the main thread polls the server, the client's clock its mirror
+  long long longest = 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto deadline = t0 + std::chrono::seconds(30);
+  while(b.bound_count("load/p" + std::to_string(n - 1)) == 0 && std::chrono::steady_clock::now() < deadline)
+  {
+    server.poll();
+    const auto a = std::chrono::steady_clock::now();
+    mirror->run_commands();
+    longest = std::max<long long>(
+        longest, std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - a).count());
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  const auto total
+      = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+  std::size_t bound = 0;
+  for(int i = 0; i < n; i++)
+    bound += b.bound_count("load/p" + std::to_string(i));
+  client.reset();
+  auto& sinks = ossia::logger().sinks();
+  sinks.erase(std::remove(sinks.begin(), sinks.end(), sink), sinks.end());
+
+  INFO("bound " << bound << " in " << total << " ms, longest run_commands " << longest << " ms, HTTP errors " << http_errors);
+  REQUIRE(bound == std::size_t(n));
+  REQUIRE(total < 10000);
+  REQUIRE(longest < 1000);
+  REQUIRE(http_errors == 0);
+}
+
+// [ossia] exposes the global device, which outlives it: deleting the object
+// stops the servers it exposed and frees their ports, so that another
+// [ossia] can expose on the same ports in the same Max.
+TEST_CASE("ossia_object_delete_frees_its_ports", "ossia_object_delete_frees_its_ports")
+{
+  ossia::net::generic_device global{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(global.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(global.get_protocol());
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  const std::string url = "ws://127.0.0.1:" + std::to_string(ws);
+
+  // what [ossia] does: its context, device::expose and its record
+  auto expose = [&](ossia::net::network_context_ptr ctx, std::vector<const ossia::net::protocol_base*>& exposed) {
+    const auto before = ossia::max_binding::exposed_protocols(global);
+    multiplex.expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws, false));
+    for(auto* p : ossia::max_binding::exposed_protocols(global))
+      if(std::find(before.begin(), before.end(), p) == before.end())
+        exposed.push_back(p);
+  };
+  auto answers = [&](ossia::net::network_context_ptr ctx) {
+    ossia::max_binding::oscquery_connect_attempt attempt{url, "max"};
+    for(int i = 0; i < 10000 && !attempt.done(); i++)
+    {
+      ossia::max_binding::poll_device_network_context(*ctx);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    auto dev = attempt.done() ? attempt.take() : nullptr;
+    return dev && ossia::net::find_node(dev->get_root_node(), "/foo/bar") != nullptr;
+  };
+
+  // a first [ossia] exposes
+  auto ctx1 = ossia::max_binding::make_device_network_context();
+  std::vector<const ossia::net::protocol_base*> exposed1;
+  expose(ctx1, exposed1);
+  REQUIRE(exposed1.size() == 1);
+  INFO("step: first server answers");
+  REQUIRE(answers(ctx1));
+
+  // it is deleted (ossia_object::destroy)
+  ossia::max_binding::stop_exposing(global, exposed1);
+  ctx1.reset();
+  REQUIRE(ossia::max_binding::exposed_protocols(global).empty());
+
+  // another [ossia] exposes on the same ports
+  auto ctx2 = ossia::max_binding::make_device_network_context();
+  std::vector<const ossia::net::protocol_base*> exposed2;
+  bool exposed_again = true;
+  try
+  {
+    expose(ctx2, exposed2);
+  }
+  catch(const std::exception& e)
+  {
+    exposed_again = false;
+    UNSCOPED_INFO("second expose: " << e.what());
+  }
+  INFO("step: same ports exposed again");
+  REQUIRE(exposed_again);
+  REQUIRE(answers(ctx2));
+  ossia::max_binding::stop_exposing(global, exposed2);
 }

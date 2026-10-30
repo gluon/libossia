@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 
 #include <ossia/detail/algorithms.hpp>
 #include <ossia/detail/audio_spin_mutex.hpp>
@@ -31,6 +32,8 @@ public:
   bool pull(ossia::net::parameter_base&) override;
   bool push(const ossia::net::parameter_base& addr, const ossia::value& v) override;
   bool push_raw(const full_parameter_data&) override;
+  bool push_bundle(const std::vector<const ossia::net::parameter_base*>&) override;
+  bool push_raw_bundle(const std::vector<full_parameter_data>&) override;
   bool observe(ossia::net::parameter_base&, bool) override;
   bool update(ossia::net::node_base& node_base) override;
 
@@ -52,6 +55,9 @@ public:
 
   //! The protocols we are currently exposing this device through.
   const auto& get_protocols() const { return m_protocols; }
+
+  //! Calls f with each protocol, under the lock that push takes.
+  void for_each_protocol(const std::function<void(ossia::net::protocol_base&)>& f);
 
 private:
   std::vector<std::unique_ptr<ossia::net::protocol_base>>

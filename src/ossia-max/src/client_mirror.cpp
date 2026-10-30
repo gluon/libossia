@@ -63,6 +63,46 @@ bool oscquery_server_reachable(std::string_view ws_url, int timeout_ms)
   }
 }
 
+oscquery_connect_attempt::oscquery_connect_attempt(
+    std::string ws_url, std::string device_name)
+{
+  m_thread = std::thread([this, url = std::move(ws_url), name = std::move(device_name)] {
+    try
+    {
+      auto dev = std::make_shared<ossia::net::generic_device>(
+          std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url), name);
+      if(dev->get_protocol().update(dev->get_root_node()))
+        m_device = std::move(dev);
+      else
+        m_error = "no answer to the tree request of " + url;
+    }
+    catch(const std::exception& e)
+    {
+      m_error = e.what();
+    }
+    catch(...)
+    {
+      m_error = "could not connect to " + url;
+    }
+    m_done = true;
+  });
+}
+
+oscquery_connect_attempt::~oscquery_connect_attempt()
+{
+  if(m_thread.joinable())
+    m_thread.join();
+}
+
+std::shared_ptr<ossia::net::generic_device> oscquery_connect_attempt::take()
+{
+  if(!m_done)
+    return {};
+  if(m_thread.joinable())
+    m_thread.join();
+  return std::move(m_device);
+}
+
 oscquery_link::oscquery_link(host h)
     : m_host{std::move(h)}
 {
@@ -70,12 +110,14 @@ oscquery_link::oscquery_link(host h)
 
 oscquery_link::~oscquery_link()
 {
+  std::lock_guard lock{m_mutex};
   m_attempting = false;
   unwatch();
 }
 
 void oscquery_link::watch(ossia::net::device_base& dev, std::string ws_url, int poll_ms)
 {
+  std::lock_guard lock{m_mutex};
   m_mirror = polled_oscquery_mirror(dev);
   m_url = std::move(ws_url);
   m_poll_ms = poll_ms > 0 ? poll_ms : 1;
@@ -93,6 +135,8 @@ void oscquery_link::watch(ossia::net::device_base& dev, std::string ws_url, int 
 
 void oscquery_link::unwatch()
 {
+  // Waits for a tick running on another thread.
+  std::lock_guard lock{m_mutex};
   if(m_attempting)
     return;
   m_mirror = nullptr;
@@ -103,6 +147,7 @@ void oscquery_link::unwatch()
 
 void oscquery_link::tick()
 {
+  std::lock_guard lock{m_mutex};
   switch(m_state)
   {
     case state::idle:

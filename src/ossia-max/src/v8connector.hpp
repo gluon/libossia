@@ -63,6 +63,9 @@ public:
   void* m_queue_qelem{};
   void* m_register_qelem{};
   std::vector<t_atom> m_atoms;
+  // @bundle: the sets of a tick leave together, in OSC bundles (1, default),
+  // or one message per value (0).
+  long m_bundle{1};
 
   void do_registration();
   void unregister();

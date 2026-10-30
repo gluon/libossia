@@ -58,6 +58,19 @@ public:
   std::unique_ptr<oscquery_link> m_link;
   std::string m_wsurl;
   long m_reconnect{1};
+  // Connection by URL in progress, on a thread of its own; checked by
+  // m_attempt_clock. Attempts left by a disconnect or a new connect end on
+  // their own and are released when done.
+  std::unique_ptr<oscquery_connect_attempt> m_attempt;
+  std::vector<std::unique_ptr<oscquery_connect_attempt>> m_abandoned;
+  std::vector<t_atom> m_attempt_status;
+  void* m_attempt_clock{};
+  static void attempt_check(client* x);
+  static void attempt_check_impl(client* x);
+  static void connect_impl(client* x);
+  static void disconnect_impl(client* x);
+  static void poll_message_impl(client* x);
+  static void finish_connect(client* x, int count, t_atom* status, bool read_tree);
 
   bool m_zeroconf{true};
   bool is_zeroconf() const { return m_zeroconf; }

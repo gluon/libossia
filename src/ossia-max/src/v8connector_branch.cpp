@@ -11,6 +11,8 @@
 #include <ossia/network/common/value_bounding.hpp>
 #include <ossia/network/dataspace/dataspace_visitors.hpp>
 #include <ossia/network/domain/domain.hpp>
+#include <ossia/network/oscquery/detail/osc_writer.hpp>
+#include <ossia/network/oscquery/oscquery_mirror.hpp>
 #include <ossia/network/value/impulse.hpp>
 #include <ossia/network/value/vec.hpp>
 
@@ -614,6 +616,7 @@ void branch::attach(ossia::net::node_base& node)
     {
       refuse(m_leaves[i].spec.address, err);
       m_leaves.erase(m_leaves.begin() + i);
+      reindex_leaves();
       m_attach_refusal = std::move(err);
     }
     else
@@ -642,10 +645,42 @@ void branch::detach()
 
 branch::leaf* branch::find(std::string_view address)
 {
-  for(auto& l : m_leaves)
-    if(l.spec.address == address)
-      return &l;
-  return nullptr;
+  auto it = m_leaf_index.find(address);
+  return it == m_leaf_index.end() ? nullptr : &m_leaves[it->second];
+}
+
+void branch::reindex_leaves()
+{
+  m_leaf_index.clear();
+  for(std::size_t i = 0; i < m_leaves.size(); i++)
+    m_leaf_index.emplace(m_leaves[i].spec.address, i);
+}
+
+void branch::reindex_bindings()
+{
+  m_binding_index.clear();
+  m_binding_by_name.clear();
+  m_pattern_bindings.clear();
+  for(std::size_t i = 0; i < m_bindings.size(); i++)
+    index_binding(i);
+}
+
+void branch::index_binding(std::size_t i)
+{
+  const std::string& a = m_bindings[i].address;
+  m_binding_index.emplace(a, i);
+  if(ossia::traversal::is_pattern(a))
+  {
+    m_pattern_bindings.push_back(i);
+    return;
+  }
+  // "dev:/a/b", "/a/b" or "a/b": the name of the node is "b"
+  std::string_view name = a;
+  if(auto slash = name.find_last_of('/'); slash != std::string_view::npos)
+    name.remove_prefix(slash + 1);
+  else if(auto colon = name.find(':'); colon != std::string_view::npos)
+    name.remove_prefix(colon + 1);
+  m_binding_by_name[std::string(name)].push_back(i);
 }
 
 std::string branch::add(const leaf_spec& spec)
@@ -669,11 +704,13 @@ std::string branch::add(const leaf_spec& spec)
                         : std::string("already exists"));
   }
   m_leaves.push_back(leaf{spec, nullptr, nullptr});
+  m_leaf_index.emplace(spec.address, m_leaves.size() - 1);
   if(m_node)
   {
     if(auto err = create(m_leaves.back()); !err.empty())
     {
       m_leaves.pop_back();
+      m_leaf_index.erase(spec.address);
       return refused(err);
     }
   }
@@ -897,6 +934,7 @@ bool branch::remove(std::string_view address)
   }
   destroy(*l);
   m_leaves.erase(m_leaves.begin() + (l - m_leaves.data()));
+  reindex_leaves();
   return true;
 }
 
@@ -905,6 +943,7 @@ void branch::clear()
   for(auto& l : m_leaves)
     destroy(l);
   m_leaves.clear();
+  m_leaf_index.clear();
 }
 
 std::string branch::set(std::string_view address, const scalars& values)
@@ -929,7 +968,7 @@ std::string branch::set_impl(std::string_view address, const scalars& values)
 
     pushing_scope guard{this, &values};
     // Stored as sent, as ossia.parameter does; bounded on output.
-    l->param->push_value(std::move(v));
+    push(*l->param, std::move(v));
     return {};
   }
 
@@ -943,12 +982,116 @@ std::string branch::set_impl(std::string_view address, const scalars& values)
       ossia::value v;
       if(auto err = scalars_to_value(*t.param, values, v); !err.empty())
         return b->address + ": " + err;
-      t.param->push_value(std::move(v));
+      push(*t.param, std::move(v));
     }
     return {};
   }
 
   return "unknown address '" + std::string(address) + "'";
+}
+
+bool branch::push(ossia::net::parameter_base& param, ossia::value&& v)
+{
+  if(!m_bundle)
+  {
+    param.push_value(std::move(v));
+    return true;
+  }
+  // Only what changes leaves, as the parameter's repetition filter says.
+  if(param.get_repetition_filter() == ossia::repetition_filter::ON && param.value() == v)
+    return false;
+  param.set_value(std::move(v));
+  if(m_outgoing_set.insert(&param).second)
+  {
+    m_outgoing.push_back(&param);
+    if(m_outgoing.size() == 1 && m_wake)
+      m_wake();
+  }
+  return true;
+}
+
+void branch::set_bundle(bool on)
+{
+  if(m_bundle && !on)
+    flush();
+  m_bundle = on;
+}
+
+namespace
+{
+constexpr std::size_t osc_bundle_header_size = 16; // "#bundle\0" and the time tag
+constexpr std::size_t osc_udp_bundle_limit = 1400;
+}
+
+std::size_t branch::flush()
+{
+  if(m_outgoing.empty())
+    return 0;
+  std::vector<ossia::net::parameter_base*> queued;
+  queued.swap(m_outgoing);
+  m_outgoing_set.clear();
+
+  // Only the parameters this branch still holds: a leaf removed or a bound
+  // parameter gone since its set is not sent.
+  std::unordered_set<const ossia::net::parameter_base*> live;
+  for(const auto& l : m_leaves)
+    if(l.param)
+      live.insert(l.param);
+  for(const auto& b : m_bindings)
+    for(const auto& t : b.targets)
+      if(t.param)
+        live.insert(t.param);
+
+  // One group per protocol, in the order of the first set.
+  std::vector<std::pair<ossia::net::protocol_base*, std::vector<const ossia::net::parameter_base*>>>
+      groups;
+  std::size_t sent = 0;
+  for(auto* p : queued)
+  {
+    if(!live.count(p))
+      continue;
+    auto* proto = &p->get_node().get_device().get_protocol();
+    auto it = std::find_if(groups.begin(), groups.end(), [proto](const auto& g) {
+      return g.first == proto;
+    });
+    if(it == groups.end())
+    {
+      groups.push_back({proto, {}});
+      it = groups.end() - 1;
+    }
+    it->second.push_back(p);
+    sent++;
+  }
+
+  for(auto& [proto, params] : groups)
+  {
+    // A client's mirror splits its bundles itself, by transport.
+    if(dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(proto))
+    {
+      proto->push_bundle(params);
+      continue;
+    }
+    // Other protocols send what they are given as one bundle: groups of at
+    // most 1400 bytes of messages.
+    std::vector<const ossia::net::parameter_base*> group;
+    std::size_t size = osc_bundle_header_size;
+    for(auto* p : params)
+    {
+      const auto message
+          = 4 + ossia::oscquery::osc_writer::to_message(*p, p->value()).size();
+      if(!group.empty() && size + message > osc_udp_bundle_limit)
+      {
+        proto->push_bundle(group);
+        group.clear();
+        size = osc_bundle_header_size;
+      }
+      group.push_back(p);
+      size += message;
+    }
+    if(!group.empty())
+      proto->push_bundle(group);
+  }
+  return sent;
 }
 
 std::vector<std::string> branch::addresses() const
@@ -1058,11 +1201,8 @@ std::string relative_to(const ossia::net::node_base& root, const ossia::net::nod
 
 branch::binding* branch::find_binding(std::string_view address)
 {
-  const auto a = trim_address(address);
-  for(auto& b : m_bindings)
-    if(b.address == a)
-      return &b;
-  return nullptr;
+  auto it = m_binding_index.find(trim_address(address));
+  return it == m_binding_index.end() ? nullptr : &m_bindings[it->second];
 }
 
 std::string branch::bind(std::string_view address)
@@ -1081,6 +1221,7 @@ std::string branch::bind(std::string_view address)
     return a + ": already declared by add";
   }
   m_bindings.push_back(binding{a, {}});
+  index_binding(m_bindings.size() - 1);
   resolve(m_bindings.back());
   if(m_binding_changed)
     m_binding_changed(a, m_bindings.back().targets.size());
@@ -1097,6 +1238,7 @@ bool branch::unbind(std::string_view address)
   }
   release(*b);
   m_bindings.erase(m_bindings.begin() + (b - m_bindings.data()));
+  reindex_bindings();
   return true;
 }
 
@@ -1287,14 +1429,30 @@ void branch::resolve(binding& b)
   }
 }
 
-void branch::on_parameter_created(const ossia::net::parameter_base&)
+// Only the bindings the new parameter can satisfy are resolved again: those
+// with a pattern, and those still waiting whose address ends with the name
+// of its node. Resolving every binding at each creation cost, for 3000
+// bindings waiting while 3000 parameters appear, 15 s in one poll.
+void branch::on_parameter_created(const ossia::net::parameter_base& p)
 {
-  bool pending = false;
-  for(const auto& b : m_bindings)
-    if(b.targets.empty() || ossia::traversal::is_pattern(b.address))
-      pending = true;
-  if(pending)
-    resolve_bindings();
+  auto again = [this](std::size_t i) {
+    auto& b = m_bindings[i];
+    const auto before = b.targets.size();
+    resolve(b);
+    if(b.targets.size() != before && m_binding_changed)
+      m_binding_changed(b.address, b.targets.size());
+  };
+  if(auto it = m_binding_by_name.find(p.get_node().get_name()); it != m_binding_by_name.end())
+  {
+    const auto candidates = it->second;
+    for(auto i : candidates)
+      if(i < m_bindings.size() && m_bindings[i].targets.empty())
+        again(i);
+  }
+  const auto patterns = m_pattern_bindings;
+  for(auto i : patterns)
+    if(i < m_bindings.size())
+      again(i);
 }
 
 void branch::on_node_removing(const ossia::net::node_base& n)

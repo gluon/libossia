@@ -1,3 +1,4 @@
+#include "device_bundles.hpp"
 #include <ossia/network/base/node_functions.hpp>
 #include <ossia/network/base/parameter.hpp>
 
@@ -9,6 +10,58 @@ namespace ossia
 namespace max_binding
 {
 Nano::Signal<void(device_base*)> device_base::on_device_created{};
+
+namespace
+{
+t_max_err set_bundle_attr(device_base* x, void*, long argc, t_atom* argv)
+{
+  if(argc && argv)
+    x->m_bundle = atom_getlong(argv);
+  if(x->m_bundles)
+    x->m_bundles->set_mode(x->m_bundle);
+  return MAX_ERR_NONE;
+}
+}
+
+void device_base::bundle_class_setup(t_class* c)
+{
+  CLASS_ATTR_LONG(c, "bundle", 0, device_base, m_bundle);
+  CLASS_ATTR_ACCESSORS(c, "bundle", nullptr, set_bundle_attr);
+  CLASS_ATTR_LABEL(
+      c, "bundle", 0,
+      "Send the values of a tick in OSC bundles (-1: when the device speaks OSCQuery)");
+}
+
+void device_base::start_bundles()
+{
+  stop_bundles();
+  if(!m_device)
+    return;
+  if(!m_bundle_clock)
+    m_bundle_clock = clock_new(this, (method)device_base::flush_bundles);
+  auto clock = m_bundle_clock;
+  m_bundles = new device_bundle_queue{*m_device, [clock] { clock_delay(clock, 0); }};
+  m_bundles->set_mode(m_bundle);
+}
+
+void device_base::stop_bundles()
+{
+  if(m_bundle_clock)
+    clock_unset(m_bundle_clock);
+  critical_enter(0);
+  delete m_bundles;
+  m_bundles = nullptr;
+  critical_exit(0);
+}
+
+// The end of the tick: what the objects pushed since the last flush leaves.
+void device_base::flush_bundles(device_base* x)
+{
+  critical_enter(0);
+  if(x->m_bundles)
+    x->m_bundles->flush();
+  critical_exit(0);
+}
 Nano::Signal<void(device_base*)> device_base::on_device_removing{};
 
 void device_base::on_parameter_created_callback(const ossia::net::parameter_base& param)
