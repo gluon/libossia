@@ -60,8 +60,38 @@ void expect_refused(branch& b, const char* address)
 namespace
 {
 
+// A free port, chosen by the system; with OSSIA_TEST_PORTS=<first>-<last>,
+// the next free one in that range, in turn, so that the tests of a machine
+// shared with other benches stay in their own ports.
+uint16_t free_port_in_range(bool tcp)
+{
+  const char* range = std::getenv("OSSIA_TEST_PORTS");
+  if(!range)
+    return 0;
+  int first = 0, last = 0;
+  if(std::sscanf(range, "%d-%d", &first, &last) != 2 || first <= 0 || last < first || last > 65535)
+    return 0;
+  static int next = 0;
+  for(int i = 0; i <= last - first; i++)
+  {
+    const int port = first + (next++ % (last - first + 1));
+    int fd = ::socket(AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    const bool ok = ::bind(fd, (sockaddr*)&addr, sizeof(addr)) == 0;
+    ::close(fd);
+    if(ok)
+      return static_cast<uint16_t>(port);
+  }
+  return 0;
+}
+
 uint16_t free_port(bool tcp)
 {
+  if(const auto port = free_port_in_range(tcp))
+    return port;
   int fd = ::socket(AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -2806,4 +2836,28 @@ TEST_CASE("ossia_object_delete_frees_its_ports", "ossia_object_delete_frees_its_
   REQUIRE(exposed_again);
   REQUIRE(answers(ctx2));
   ossia::max_binding::stop_exposing(global, exposed2);
+}
+
+// D1. Stopping an OSCQuery server that a device exposes (ossia.device's
+// "stop", multiplex_protocol::stop_expose_to) destroys the server at once,
+// while its UDP socket has posted its closing to the network context. The
+// next poll of the context runs that closing: it must find nothing to touch.
+TEST_CASE("oscquery_server_stop_then_poll", "oscquery_server_stop_then_poll")
+{
+  auto ctx = std::make_shared<ossia::net::network_context>();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), "a10_stop"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, free_port(false), free_port(true), false);
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+  ctx->context.poll();
+  ctx->context.restart();
+
+  multiplex.stop_expose_to(*exposed);
+  INFO("step: the poll that follows the stop");
+  REQUIRE_NOTHROW(ctx->context.poll());
+  ctx->context.restart();
+  REQUIRE_NOTHROW(ctx->context.poll());
 }
