@@ -10,8 +10,12 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <map>
+
+#include <unistd.h>
 
 namespace ossia
 {
@@ -112,6 +116,8 @@ struct oscquery_directory::impl final : servus::Listener
   using clock = std::chrono::steady_clock;
   struct entry
   {
+    std::string host;
+    std::string port;
     std::string url;
     std::shared_ptr<ossia::net::generic_device> device;
     ossia::oscquery::oscquery_mirror_protocol* mirror{};
@@ -208,6 +214,8 @@ oscquery_directory::changes oscquery_directory::poll()
       {
         d.abandon(e);
         e = impl::entry{};
+        e.host = host;
+        e.port = port;
         e.url = url;
         e.next_try = now;
       }
@@ -266,6 +274,32 @@ oscquery_directory::find(const std::string& name) const
   std::lock_guard lock{m_impl->mutex};
   auto it = m_impl->entries.find(name);
   return it != m_impl->entries.end() ? it->second.device : nullptr;
+}
+
+namespace
+{
+// The first label of a host name, in lower case: "Julien4" for the SRV target
+// "julien4.local.", as for gethostname's "Julien4" or "Julien4.local".
+std::string host_label(std::string_view host)
+{
+  std::string out{host.substr(0, host.find('.'))};
+  std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) { return std::tolower(c); });
+  return out;
+}
+}
+
+std::optional<std::string> oscquery_directory::announced_name(int ws_port) const
+{
+  char buf[256]{};
+  if(::gethostname(buf, sizeof(buf) - 1) != 0)
+    return std::nullopt;
+  const auto self = host_label(buf);
+  const auto port = std::to_string(ws_port);
+  std::lock_guard lock{m_impl->mutex};
+  for(const auto& [name, e] : m_impl->entries)
+    if(e.port == port && host_label(e.host) == self)
+      return name;
+  return std::nullopt;
 }
 
 std::vector<std::shared_ptr<ossia::net::generic_device>> oscquery_directory::devices() const
