@@ -3352,3 +3352,86 @@ TEST_CASE("oscquery_server_stopped_while_polled_with_a_client", "oscquery_server
   INFO("exception: " << error);
   REQUIRE(error.empty());
 }
+
+// A probe, hidden from the normal runs: runs the directory for
+// OSSIA_PROBE_SECONDS, an OSCQuery server process on OSSIA_PROBE_PORT behind
+// whatever announces OSSIA_PROBE_NAME (started apart), and prints, with
+// their time, what the directory reports and whether it finds the name.
+TEST_CASE("zz_directory_probe", "[.]")
+{
+  const char* name_s = std::getenv("OSSIA_PROBE_NAME");
+  const char* port_s = std::getenv("OSSIA_PROBE_PORT");
+  const char* secs_s = std::getenv("OSSIA_PROBE_SECONDS");
+  REQUIRE(name_s);
+  REQUIRE(port_s);
+  const std::string name = name_s;
+  const int seconds = secs_s ? std::atoi(secs_s) : 60;
+  server_process server{free_port(false), static_cast<uint16_t>(std::atoi(port_s))};
+  server.name = "a10_probe_srv_" + std::to_string(getpid());
+  REQUIRE(server.start());
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto at = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
+  ossia::max_binding::oscquery_directory dir;
+  bool had = false;
+  for(int i = 0; i < seconds * 10; i++)
+  {
+    auto ch = dir.poll();
+    for(auto& n : ch.removed)
+      std::printf("%8.2f removed %s\n", at(), n.c_str());
+    for(auto& n : ch.lost)
+      std::printf("%8.2f lost %s\n", at(), n.c_str());
+    const bool has = dir.find(name) != nullptr;
+    if(has != had)
+      std::printf("%8.2f find(%s) %s\n", at(), name.c_str(), has ? "found" : "nullptr");
+    had = has;
+    std::fflush(stdout);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+}
+
+// demo.maxpat connected by address while prism_demo is announced: "bind
+// /image/scale 2". The client first had the zeroconf listener's mirror of
+// the device (connect by name, connect 1 at once), shared and kept alive by
+// the listener, then its own device (connect oscquery <url>, the demo's
+// fallback after 5 s). Its connector's resolution context
+// goes from the first to the second; the first is not destroyed, so nothing
+// tells the connector to forget it (the client clears its device before it
+// announces the removal). Expected: one target, the second device's, and a
+// value set leaves through it only.
+TEST_CASE("v8connector_context_change_leaves_a_shared_device", "v8connector_context_change_leaves_a_shared_device")
+{
+  ossia::net::generic_device shared{std::make_unique<ossia::net::multiplex_protocol>(), "prism_demo"};
+  ossia::net::generic_device own{std::make_unique<ossia::net::multiplex_protocol>(), "prism_demo"};
+  ossia::net::generic_device max_dev{std::make_unique<ossia::net::multiplex_protocol>(), "max"};
+  auto leaf = [](ossia::net::generic_device& d) {
+    auto* p = ossia::try_setup_parameter("float", ossia::net::create_node(d.get_root_node(), "/image/scale"));
+    p->set_domain(ossia::make_domain(0.f, 1.f));
+    p->push_value(0.f);
+    return p;
+  };
+  auto* in_shared = leaf(shared);
+  auto* in_own = leaf(own);
+
+  branch b;
+  b.attach(ossia::net::create_node(max_dev.get_root_node(), "/demo_ui"));
+  b.set_resolution_context({&shared.get_root_node()}, {&shared, &max_dev});
+  REQUIRE(b.bind("/image/scale").empty());
+  REQUIRE(b.bound_count("/image/scale") == 1);
+
+  // the client leaves the shared mirror for its own device; the shared one lives on
+  b.set_resolution_context({&own.get_root_node()}, {&own, &max_dev});
+  const auto count = b.bound_count("/image/scale");
+  REQUIRE(b.set("/image/scale", {0.75f}).empty());
+  INFO("step: one target after the change, on the client's own device");
+  REQUIRE(count == 1);
+  REQUIRE(ossia::convert<float>(in_shared->value()) == 0.f);
+  REQUIRE(ossia::convert<float>(in_own->value()) == 0.75f);
+
+  // a value of the shared device no longer reaches the branch
+  b.drain();
+  in_shared->push_value(0.25f);
+  bool from_shared = false;
+  for(auto& in : b.drain())
+    from_shared = from_shared || in.address == "/image/scale";
+  REQUIRE(!from_shared);
+}
