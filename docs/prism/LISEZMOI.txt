@@ -23,7 +23,9 @@ CONTENU
   WebSocket en une seconde environ (disconnected, connect 0 <nom>) et
   se reconnecte, trouve aussi un ossia.device du même Max, et réessaie
   un device dont la connexion a échoué ; un serveur OSCQuery retire son
-  annonce mDNS dès son arrêt ; un
+  annonce mDNS dès son arrêt ; un ossia.device exposé en OSCQuery
+  donne le nom sous lequel il est annoncé (announced <nom>), avec un
+  avertissement en console si ce nom était pris (nom (2)) ; un
   client OSCQuery envoie des bundles OSC
   (push_bundle), et un device exposé les transmet à son serveur. Une
   couleur reste décrite par le
