@@ -3263,3 +3263,92 @@ TEST_CASE("oscquery_directory_retries_a_failed_build", "oscquery_directory_retri
   INFO("step: the device goes with its announcement");
   REQUIRE(p.until([&] { return p.has(p.removed, name) && p.dir.find(name) == nullptr; }, 10000));
 }
+
+// The name a server is announced under, as the directory sees it: the one it
+// was given, or, when another announcement already has that name, the one the
+// system chose (mDNSResponder renames, "name (2)"). Servus does not report it.
+TEST_CASE("oscquery_directory_announced_name", "oscquery_directory_announced_name")
+{
+  const std::string name = "a10_dup_" + std::to_string(getpid());
+  // another announcement takes the name first, on another port
+  dns_sd_announcement first{name, free_port(true)};
+  REQUIRE(first.announce());
+  directory_poller p;
+  INFO("step: the first announcement is seen");
+  REQUIRE(p.until([&] { return p.dir.announced_name(first.port).has_value(); }, 10000));
+
+  auto ctx = ossia::max_binding::make_device_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), name};
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  const uint16_t ws = free_port(true);
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), ws, false);
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+
+  std::optional<std::string> real;
+  p.until([&] { return (real = p.dir.announced_name(ws)).has_value(); }, 10000);
+  multiplex.stop_expose_to(*exposed);
+  INFO("step: the server's announcement is seen, under another name than the one taken");
+  REQUIRE(real);
+  WARN("asked " << name << ", announced " << *real);
+  REQUIRE(*real != name);
+  REQUIRE(real->rfind(name, 0) == 0);
+}
+
+// D1 as Max runs it. The device's network context is polled every 10 ms on
+// another thread (Max's scheduler, device::asio_timer), a client is connected
+// (in Max, the zeroconf listener's mirror of the device itself), and "stop"
+// (multiplex_protocol::stop_expose_to) destroys the server on the main
+// thread while that thread keeps polling. The closing handshake of the
+// client's WebSocket then completes in a later poll, whose handlers must find
+// nothing to touch. Before the fix: an exception out of poll (std::mutex::lock
+// on the destroyed server's mutex, in Max), or AddressSanitizer.
+TEST_CASE("oscquery_server_stopped_while_polled_with_a_client", "oscquery_server_stopped_while_polled_with_a_client")
+{
+  auto ctx = ossia::max_binding::make_device_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), "a10_polled"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  const uint16_t ws = free_port(true);
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), ws, false);
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+
+  std::atomic_bool stop{false};
+  std::mutex error_mutex;
+  std::string error;
+  std::thread scheduler([&] {
+    while(!stop)
+    {
+      try
+      {
+        ossia::max_binding::poll_device_network_context(*ctx);
+      }
+      catch(const std::exception& e)
+      {
+        std::lock_guard lock{error_mutex};
+        if(error.empty())
+          error = e.what();
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  });
+
+  ossia::max_binding::oscquery_connect_attempt attempt{"ws://127.0.0.1:" + std::to_string(ws), "a10_mirror"};
+  for(int i = 0; i < 500 && !attempt.done(); i++)
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  auto client = attempt.take();
+  INFO("step: a client is connected");
+  REQUIRE(client);
+
+  multiplex.stop_expose_to(*exposed);
+  std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+  stop = true;
+  scheduler.join();
+  client.reset();
+
+  INFO("step: no exception out of the polls after the stop");
+  std::lock_guard lock{error_mutex};
+  INFO("exception: " << error);
+  REQUIRE(error.empty());
+}
