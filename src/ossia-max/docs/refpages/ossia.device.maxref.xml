@@ -64,6 +64,18 @@
 			<description>
 				Sending the <m>expose</m> message without any argument will print in Max Console various protocol and configuration options available
 				Sending the <m>expose</m> message followed by a protocol name will expose the device to the network using the optional configuration option (ie. network ports)
+				With <m>expose</m> oscquery, the device is announced over mDNS (_oscjson._tcp) under its name, so that an <o>ossia.client</o> finds it with <m>connect</m> &lt;name&gt;, on this machine or another one of the same network. About a second later, once the announcement is seen on the network, the outlet sends <m>announced</m> and the name the device is announced under. If another device of the network already has that name, the system announces this one as "name (2)": <m>announced</m> gives that name, and the console warns that the name is taken.
+			</description>
+		</method>
+		<method name="stop">
+			<arglist>
+				<arg name="index" optional="0" type="int" />
+			</arglist>
+			<digest>
+				Stop exposing the device
+			</digest>
+			<description>
+				The <m>stop</m> message followed by the index of an exposed protocol (0 for the first <m>expose</m>) stops it and frees its ports; the outlet sends <m>stop_expose</m> and the index. An OSCQuery server first withdraws its mDNS announcement, then closes its connections.
 			</description>
 		</method>
 

@@ -16,8 +16,32 @@
 
 #include <nano_signal_slot.hpp>
 
+#include <memory>
+#include <mutex>
+
 namespace ossia::net
 {
+namespace detail
+{
+// close() posts the closing of a socket to its context. The owner may destroy
+// the socket before the context runs it (a protocol stopped and deleted at
+// once): the closing holds this, and does nothing once the socket is gone.
+// The mutex keeps the destruction and a closing running on another thread
+// apart; recursive, since a slot of on_close may destroy the socket.
+struct udp_socket_life
+{
+  std::recursive_mutex mutex;
+  bool alive{true};
+};
+
+inline void end_udp_socket_life(const std::shared_ptr<udp_socket_life>& life)
+{
+  if(!life)
+    return;
+  std::lock_guard lock{life->mutex};
+  life->alive = false;
+}
+}
 
 class udp_receive_socket
 {
@@ -39,7 +63,7 @@ public:
   {
   }
 
-  ~udp_receive_socket() = default;
+  ~udp_receive_socket() { detail::end_udp_socket_life(m_life); }
 
   void assign(int sock) { m_socket.assign(boost::asio::ip::udp::v4(), sock); }
   void open()
@@ -71,16 +95,13 @@ public:
   {
     if(m_socket.is_open())
     {
-      boost::asio::post(m_context, [this] {
-        try
-        {
-          m_socket.shutdown(boost::asio::ip::udp::socket::shutdown_both);
-        }
-        catch(...)
-        {
-        }
-
-        m_socket.close();
+      boost::asio::post(m_context, [this, life = m_life] {
+        std::lock_guard lock{life->mutex};
+        if(!life->alive)
+          return;
+        boost::system::error_code ec;
+        m_socket.shutdown(boost::asio::ip::udp::socket::shutdown_both, ec);
+        m_socket.close(ec);
         on_close();
       });
     }
@@ -120,6 +141,7 @@ public:
   boost::asio::io_context& m_context;
   proto::endpoint m_endpoint;
   proto::socket m_socket;
+  std::shared_ptr<detail::udp_socket_life> m_life{std::make_shared<detail::udp_socket_life>()};
   std::string m_multicast_group;
   std::string m_multicast_interface;
   alignas(16) char m_data[65535];
@@ -149,6 +171,8 @@ public:
       , m_socket{boost::asio::make_strand(ctx)}
   {
   }
+
+  ~udp_send_socket() { detail::end_udp_socket_life(m_life); }
 
   void connect()
   {
@@ -180,15 +204,13 @@ public:
   {
     if(m_socket.is_open())
     {
-      boost::asio::post(m_context, [this] {
-        try
-        {
-          m_socket.shutdown(boost::asio::ip::udp::socket::shutdown_both);
-        }
-        catch(...)
-        {
-        }
-        m_socket.close();
+      boost::asio::post(m_context, [this, life = m_life] {
+        std::lock_guard lock{life->mutex};
+        if(!life->alive)
+          return;
+        boost::system::error_code ec;
+        m_socket.shutdown(boost::asio::ip::udp::socket::shutdown_both, ec);
+        m_socket.close(ec);
         on_close();
       });
     }
@@ -207,6 +229,7 @@ public:
   boost::asio::io_context& m_context;
   proto::endpoint m_endpoint;
   proto::socket m_socket;
+  std::shared_ptr<detail::udp_socket_life> m_life{std::make_shared<detail::udp_socket_life>()};
   bool m_broadcast{};
   std::optional<int> m_multicast_ttl;
   std::string m_multicast_interface;

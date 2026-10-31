@@ -4,6 +4,26 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [2.1.0+prism.6] - 2026-11-01
+
+Published for macOS universal (Apple Silicon and Intel). Windows x64 to come: same version, added to the Release later.
+
+### Added
+
+- `ossia.device` exposed over OSCQuery: `announced <name>` on the outlet, about a second after `expose`, with the name the device is announced under over mDNS; when that name is already taken on the network, the system announces the device as `name (2)`, and the console warns. Before, nothing said so.
+
+### Changed
+
+- `ossia.client` connected by name (`connect <name>`): when the device's WebSocket goes down while it is still announced, the outlet sends `disconnected` then `connect 0 <name>` within about a second, and the client tries again every second until the device answers; before, it stayed connected to a dead device until the announcement went (60 s after a TouchDesigner killed, never for a server stopped but still announced). `@reconnect 0` stops the attempts, as for a connection by URL, and also after the device is no longer announced.
+- An OSCQuery server withdraws its mDNS announcement when it stops (`stop` on an `ossia.device`), before it closes its connections; before, only when it was destroyed.
+
+### Fixed
+
+- `stop` sent to an `ossia.device` exposed over OSCQuery quit Max (`stop 0` after `expose oscquery`, three times out of three): the server was destroyed while the closing of its UDP socket, posted to its network context, still pointed to it, and while the WebSocket of a connected client (the zeroconf listener's own mirror of the device, in the same Max) was closing: the next poll threw out of the scheduler, `close: Bad file descriptor` for the first, `mutex lock failed` for the second. The defect existed in `2.1.0+prism.5`, `2.1.0+prism.4` and ossia 2.1.0.
+- `ossia.client` finds by name a device of the same Max (`connect <name>` to an `ossia.device` exposed in that Max): the mirrors of the announced devices are built on a thread of their own. Before, they were built on the Max clock that also polls the device's server, which could never answer: the device was never found (`devices 0`), and each attempt held that clock for 1.5 s.
+- A device announced before its server answers, or whose build failed, is tried again every second while it is announced; before, it was never tried again until it was announced anew.
+- `ossia.v8connector`: when its `ossia.client` goes from one device to another while the first stays alive (connected by name to the zeroconf listener's shared mirror, then by URL, as the fallback of a demo does), the bindings on the first device are released. Before, each bound address followed both (`bind <address> 2`), and every value set left twice, once through the listener's mirror.
+
 ## [2.1.0+prism.5] - 2026-10-30
 
 Published for macOS universal (Apple Silicon and Intel). Windows x64 to come: same version, added to the Release later.

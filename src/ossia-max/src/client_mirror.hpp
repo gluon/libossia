@@ -12,12 +12,15 @@
 #include <ossia/network/generic/generic_device.hpp>
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 namespace ossia
 {
@@ -70,6 +73,52 @@ private:
   std::string m_error;
   std::atomic_bool m_done{false};
   std::thread m_thread;
+};
+
+// The OSCQuery devices announced over mDNS (_oscjson._tcp), each mirrored:
+// what ossia.client finds by name, and what ossia.fuzzysearch searches.
+// Every mirror is built on a thread of its own (oscquery_connect_attempt),
+// never on the thread that calls poll: built there, a mirror of a server of
+// the same Max, whose network context that thread polls, could never
+// connect. A build that fails is tried again every retry_ms while the device
+// is announced, and a mirror whose WebSocket goes down is dropped, reported,
+// and built again the same way.
+class oscquery_directory
+{
+public:
+  oscquery_directory();
+  ~oscquery_directory();
+  oscquery_directory(const oscquery_directory&) = delete;
+  oscquery_directory& operator=(const oscquery_directory&) = delete;
+
+  struct changes
+  {
+    // No longer announced.
+    std::vector<std::string> removed;
+    // Still announced, but the WebSocket of their mirror went down.
+    std::vector<std::string> lost;
+  };
+
+  // Reads what mDNS reported, starts and ends the builds, follows the
+  // WebSocket of each mirror. Called regularly, always on the same thread.
+  changes poll();
+
+  // Any thread. The mirror of the device announced under that name, nullptr
+  // while it is not built.
+  std::shared_ptr<ossia::net::generic_device> find(const std::string& name) const;
+  std::vector<std::shared_ptr<ossia::net::generic_device>> devices() const;
+
+  // Any thread. The instance name under which this machine announces the
+  // server whose WebSocket listens on ws_port: the name it was given, or the
+  // one the system chose because it was taken on the network ("name (2)").
+  // nullopt until the announcement is seen.
+  std::optional<std::string> announced_name(int ws_port) const;
+
+  static constexpr int retry_ms = 1000;
+
+private:
+  struct impl;
+  std::unique_ptr<impl> m_impl;
 };
 
 // The link of an ossia.client to an OSCQuery server reached by URL.

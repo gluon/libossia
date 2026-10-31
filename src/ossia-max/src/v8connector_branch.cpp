@@ -1267,6 +1267,11 @@ void branch::set_resolution_context(
     std::vector<ossia::net::node_base*> parents,
     std::vector<ossia::net::device_base*> devices)
 {
+  std::vector<std::size_t> before;
+  before.reserve(m_bindings.size());
+  for(const auto& b : m_bindings)
+    before.push_back(b.targets.size());
+
   for(auto* dev : m_devices)
     unwatch_device(*dev, true);
   m_parents = std::move(parents);
@@ -1276,7 +1281,35 @@ void branch::set_resolution_context(
   m_devices = std::move(devices);
   for(auto* dev : m_devices)
     watch_device(*dev);
-  resolve_bindings();
+
+  // A target on a device that left the context is released: a client that
+  // connected to another device, the old one kept alive elsewhere (the
+  // zeroconf listener keeps its mirrors), must not leave a binding on it,
+  // which would receive and send every value a second time.
+  const auto in_context = [&](const ossia::net::device_base* dev) {
+    return std::find(m_parent_devices.begin(), m_parent_devices.end(), dev) != m_parent_devices.end()
+           || std::find(m_devices.begin(), m_devices.end(), dev) != m_devices.end();
+  };
+  for(auto& b : m_bindings)
+  {
+    for(auto& t : b.targets)
+    {
+      if(in_context(&t.node->get_device()))
+        continue;
+      t.node->about_to_be_deleted.disconnect<&branch::on_node_removing>(this);
+      t.param->remove_callback(t.callback);
+      t.node = nullptr;
+    }
+    std::erase_if(b.targets, [](const target& t) { return t.node == nullptr; });
+  }
+
+  for(std::size_t i = 0; i < m_bindings.size(); i++)
+  {
+    auto& b = m_bindings[i];
+    resolve(b);
+    if(b.targets.size() != before[i] && m_binding_changed)
+      m_binding_changed(b.address, b.targets.size());
+  }
 }
 
 // The branch listens to the destruction of the root of every device it knows,
