@@ -1368,6 +1368,8 @@ struct server_process
 {
   uint16_t osc, ws;
   std::string log_path;
+  // The name the server announces; empty: td_bench.
+  std::string name;
   pid_t pid{};
 
   server_process(uint16_t osc, uint16_t ws)
@@ -1390,6 +1392,7 @@ struct server_process
     setenv("OSSIA_BENCH_OSC", std::to_string(osc).c_str(), 1);
     setenv("OSSIA_BENCH_WS", std::to_string(ws).c_str(), 1);
     setenv("OSSIA_BENCH_LOG", log_path.c_str(), 1);
+    setenv("OSSIA_BENCH_NAME", name.c_str(), 1);
     const char* argv[] = {exe.c_str(), "zz_td_bench_server", nullptr};
     if(posix_spawn(&pid, exe.c_str(), nullptr, nullptr, const_cast<char**>(argv), environ) != 0)
       return false;
@@ -1444,7 +1447,9 @@ TEST_CASE("zz_td_bench_server", "[.]")
   auto ctx = ossia::net::create_network_context();
   auto mp = std::make_unique<ossia::net::multiplex_protocol>();
   auto* multiplex = mp.get();
-  ossia::net::generic_device dev{std::move(mp), "td_bench"};
+  // OSSIA_BENCH_NAME: the name the device is announced under, when set.
+  const char* name_s = std::getenv("OSSIA_BENCH_NAME");
+  ossia::net::generic_device dev{std::move(mp), name_s && *name_s ? name_s : "td_bench"};
   auto& n = ossia::net::create_node(dev.get_root_node(), "/bench/p0");
   auto* leaf = ossia::try_setup_parameter("float", n);
   leaf->set_domain(ossia::make_domain(0.f, 1.f));
@@ -3069,4 +3074,192 @@ TEST_CASE("oscquery_server_withdraws_on_stop", "oscquery_server_withdraws_on_sto
 
   INFO("step: stop() alone sends the goodbye within 2 s");
   REQUIRE(goodbye);
+}
+
+namespace
+{
+// An mDNS announcement of _oscjson._tcp held by a dns-sd process, apart from
+// any OSCQuery server: it stays while the server behind its port dies.
+struct dns_sd_announcement
+{
+  std::string name;
+  uint16_t port{};
+  pid_t pid{};
+
+  dns_sd_announcement(std::string name, uint16_t port)
+      : name{std::move(name)}
+      , port{port}
+  {
+  }
+  ~dns_sd_announcement() { withdraw(); }
+  bool announce()
+  {
+    const std::string p = std::to_string(port);
+    const char* argv[] = {"/usr/bin/dns-sd", "-R", name.c_str(), "_oscjson._tcp", "local", p.c_str(), nullptr};
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_addopen(&fa, 1, "/dev/null", O_WRONLY, 0);
+    const bool ok = posix_spawn(&pid, argv[0], &fa, nullptr, const_cast<char**>(argv), environ) == 0;
+    posix_spawn_file_actions_destroy(&fa);
+    return ok;
+  }
+  void withdraw()
+  {
+    if(!pid)
+      return;
+    kill(pid, SIGTERM);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    pid = 0;
+  }
+};
+
+// The directory polled every 100 ms, as the browse clock of ossia-max does,
+// until `done` or `timeout_ms`; what it reported meanwhile is gathered.
+struct directory_poller
+{
+  ossia::max_binding::oscquery_directory dir;
+  std::vector<std::string> removed, lost;
+
+  template <typename F>
+  bool until(F done, int timeout_ms)
+  {
+    for(int t = 0; t <= timeout_ms; t += 100)
+    {
+      auto ch = dir.poll();
+      removed.insert(removed.end(), ch.removed.begin(), ch.removed.end());
+      lost.insert(lost.end(), ch.lost.begin(), ch.lost.end());
+      if(done())
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return false;
+  }
+  bool has(const std::vector<std::string>& v, const std::string& name) const
+  {
+    return std::find(v.begin(), v.end(), name) != v.end();
+  }
+};
+}
+
+// B7, the cause. A mirror built on the thread that polls the network context
+// of the server it connects to never connects: the WebSocket handshake waits
+// for that thread, busy waiting for the handshake. This is what the zeroconf
+// listener of ossia-max did with a device of the same Max: it built the
+// mirror on the Max clock that also polls the device's server.
+TEST_CASE("oscquery_mirror_on_the_polling_thread_fails", "oscquery_mirror_on_the_polling_thread_fails")
+{
+  auto ctx = ossia::max_binding::make_device_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), "a10_same_thread"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  const uint16_t ws = free_port(true);
+  multiplex.expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), ws, false));
+  ossia::max_binding::poll_device_network_context(*ctx);
+  bool built = false;
+  try
+  {
+    // this thread polls ctx, and does not while it builds
+    auto mirror = std::make_unique<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>("ws://127.0.0.1:" + std::to_string(ws)), "m");
+    built = mirror->get_protocol().update(mirror->get_root_node());
+  }
+  catch(...)
+  {
+  }
+  REQUIRE(!built);
+}
+
+// B7, fixed. The directory finds the device of its own process by name: its
+// mirror is built on a thread of its own while another thread polls the
+// server, as Max's scheduler does every 10 ms.
+TEST_CASE("oscquery_directory_finds_its_own_device", "oscquery_directory_finds_its_own_device")
+{
+  const std::string name = "a10_own_" + std::to_string(getpid());
+  auto ctx = ossia::max_binding::make_device_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), name};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), free_port(true), false);
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+  std::atomic_bool stop{false};
+  std::thread scheduler([&] {
+    while(!stop)
+    {
+      ossia::max_binding::poll_device_network_context(*ctx);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  });
+
+  directory_poller p;
+  const bool found = p.until([&] {
+    auto d = p.dir.find(name);
+    return d && ossia::net::find_node(d->get_root_node(), "/foo/bar");
+  }, 15000);
+  multiplex.stop_expose_to(*exposed);
+  stop = true;
+  scheduler.join();
+  INFO("step: the device of this process found by name, its tree read, within 15 s");
+  REQUIRE(found);
+}
+
+// The WebSocket of a device found by name goes down while the device stays
+// announced (its process killed, the announcement held by dns-sd): the
+// directory reports it lost within 2 s and drops it, then builds it again
+// once the server answers on the same port.
+TEST_CASE("oscquery_directory_follows_the_websocket", "oscquery_directory_follows_the_websocket")
+{
+  const std::string name = "a10_ws_" + std::to_string(getpid());
+  server_process server{free_port(false), free_port(true)};
+  server.name = "a10_srv_" + std::to_string(getpid());
+  REQUIRE(server.start());
+  dns_sd_announcement announcement{name, server.ws};
+  REQUIRE(announcement.announce());
+
+  directory_poller p;
+  INFO("step: the device is built");
+  REQUIRE(p.until([&] { return p.dir.find(name) != nullptr; }, 15000));
+
+  server.stop();
+  const auto t0 = std::chrono::steady_clock::now();
+  const bool lost = p.until([&] { return p.has(p.lost, name); }, 2000);
+  const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+  WARN("WebSocket down reported " << ms << " ms after the kill");
+  INFO("step: the loss is reported within 2 s, the device dropped");
+  REQUIRE(lost);
+  REQUIRE(p.dir.find(name) == nullptr);
+  REQUIRE(!p.has(p.removed, name));
+
+  REQUIRE(server.start());
+  INFO("step: the device is built again once the server answers");
+  REQUIRE(p.until([&] { return p.dir.find(name) != nullptr; }, 15000));
+}
+
+// A device announced before its server answers: the first builds fail, the
+// directory tries again every second, and builds it once the server is up.
+// Then the announcement goes, and the device with it.
+TEST_CASE("oscquery_directory_retries_a_failed_build", "oscquery_directory_retries_a_failed_build")
+{
+  const std::string name = "a10_retry_" + std::to_string(getpid());
+  server_process server{free_port(false), free_port(true)};
+  server.name = "a10_srv2_" + std::to_string(getpid());
+  dns_sd_announcement announcement{name, server.ws};
+  REQUIRE(announcement.announce());
+
+  directory_poller p;
+  p.until([] { return false; }, 4000);
+  INFO("step: nothing built while the server is down");
+  REQUIRE(p.dir.find(name) == nullptr);
+
+  REQUIRE(server.start());
+  INFO("step: built once the server answers");
+  REQUIRE(p.until([&] { return p.dir.find(name) != nullptr; }, 15000));
+
+  // Servus reports the instance once per interface it is seen on: the
+  // first removal drops the device, a late addition from another interface
+  // may bring it back until that interface reports its removal too.
+  announcement.withdraw();
+  INFO("step: the device goes with its announcement");
+  REQUIRE(p.until([&] { return p.has(p.removed, name) && p.dir.find(name) == nullptr; }, 10000));
 }
