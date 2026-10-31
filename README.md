@@ -145,6 +145,7 @@ Changed in ossia-prism:
 
 Fixed in `ossia.v8connector`:
 
+- **A binding left on a device the client no longer uses** (`2.1.0+prism.6`, `v8connector_branch.cpp`). An `ossia.client` that leaves a device still alive elsewhere, the zeroconf listener's mirror it shared when connected by name, for another one (a connection by URL) does not tell the object: it clears its device before announcing the removal, and the shared mirror is not destroyed. The object then followed each bound address on both devices (`bind <address> 2`) and sent every value through both. A change of resolution context now releases the bindings on the devices that left it.
 - **Crash when a followed device comes back** (`2.1.0+prism.4`). Max crashed twice in `ossia.v8connector`, in a patch whose `bind` addresses point to a remote device, while the object registered again. `ossia.client` clears its device before it announces its removal, so the object kept a pointer to a destroyed device and used it at the next registration; under AddressSanitizer the bench shows that use after free when a followed device is destroyed and a new one arrives under the same name. The object now notices the destruction of every device it knows by itself. The crash itself has not been reproduced in Max.
 
 Known defects, not fixed:
