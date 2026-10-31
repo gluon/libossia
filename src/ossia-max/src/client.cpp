@@ -58,7 +58,7 @@ extern "C" void ossia_client_setup()
 
   CLASS_ATTR_LONG(c, "reconnect", 0, client, m_reconnect);
   CLASS_ATTR_STYLE(c, "reconnect", 0, "onoff");
-  CLASS_ATTR_LABEL(c, "reconnect", 0, "Reconnect to an OSCQuery server reached by URL when it goes away");
+  CLASS_ATTR_LABEL(c, "reconnect", 0, "Reconnect to an OSCQuery server reached by URL or by name when it goes away");
 
   class_addmethod(c, (method)client::do_notify, "notify", A_CANT, 0);
 

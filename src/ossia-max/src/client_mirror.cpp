@@ -3,11 +3,15 @@
 
 #include "client_mirror.hpp"
 
+#include <servus/listener.h>
+#include <servus/servus.h>
+
 #include <boost/asio/connect.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
 #include <chrono>
+#include <map>
 
 namespace ossia
 {
@@ -101,6 +105,177 @@ std::shared_ptr<ossia::net::generic_device> oscquery_connect_attempt::take()
   if(m_thread.joinable())
     m_thread.join();
   return std::move(m_device);
+}
+
+struct oscquery_directory::impl final : servus::Listener
+{
+  using clock = std::chrono::steady_clock;
+  struct entry
+  {
+    std::string url;
+    std::shared_ptr<ossia::net::generic_device> device;
+    ossia::oscquery::oscquery_mirror_protocol* mirror{};
+    std::unique_ptr<oscquery_connect_attempt> attempt;
+    clock::time_point next_try{};
+  };
+
+  servus::Servus service{"_oscjson._tcp"};
+  // Filled by Servus during browse, read by poll.
+  std::mutex events_mutex;
+  std::vector<std::pair<bool, std::string>> events;
+  // The mirrors, read by find and devices from any thread.
+  mutable std::mutex mutex;
+  std::map<std::string, entry> entries;
+  // Builds that ended their use (device removed or announced elsewhere):
+  // released once their thread is done.
+  std::vector<std::unique_ptr<oscquery_connect_attempt>> abandoned;
+
+  impl()
+  {
+    for(const auto& i : service.getInstances())
+      instanceAdded(i);
+    service.addListener(this);
+    service.beginBrowsing(servus::Interface::IF_ALL);
+  }
+
+  ~impl() override
+  {
+    service.removeListener(this);
+    service.endBrowsing();
+  }
+
+  void instanceAdded(const std::string& instance) override
+  {
+    std::lock_guard lock{events_mutex};
+    events.push_back({true, instance});
+  }
+
+  void instanceRemoved(const std::string& instance) override
+  {
+    std::lock_guard lock{events_mutex};
+    events.push_back({false, instance});
+  }
+
+  void abandon(entry& e)
+  {
+    if(e.attempt)
+      abandoned.push_back(std::move(e.attempt));
+  }
+};
+
+oscquery_directory::oscquery_directory()
+    : m_impl{std::make_unique<impl>()}
+{
+}
+
+oscquery_directory::~oscquery_directory() = default;
+
+oscquery_directory::changes oscquery_directory::poll()
+{
+  auto& d = *m_impl;
+  changes out;
+  try
+  {
+    d.service.browse(0);
+  }
+  catch(...)
+  {
+  }
+
+  std::vector<std::pair<bool, std::string>> events;
+  {
+    std::lock_guard lock{d.events_mutex};
+    events.swap(d.events);
+  }
+
+  const auto now = impl::clock::now();
+  std::lock_guard lock{d.mutex};
+  for(const auto& [added, name] : events)
+  {
+    if(added)
+    {
+      // The address of the SRV record, resolved by the system when the
+      // WebSocket connects, as the mirror of ossia.client always did.
+      std::string host = d.service.get(name, "servus_ip");
+      if(host.empty())
+        host = d.service.get(name, "servus_host");
+      const std::string port = d.service.get(name, "servus_port");
+      if(host.empty() || port.empty())
+        continue;
+      const std::string url = "ws://" + host + ":" + port;
+      auto& e = d.entries[name];
+      if(e.url != url)
+      {
+        d.abandon(e);
+        e = impl::entry{};
+        e.url = url;
+        e.next_try = now;
+      }
+    }
+    else if(auto it = d.entries.find(name); it != d.entries.end())
+    {
+      d.abandon(it->second);
+      d.entries.erase(it);
+      out.removed.push_back(name);
+    }
+  }
+
+  for(auto& [name, e] : d.entries)
+  {
+    if(e.attempt)
+    {
+      if(!e.attempt->done())
+        continue;
+      auto dev = e.attempt->take();
+      e.attempt.reset();
+      if(dev)
+      {
+        e.mirror = polled_oscquery_mirror(*dev);
+        e.device = std::move(dev);
+      }
+      else
+      {
+        e.next_try = now + std::chrono::milliseconds(retry_ms);
+      }
+    }
+    else if(e.device)
+    {
+      // The WebSocket went down: the server stopped, or its process died,
+      // still announced. Dropped now, built again when it answers.
+      if(e.mirror && !e.mirror->connected())
+      {
+        e.device.reset();
+        e.mirror = nullptr;
+        e.next_try = now + std::chrono::milliseconds(retry_ms);
+        out.lost.push_back(name);
+      }
+    }
+    else if(now >= e.next_try)
+    {
+      e.attempt = std::make_unique<oscquery_connect_attempt>(e.url, name);
+    }
+  }
+
+  std::erase_if(d.abandoned, [](const auto& a) { return a->done(); });
+  return out;
+}
+
+std::shared_ptr<ossia::net::generic_device>
+oscquery_directory::find(const std::string& name) const
+{
+  std::lock_guard lock{m_impl->mutex};
+  auto it = m_impl->entries.find(name);
+  return it != m_impl->entries.end() ? it->second.device : nullptr;
+}
+
+std::vector<std::shared_ptr<ossia::net::generic_device>> oscquery_directory::devices() const
+{
+  std::lock_guard lock{m_impl->mutex};
+  std::vector<std::shared_ptr<ossia::net::generic_device>> out;
+  for(const auto& [name, e] : m_impl->entries)
+    if(e.device)
+      out.push_back(e.device);
+  return out;
 }
 
 oscquery_link::oscquery_link(host h)
