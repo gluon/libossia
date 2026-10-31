@@ -2861,3 +2861,212 @@ TEST_CASE("oscquery_server_stop_then_poll", "oscquery_server_stop_then_poll")
   ctx->context.restart();
   REQUIRE_NOTHROW(ctx->context.poll());
 }
+
+#include <ifaddrs.h>
+#include <net/if.h>
+
+namespace
+{
+// A passive mDNS listener for the tests: joins 224.0.0.251:5353 on every
+// IPv4 interface (SO_REUSEPORT, as mDNSResponder does) and records, with
+// their time, the PTR records that name a given service instance: TTL 0 is a
+// goodbye.
+struct mdns_watch
+{
+  struct record
+  {
+    std::chrono::steady_clock::time_point t;
+    uint32_t ttl;
+  };
+
+  explicit mdns_watch(std::string instance)
+      : instance{std::move(instance)}
+  {
+    fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    int one = 1;
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(5353);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    ok = ::bind(fd, (sockaddr*)&addr, sizeof(addr)) == 0;
+    ifaddrs* ifs = nullptr;
+    if(ok && ::getifaddrs(&ifs) == 0)
+    {
+      for(auto* i = ifs; i; i = i->ifa_next)
+      {
+        if(!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || (i->ifa_flags & IFF_LOOPBACK))
+          continue;
+        ip_mreq m{};
+        m.imr_multiaddr.s_addr = inet_addr("224.0.0.251");
+        m.imr_interface = ((sockaddr_in*)i->ifa_addr)->sin_addr;
+        ::setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &m, sizeof(m));
+      }
+      ::freeifaddrs(ifs);
+    }
+    timeval tv{0, 100000};
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    thread = std::thread([this] { run(); });
+  }
+  ~mdns_watch()
+  {
+    done = true;
+    thread.join();
+    ::close(fd);
+  }
+
+  // First record after `since` with ttl 0 (goodbye) or not (announcement).
+  std::optional<std::chrono::steady_clock::time_point>
+  first(bool goodbye, std::chrono::steady_clock::time_point since)
+  {
+    std::lock_guard lock{mutex};
+    for(auto& r : records)
+      if(r.t >= since && (r.ttl == 0) == goodbye)
+        return r.t;
+    return std::nullopt;
+  }
+
+  std::string instance;
+  int fd{-1};
+  bool ok{};
+  std::atomic_bool done{false};
+  std::mutex mutex;
+  std::vector<record> records;
+  std::thread thread;
+
+private:
+  static bool name_at(const unsigned char* d, std::size_t n, std::size_t& off, std::string& out)
+  {
+    std::size_t pos = off;
+    bool jumped = false;
+    for(int guard = 0; guard < 64 && pos < n; guard++)
+    {
+      const unsigned len = d[pos];
+      if((len & 0xC0) == 0xC0)
+      {
+        if(pos + 1 >= n)
+          return false;
+        if(!jumped)
+          off = pos + 2;
+        pos = ((len & 0x3F) << 8) | d[pos + 1];
+        jumped = true;
+        continue;
+      }
+      if(len == 0)
+      {
+        if(!jumped)
+          off = pos + 1;
+        return true;
+      }
+      if(pos + 1 + len > n)
+        return false;
+      out.append((const char*)d + pos + 1, len);
+      out += '.';
+      pos += 1 + len;
+    }
+    return false;
+  }
+
+  void parse(const unsigned char* d, std::size_t n)
+  {
+    if(n < 12 || !(d[2] & 0x80)) // responses only
+      return;
+    const unsigned qd = (d[4] << 8) | d[5];
+    const unsigned rr = ((d[6] << 8) | d[7]) + ((d[8] << 8) | d[9]) + ((d[10] << 8) | d[11]);
+    std::size_t off = 12;
+    for(unsigned i = 0; i < qd; i++)
+    {
+      std::string q;
+      if(!name_at(d, n, off, q) || off + 4 > n)
+        return;
+      off += 4;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    for(unsigned i = 0; i < rr; i++)
+    {
+      std::string name;
+      if(!name_at(d, n, off, name) || off + 10 > n)
+        return;
+      const unsigned type = (d[off] << 8) | d[off + 1];
+      const uint32_t ttl = (uint32_t(d[off + 4]) << 24) | (d[off + 5] << 16) | (d[off + 6] << 8) | d[off + 7];
+      const unsigned len = (d[off + 8] << 8) | d[off + 9];
+      off += 10;
+      if(off + len > n)
+        return;
+      if(type == 12)
+      {
+        std::size_t p = off;
+        std::string target;
+        if(name_at(d, n, p, target) && target.rfind(instance + ".", 0) == 0)
+        {
+          std::lock_guard lock{mutex};
+          records.push_back({now, ttl});
+        }
+      }
+      off += len;
+    }
+  }
+
+  void run()
+  {
+    unsigned char buf[9000];
+    while(!done)
+    {
+      const auto n = ::recv(fd, buf, sizeof(buf), 0);
+      if(n > 0)
+        parse(buf, static_cast<std::size_t>(n));
+    }
+  }
+};
+}
+
+// The server withdraws its mDNS announcement when it stops, before it closes
+// its WebSocket connections, not only when it is destroyed: stop() alone,
+// the server still alive, sends the goodbye (PTR with TTL 0). No client is
+// connected: a connection that closes after stop() alone, the server still
+// alive, reaches on_connectionClosed, which reads the WebSocket server that
+// stop() has reset (a crash of its own, not this test's subject). A few
+// seconds of listening on 5353.
+TEST_CASE("oscquery_server_withdraws_on_stop", "oscquery_server_withdraws_on_stop")
+{
+  const std::string name = "a10_order_" + std::to_string(getpid());
+  mdns_watch watch{name};
+  REQUIRE(watch.ok);
+  auto ctx = ossia::net::create_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), name};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, free_port(false), free_port(true), false);
+  auto* exposed = server.get();
+  const auto announced_from = std::chrono::steady_clock::now();
+  multiplex.expose_to(std::move(server));
+  std::thread net([&] { ctx->run(); });
+
+  bool announced = false;
+  for(int i = 0; i < 100 && !announced; i++)
+  {
+    announced = watch.first(false, announced_from).has_value();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  INFO("step: the announcement is seen within 5 s");
+  REQUIRE(announced);
+
+  const auto t0 = std::chrono::steady_clock::now();
+  exposed->stop();
+  std::optional<std::chrono::steady_clock::time_point> goodbye;
+  for(int i = 0; i < 40 && !goodbye; i++)
+  {
+    goodbye = watch.first(true, t0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  const auto ms = [&](auto t) { return std::chrono::duration<double, std::milli>(t - t0).count(); };
+  WARN("goodbye " << (goodbye ? std::to_string(ms(*goodbye)) + " ms" : std::string("not seen")) << " after stop()");
+  multiplex.stop_expose_to(*exposed);
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+
+  INFO("step: stop() alone sends the goodbye within 2 s");
+  REQUIRE(goodbye);
+}
