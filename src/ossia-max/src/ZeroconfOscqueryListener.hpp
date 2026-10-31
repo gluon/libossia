@@ -1,50 +1,43 @@
 #pragma once
 
+#include "client_mirror.hpp"
+
 #include <ossia/network/generic/generic_device.hpp>
 
-#include <servus/servus.h>
-
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace ossia
 {
 namespace max_binding
 {
-class ZeroconfOscqueryListener final : servus::Listener
+// The OSCQuery devices announced over mDNS, for ossia.client (connect <name>)
+// and ossia.fuzzysearch. The mirrors live in an oscquery_directory, which
+// browse() polls from a Max clock; this class tells the clients connected by
+// name when their device is no longer announced, or when its WebSocket went
+// down.
+class ZeroconfOscqueryListener final
 {
 public:
   ZeroconfOscqueryListener();
-  ~ZeroconfOscqueryListener() override;
+  ~ZeroconfOscqueryListener();
 
   static std::shared_ptr<ossia::net::generic_device>
   find_device(const std::string& name);
-  static std::vector<std::shared_ptr<ossia::net::generic_device>> get_devices()
-  {
-    return s_devices;
-  }
+  static std::vector<std::shared_ptr<ossia::net::generic_device>> get_devices();
 
   void browse();
 
-  enum ConnectionEvent
-  {
-    ADDED = 0,
-    REMOVED
-  };
-
 private:
-  // since Max is not thread safe, we put connection events (from Servus thread) in a
-  // vector and process it at scheduled interval triggered by Max clock
-  void instanceAdded(const std::string& instance) final override;
-  void instanceRemoved(const std::string& instance) final override;
-  void addInstance(const std::string& instance);
-  void removeInstance(const std::string& instance);
+  // The clients connected by name to `name` let go of their device, and try
+  // again in one second if their @reconnect is on. `lost`: the device is
+  // still announced, its WebSocket went down; reported as a failed
+  // connection is (connect 0 <name>).
+  static void release_clients(const std::string& name, bool lost);
 
-  static std::vector<std::shared_ptr<ossia::net::generic_device>> s_devices;
-  static std::vector<std::pair<ConnectionEvent, std::string>> s_connection_events;
-
-  servus::Servus service;
-  static std::mutex s_mutex;
+  static std::unique_ptr<oscquery_directory> s_directory;
 };
 
-} // namespace pd
+} // namespace max_binding
 } // namespace ossia
