@@ -4,8 +4,10 @@
 
 #include <ossia/network/generic/generic_device.hpp>
 
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ossia
@@ -36,7 +38,15 @@ private:
   // connection is (connect 0 <name>).
   static void release_clients(const std::string& name, bool lost);
 
+  // Each ossia.device exposed over OSCQuery says once, on its outlet, the name
+  // it is announced under (announced <name>), and warns in the console when
+  // the system announced it under another name than its own, taken on the
+  // network: Servus does not report it, the directory sees it.
+  static void report_announced_names();
+
   static std::unique_ptr<oscquery_directory> s_directory;
+  // The servers already reported, and the name each was announced under.
+  static std::map<const void*, std::string> s_announced;
 };
 
 } // namespace max_binding

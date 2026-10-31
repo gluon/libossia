@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -106,6 +107,12 @@ public:
   // while it is not built.
   std::shared_ptr<ossia::net::generic_device> find(const std::string& name) const;
   std::vector<std::shared_ptr<ossia::net::generic_device>> devices() const;
+
+  // Any thread. The instance name under which this machine announces the
+  // server whose WebSocket listens on ws_port: the name it was given, or the
+  // one the system chose because it was taken on the network ("name (2)").
+  // nullopt until the announcement is seen.
+  std::optional<std::string> announced_name(int ws_port) const;
 
   static constexpr int retry_ms = 1000;
 
