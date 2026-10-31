@@ -32,7 +32,7 @@
 	<outletlist>
 			<outlet id="0" name="Info outlet" type="any">
 			<digest>Various information messages</digest>
-			<description>Messages and information in reply to various messages. <m>connect</m> followed by 1 and the connection parameters when the device is connected, by 0 when the connection failed or, for a connection by URL, when the server went away; the object then tries again every second (see <at>reconnect</at>) and sends <m>connect</m> 1 again when the server is back.</description>
+			<description>Messages and information in reply to various messages. <m>connect</m> followed by 1 and the connection parameters when the device is connected, by 0 when the connection failed or when the server went away, for a connection by URL or by name; the object then tries again every second (see <at>reconnect</at>) and sends <m>connect</m> 1 again when the server is back.</description>
 		</outlet>
 	</outletlist>
 
@@ -68,6 +68,8 @@
 				Then, sending it with the appropriate values will connect to the appropriate device on the network, and allow it to be explored, queried and remotely-controlled.
 				Notice that, if the <m>getdevices</m> message has not been sent previously, the object will internally do it, which might take some time, and delay the actual connection accordingly.
 				With <m>connect</m> oscquery &lt;url&gt;, the connection runs on a thread of its own, so that Max does not wait for the server, which may be an <o>ossia.device</o> of the same Max; the outlet sends <m>connect</m> 1 when the device is connected and its tree read. The object then follows the server's WebSocket: when it goes down (the server stopped), the outlet sends <m>connect</m> 0 with the connection parameters, and every second the object tries again, as long as <at>reconnect</at> is on, until the server answers; it then reads the tree again and subscribes again to every parameter it follows, and the outlet sends <m>connect</m> 1. A <m>disconnect</m> or a new <m>connect</m> stops the attempts.
+			
+				With <m>connect</m> &lt;name&gt;, the object connects to the OSCQuery device announced over mDNS (_oscjson._tcp) under that name, on this machine, the same Max included, or another one of the same network. Until the device is found, the outlet sends <m>connect</m> 0 &lt;name&gt; and the object tries again every second. Once connected, when the device's WebSocket goes down while it is still announced (its server stopped, or its application quit abruptly), the outlet sends <m>disconnected</m> then <m>connect</m> 0 &lt;name&gt; within about a second; when the device is no longer announced, the outlet sends <m>disconnected</m>. In both cases the object tries again every second while <at>reconnect</at> is on, and sends <m>connect</m> 1 &lt;name&gt; when the device is back. The message <m>get</m> devices lists the devices found, those whose tree is read.
 			</description>
 		</method>
 
@@ -159,7 +161,7 @@
 				Reconnect when the server goes away
 			</digest>
 			<description>
-				The <at>reconnect</at> attribute (default: on) makes a client connected by URL (<m>connect</m> oscquery &lt;url&gt;) try again every second when the server's WebSocket goes down, until the server answers. Off, the loss is reported by <m>connect</m> 0 on the outlet and nothing is tried.
+				The <at>reconnect</at> attribute (default: on) makes a client connected by URL (<m>connect</m> oscquery &lt;url&gt;) or by name (<m>connect</m> &lt;name&gt;) try again every second when the server's WebSocket goes down, or, by name, when the device is no longer announced, until the server answers. Off, the loss is reported on the outlet and nothing is tried.
 			</description>
 		</attribute>
 

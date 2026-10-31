@@ -1,4 +1,4 @@
-ossia-prism 2.1.0+prism.5
+ossia-prism 2.1.0+prism.6
 Paquet Max ossia (libossia 2.1.0) avec l'objet ossia.v8connector.
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
@@ -9,7 +9,8 @@ CONTENU
 - Corrections d'ossia aussi : un clic sur connect d'un ossia.client
   connecté par URL ne fait plus planter Max (le poll et connect ne
   tournent plus en même temps) ; supprimer [ossia] arrête les serveurs
-  qu'il a exposés et libère leurs ports.
+  qu'il a exposés et libère leurs ports ; stop sur un ossia.device exposé
+  en OSCQuery ne fait plus quitter Max.
 - Modifications d'ossia : le serveur OSCQuery écrit une seule clé
   EXTENDED_TYPE par paramètre ; un ossia.client connecté par nom
   applique les changements d'arbre du serveur (PATH_ADDED, PATH_REMOVED),
@@ -18,6 +19,11 @@ CONTENU
   revient (connect 1 ..., arbre relu, abonnements renvoyés), ce que
   @reconnect 0 désactive ; la connexion par URL se fait sur un thread à
   part, sans figer Max, y compris vers un ossia.device du même Max ; un
+  ossia.client connecté par nom (connect <nom>) voit la perte du
+  WebSocket en une seconde environ (disconnected, connect 0 <nom>) et
+  se reconnecte, trouve aussi un ossia.device du même Max, et réessaie
+  un device dont la connexion a échoué ; un serveur OSCQuery retire son
+  annonce mDNS dès son arrêt ; un
   client OSCQuery envoie des bundles OSC
   (push_bundle), et un device exposé les transmet à son serveur. Une
   couleur reste décrite par le
@@ -25,7 +31,7 @@ CONTENU
   libossia 2.1.0 ajoutait une seconde clé EXTENDED_TYPE « vecf », qui
   masquait ce tableau pour un client gardant la dernière clé en double.
 - Plateformes : macOS universel (Apple Silicon et Intel) pour
-  2.1.0+prism.5 ; Windows x64 à venir, même version, ajouté plus tard à
+  2.1.0+prism.6 ; Windows x64 à venir, même version, ajouté plus tard à
   la Release.
 
 INSTALLATION
@@ -39,7 +45,7 @@ INSTALLATION
 4. macOS seulement, le paquet n'étant pas signé par Apple, dans le Terminal :
    xattr -dr com.apple.quarantine ~/Documents/Max\ 9/Packages/ossia-prism
 5. Relancer Max. À la création d'un ossia.v8connector, la console affiche
-   « ossia-prism 2.1.0+prism.4, PRISM CNRS ».
+   « ossia-prism 2.1.0+prism.6, PRISM CNRS ».
 
 PRISE EN MAIN
 - Aide : clic droit sur ossia.v8connector, Open Help (onglets Basic,

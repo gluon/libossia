@@ -124,7 +124,7 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 ### Differences from ossia 2.1.0
 
-State on 2026-10-30, `2.1.0+prism.5`. "Fixed" means fixed in ossia-prism, not in ossia.
+State on 2026-10-31, `2.1.0+prism.6`. "Fixed" means fixed in ossia-prism, not in ossia.
 
 Changed in ossia-prism:
 
@@ -135,6 +135,9 @@ Changed in ossia-prism:
 - **`ossia.client`: the poll and `connect` never run at once** (`2.1.0+prism.5`, `client.cpp`, `client_mirror.hpp`). In ossia 2.1.0 the client applies its mirror's commands from a clock, on the scheduler thread with Overdrive, while `connect` and `disconnect` destroy the device on the main thread: a click on `connect` could crash Max. The poll, `connect`, `disconnect` and the end of a connection now enter Max's critical region, and the link waits for a running poll before the device goes.
 - **`[ossia]` frees its ports when deleted** (`2.1.0+prism.5`, `ossia_object.cpp`, `device_network.hpp`). In ossia 2.1.0 the servers exposed by `[ossia]` stay on the global device after the object is deleted, their ports taken. They are now stopped with the object.
 - **`ossia.client` by URL does not hold Max** (`2.1.0+prism.5`, `client.cpp`, `client_mirror.hpp`). In ossia 2.1.0, `connect oscquery <url>` builds the mirror on the main thread, which waits up to 1.5 s for the WebSocket and up to 3 s for the tree: Max freezes during each attempt, and an `ossia.device` of the same Max, whose server is polled by that same thread, can never answer. The connection now runs on a thread of its own; the outlet sends `connect 1 ...` when it is done.
+- **`stop` on an `ossia.device` exposed over OSCQuery no longer quits Max** (`2.1.0+prism.6`, core commit `3b065120b`, `src/ossia/network/sockets/udp_socket.hpp`). In ossia 2.1.0, `stop` destroys the OSCQuery server at once, while the closing of its UDP socket, posted to the network context, still captures the socket: the next poll of the context, on Max's scheduler thread, reads the freed socket and `close()` throws `boost::system::system_error` (Bad file descriptor), which nothing catches. A posted closing now does nothing once its socket is destroyed, and neither `shutdown()` nor `close()` throws out of the context. Candidate for upstream.
+- **The OSCQuery server withdraws its announcement when it stops** (`2.1.0+prism.6`, core commit `5e8816497`, `src/ossia/protocols/oscquery/oscquery_server_asio.cpp`). In ossia 2.1.0 the mDNS announcement goes only with the destruction of the server, after its connections are closed. Candidate for upstream.
+- **`ossia.client` connected by name follows the device** (`2.1.0+prism.6`, `ZeroconfOscqueryListener.cpp`, `client_mirror.cpp`). In ossia 2.1.0 the zeroconf listener builds the mirror of each announced device on a Max clock, under a lock, once: a build that fails is never tried again, a device of the same Max is never found (the clock that builds is the one that polls its server), and a mirror whose WebSocket went down stays until the announcement goes. ossia-prism builds each mirror on a thread of its own, tries again every second, drops a mirror whose WebSocket is down and builds it again; the client connected by name is told (`disconnected`, `connect 0 <name>`) and reconnects, as `@reconnect` allows. The mirrors are still built for every announced device, so that `ossia.fuzzysearch` keeps searching them.
 - **`@clip none`**, the OSCQuery name of the free mode, is accepted by `ossia.v8connector` only; `ossia.parameter` still expects `free`.
 - **An address already taken** is refused by `ossia.v8connector` without a name (`refused <address> already exists`); `ossia.parameter`, in the same case, creates a sibling with a free name (`gain.1`).
 - Added: the `ossia.v8connector` object, the package name `ossia-prism`, the version `2.1.0+prism.N`.
@@ -145,12 +148,19 @@ Fixed in `ossia.v8connector`:
 
 Known defects, not fixed:
 
-- The OSCQuery server of libossia (`oscquery_asio::oscquery_server_protocol`, the one of `ossia.device`) frees its sockets before they are closed when it is destroyed while its network thread runs: the destructor (`src/ossia/protocols/oscquery/oscquery_server_asio.cpp:856`) posts the close of its UDP socket to that thread, then frees the socket before the close has run. AddressSanitizer reports this use after free in a test that stops a server and exposes another one in the same process; destroyed from its own network thread, the server blocks instead. Not observed as such in Max.
+- `stop()` alone on the OSCQuery server of libossia, the server kept alive, while a client connection is closing, crashes in `on_connectionClosed` (`src/ossia/protocols/oscquery/oscquery_server_asio.cpp:668`), which reads the WebSocket server that `stop()` has reset (seen under AddressSanitizer in the bench). ossia-max always destroys the server right after stopping it; not fixed.
+- When a device name is already announced on the network, the system announces an `ossia.device` as `name (2)` and Max says nothing: Servus, the mDNS library of libossia, does not report the name it registered. A client looking for `name` finds the other device.
 - Sending `expose` on a port already in use, including a second `expose`, crashes Max (OSCQuery server of `ossia.device`). Use explicit, free ports, and `stop` before exposing again.
 - The server logs `remote_endpoint: Invalid argument` at each connection, with no effect seen on the served tree.
 - The access mode is not enforced by the server: a read-only parameter can be written over OSC.
 - The client cannot read some OSCQuery servers that are not ossia: it asks `?HOST_INFO=1` instead of `?HOST_INFO`, and does not read `chunked` HTTP replies.
 - On Windows, the automatic discovery of OSCQuery devices (mDNS) depends on the Bonjour service being installed and running; without it, connect `ossia.client` to an explicit address.
+
+### Discovery by name
+
+`expose oscquery` on an `ossia.device` announces it over mDNS as `_oscjson._tcp`, under the device's name, with the WebSocket port (also the HTTP port) in the SRV record and the host name of the machine as its target; no `_osc._udp`. `connect <name>` on an `ossia.client` connects to it, from the same Max, another Max or a TouchDesigner component of the same network. The client keeps the mirror the zeroconf listener built for that device, follows its WebSocket and tries again every second (`@reconnect`). The listener builds a mirror for every announced device, on a thread of its own, and tries a failed build again every second while the device is announced.
+
+mDNS works within one subnet: the machines must share a VLAN, multicast 224.0.0.251 on UDP 5353 must pass between them, Wi-Fi client isolation must be off. On Windows, mDNS in Max needs the Bonjour service. Where discovery cannot work, connect by address: `connect oscquery ws://<ip>:<port>`.
 
 ### Known limits
 
