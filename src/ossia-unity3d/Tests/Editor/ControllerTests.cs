@@ -16,6 +16,7 @@ namespace Ossia.Tests
         Assert.AreEqual("unity", c.deviceName);
         Assert.AreEqual(1234, c.oscPort);
         Assert.AreEqual(5678, c.wsPort);
+        Assert.IsTrue(c.runInBackground);
       } finally {
         Object.DestroyImmediate(go);
       }
