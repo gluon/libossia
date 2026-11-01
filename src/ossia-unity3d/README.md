@@ -21,6 +21,7 @@ One GameObject named `OssiaController` holds the `Ossia.Controller` component: t
 | `oscPort` | `1234` | UDP port on which the device receives OSC |
 | `wsPort` | `5678` | TCP port of the OSCQuery server: HTTP (the tree) and WebSocket |
 | `runInBackground` | on | Keeps the scene following the values received when Unity loses focus (see below) |
+| `resolveAnnouncedName` | on | Reads the name the device is announced under over mDNS (see below) |
 | `appName` | `Unity` | Name used by the presets and the logger |
 
 The device starts in `Awake` and stops when Play stops (`OnApplicationQuit`), which frees its ports and withdraws its mDNS announcement: a second Play in the same editor gets them back.
@@ -49,9 +50,9 @@ Then `[ossia.remote /Cube/transform/position]` fed by `[pak 0. 0. 0.]` moves the
 
 In Play, the device is announced over mDNS (`_oscjson._tcp` on the WebSocket port, `_osc._udp` on the OSC port) under `deviceName`; Stop withdraws the announcement, about a second later. When another device of the network already has that name, the system announces this one as `unity (2)`.
 
-The Controller reads the name really announced: a thread of its own browses the network for five seconds after `Awake` and picks the device announced on this machine with the Controller's WebSocket port. On the main thread, the console then shows `OSSIA: announced "unity" over mDNS (_oscjson._tcp)`, the read-only property `AnnouncedName` gets the name (null until then), and when it differs from `deviceName`, a warning: `OSSIA: announced as "unity (2)": the name "unity" is taken on the network`. A client then connects with `connect unity (2)`, or by URL.
+When `resolveAnnouncedName` is on, the default, the Controller reads the name really announced: once its server runs, a thread of its own browses the network for two seconds and picks the device announced on this machine with the Controller's WebSocket port. On the main thread, the console then shows `OSSIA: announced "unity" over mDNS (_oscjson._tcp)`, the read-only property `AnnouncedName` gets the name (null until then), and when it differs from `deviceName`, a warning: `OSSIA: announced as "unity (2)": the name "unity" is taken on the network`. A client then connects with `connect unity (2)`, or by URL.
 
-In the editor, a Play started less than five seconds after the previous one stopped waits until that browsing ends: the domain reload waits for its thread, which cannot leave the library before.
+In the editor, a Play started less than two seconds after the previous one waits until that browsing ends, up to two seconds: the domain reload waits for its thread, which cannot leave the library before. Turn `resolveAnnouncedName` off to do without it.
 
 `dns-sd -B _oscjson._tcp` (macOS) lists the names announced on the network.
 

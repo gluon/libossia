@@ -12,8 +12,9 @@ Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, i
 
 - Unity: the `Controller` has the fields `deviceName`, `oscPort` and `wsPort`, set in the inspector; their defaults are the values fixed before in the code: `unity`, 1234, 5678.
 - Unity: the `Controller` field `runInBackground` (on by default) sets `Application.runInBackground` at runtime, without changing the project settings, so that the scene keeps following the values received when Unity loses focus.
-- Unity: the `Controller` reads the name its device is announced under over mDNS, on a thread of its own, five seconds after `Awake`: read-only property `AnnouncedName`, a console line, and a warning when the system announced it under another name than `deviceName` (`unity (2)`, the name being taken on the network). Before, nothing said so.
-- C API: `ossia_oscquery_list_devices`, the OSCQuery devices announced over mDNS (name, host, WebSocket port), freed with `ossia_oscquery_devices_free`; it blocks for five seconds.
+- Unity: the `Controller` reads the name its device is announced under over mDNS (field `resolveAnnouncedName`, on by default), on a thread of its own that browses for two seconds once the server runs: read-only property `AnnouncedName`, a console line, and a warning when the system announced it under another name than `deviceName` (`unity (2)`, the name being taken on the network). Before, nothing said so.
+- C API: `ossia_oscquery_list_devices`, the OSCQuery devices announced over mDNS (name, host, WebSocket port) within the given browsing time, freed with `ossia_oscquery_devices_free`.
+- `ossia::net::list_oscquery_devices(timeout)`: browses for the given time; `list_oscquery_devices()` still browses for five seconds.
 - Unity: the sample "Exposed cube" (Package Manager, Samples): an `OssiaController` and a cube whose transform is exposed.
 - Unity: Edit Mode and Play Mode tests in the package (`Tests/`): a round trip of each value type, the native callbacks, a second Play, the mDNS announcement and its withdrawal, a cube moved by an OSC message from outside.
 - Unity: `LISEZMOI.txt` in the package, and the README's sections on installation, the `Controller`, focus, Max and mDNS.
