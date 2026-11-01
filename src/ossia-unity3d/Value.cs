@@ -283,7 +283,7 @@ namespace Ossia
     }
     public char GetChar()
     {
-      return Network.ossia_value_to_char(ossia_value);
+      return Network.ossia_value_convert_char(ossia_value);
     }
 
     public int[] GetIntArray()
