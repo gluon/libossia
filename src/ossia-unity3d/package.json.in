@@ -7,5 +7,12 @@
   "keywords": [ "osc", "oscquery", "remote", "control" ],
   "category": "network",
   "dependencies": {
-  }
+  },
+  "samples": [
+    {
+      "displayName": "Exposed cube",
+      "description": "An OssiaController and a cube whose transform is exposed over OSCQuery, on ports 1234 (OSC) and 5678 (HTTP and WebSocket).",
+      "path": "Samples~/ExposedCube"
+    }
+  ]
 }

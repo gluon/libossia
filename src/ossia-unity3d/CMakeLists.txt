@@ -62,6 +62,11 @@ install(
 )
 
 install(
+  DIRECTORY Samples~
+  DESTINATION ${OSSIA_UNITY_PACKAGE_FOLDER}
+)
+
+install(
   FILES 
     "${CMAKE_CURRENT_LIST_DIR}/README.md"
     "${CMAKE_BINARY_DIR}/package.json"
