@@ -11,6 +11,14 @@ namespace Ossia
   public class Controller : MonoBehaviour
   {
     public string appName = "Unity";
+
+    [Tooltip ("Name of the OSCQuery device, the name it is announced under over mDNS")]
+    public string deviceName = "unity";
+    [Tooltip ("UDP port on which the device receives OSC")]
+    public int oscPort = 1234;
+    [Tooltip ("TCP port of the OSCQuery server: HTTP and WebSocket")]
+    public int wsPort = 5678;
+
     void Awake ()
     {
       Debug.Log ("OSSIA: Starting");
@@ -28,12 +36,12 @@ namespace Ossia
         Ossia.Network.ossia_set_debug_logger (intptr_delegate);
 
         local_protocol = new Ossia.Local ();
-        local_device = new Ossia.Device (local_protocol, "unity");
+        local_device = new Ossia.Device (local_protocol, deviceName);
         scene_node = local_device.GetRootNode ();
 
         Queue = new Ossia.MessageQueue (local_device);
 
-        oscq_protocol = new Ossia.OSCQuery (1234, 5678);
+        oscq_protocol = new Ossia.OSCQuery (oscPort, wsPort);
         local_protocol.ExposeTo (oscq_protocol);
       }
     }
