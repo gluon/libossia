@@ -18,10 +18,19 @@ namespace Ossia
     public int oscPort = 1234;
     [Tooltip ("TCP port of the OSCQuery server: HTTP and WebSocket")]
     public int wsPort = 5678;
+    [Tooltip ("Keep the player loop running when the application loses focus. "
+            + "Off, Update stops and the values received are no longer applied until the window is focused again.")]
+    public bool runInBackground = true;
 
     void Awake ()
     {
       Debug.Log ("OSSIA: Starting");
+      // The values received are applied in Update, which Unity stops, in the
+      // editor as in a player, when the application loses focus and the
+      // project's Run In Background is off. Set at runtime only: the
+      // project settings are left as they are.
+      if (runInBackground)
+        Application.runInBackground = true;
       if (!set) {
         set = true;
 
