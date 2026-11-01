@@ -3,7 +3,7 @@ README
 
 # ossia (PRISM) for Unity
 
-The Unity package `io.ossia.ossia-unity`, displayed as "ossia (PRISM)", built from this repository: the ossia library and its C# binding, which expose objects of a Unity scene over OSCQuery. Its version is the tag it is built from, `2.1.0+prism.N`. Tested on macOS Apple Silicon, Unity 6.3 LTS, Mono scripting backend; the macOS library is universal (arm64 and x86_64).
+The Unity package `io.ossia.ossia-unity`, displayed as "ossia (PRISM)", built from this repository: the ossia library and its C# binding, which expose objects of a Unity scene over OSCQuery. Its version is the tag it is built from, `2.1.0+prism.N`. Tested on macOS Apple Silicon, Unity 6.3 LTS, in the editor and in players built with Mono and with IL2CPP; the macOS library is universal (arm64 and x86_64).
 
 ## Installation
 
@@ -47,7 +47,13 @@ Then `[ossia.remote /Cube/transform/position]` fed by `[pak 0. 0. 0.]` moves the
 
 ## mDNS
 
-In Play, the device is announced over mDNS (`_oscjson._tcp` on the WebSocket port, `_osc._udp` on the OSC port) under `deviceName`; Stop withdraws the announcement, about a second later. When another device of the network already has that name, the system announces this one as `unity (2)`: Unity does not say so, the library keeps no trace of the name it was registered under. `dns-sd -B _oscjson._tcp` (macOS) lists the names really announced.
+In Play, the device is announced over mDNS (`_oscjson._tcp` on the WebSocket port, `_osc._udp` on the OSC port) under `deviceName`; Stop withdraws the announcement, about a second later. When another device of the network already has that name, the system announces this one as `unity (2)`.
+
+The Controller reads the name really announced: a thread of its own browses the network for five seconds after `Awake` and picks the device announced on this machine with the Controller's WebSocket port. On the main thread, the console then shows `OSSIA: announced "unity" over mDNS (_oscjson._tcp)`, the read-only property `AnnouncedName` gets the name (null until then), and when it differs from `deviceName`, a warning: `OSSIA: announced as "unity (2)": the name "unity" is taken on the network`. A client then connects with `connect unity (2)`, or by URL.
+
+In the editor, a Play started less than five seconds after the previous one stopped waits until that browsing ends: the domain reload waits for its thread, which cannot leave the library before.
+
+`dns-sd -B _oscjson._tcp` (macOS) lists the names announced on the network.
 
 ## Tests
 
@@ -61,7 +67,7 @@ then Window > General > Test Runner, or in batch mode: `Unity -batchmode -projec
 
 ## Not tested
 
-macOS Intel; Windows, Linux, iOS; IL2CPP players (the native callbacks are static and marked `[MonoPInvokeCallback]`, as IL2CPP requires, but no IL2CPP player was built).
+macOS Intel; Windows, Linux, iOS.
 
 # Basic usage: 
 

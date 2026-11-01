@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using Ossia;
 
 namespace Ossia
@@ -52,11 +53,52 @@ namespace Ossia
 
         oscq_protocol = new Ossia.OSCQuery (oscPort, wsPort);
         local_protocol.ExposeTo (oscq_protocol);
+
+        LookUpAnnouncedName ();
       }
+    }
+
+    //! The name the device is announced under over mDNS (_oscjson._tcp),
+    //! null until it is found, a few seconds after Awake. It differs from
+    //! deviceName when another device of the network already had that name:
+    //! the system then announces this one as "name (2)".
+    public string AnnouncedName { get; private set; }
+
+    // Browsing blocks for five seconds: on a thread of its own, which hands
+    // the name over to Update, on the main thread. Once only: in the editor,
+    // the domain reload of the next Play waits for the thread, which cannot
+    // leave the library before the end of its five seconds.
+    void LookUpAnnouncedName ()
+    {
+      int port = wsPort;
+      string self = System.Net.Dns.GetHostName ();
+      var thread = new Thread (() => {
+        found_name = Zeroconf.AnnouncedName (Zeroconf.ListOscqueryDevices (), self, port) ?? "";
+      });
+      thread.IsBackground = true;
+      thread.Name = "ossia mdns lookup";
+      thread.Start ();
+    }
+
+    void ReportAnnouncedName ()
+    {
+      var name = found_name;
+      if (name == null || name_reported || quitting)
+        return;
+      name_reported = true;
+      if (name == "") {
+        Debug.LogWarning ("OSSIA: \"" + deviceName + "\" was not found among the devices announced over mDNS");
+        return;
+      }
+      AnnouncedName = name;
+      Debug.Log ("OSSIA: announced \"" + name + "\" over mDNS (_oscjson._tcp)");
+      if (name != deviceName)
+        Debug.LogWarning ("OSSIA: announced as \"" + name + "\": the name \"" + deviceName + "\" is taken on the network");
     }
 
     void Update()
     {
+      ReportAnnouncedName ();
       Ossia.Message m;
       while (Queue.Pop (out m)) {
         if (Hash.ContainsKey (m.Address)) {
@@ -73,6 +115,7 @@ namespace Ossia
     void OnApplicationQuit ()
     {
       Debug.Log ("OSSIA: Quitting");
+      quitting = true;
       Network.ossia_device_reset_static ();
     }
 
@@ -125,6 +168,9 @@ namespace Ossia
 
 
     bool set = false;
+    volatile bool quitting = false;
+    volatile string found_name = null;
+    bool name_reported = false;
 
     Ossia.Local local_protocol = null;
     Ossia.Device local_device = null;
