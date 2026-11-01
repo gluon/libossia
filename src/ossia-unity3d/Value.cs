@@ -89,15 +89,17 @@ namespace Ossia
         ossia_value = Network.ossia_value_create_3f (vec.x, vec.y, vec.z);
       } else if (obj is UnityEngine.Vector4) {
         var vec = (Vector4)obj;
-        ossia_value = Network.ossia_value_create_4f (vec.w, vec.x, vec.y, vec.z);
+        ossia_value = Network.ossia_value_create_4f (vec.x, vec.y, vec.z, vec.w);
       } else if (obj is UnityEngine.Quaternion) {
+        // orientation.quaternion: x, y, z, w, the order of Unity's Quaternion
         var vec = (Quaternion)obj;
-        ossia_value = Network.ossia_value_create_4f (vec.w, vec.x, vec.y, vec.z);
+        ossia_value = Network.ossia_value_create_4f (vec.x, vec.y, vec.z, vec.w);
       } else if (obj is UnityEngine.Color) {
         var vec = (Color)obj;
         ossia_value = Network.ossia_value_create_4f (vec.r, vec.g, vec.b, vec.a);
       } else if (obj is UnityEngine.Color32) {
-        var vec = (Color)obj;
+        // color.rgba8: components from 0 to 255
+        var vec = (Color32)obj;
         ossia_value = Network.ossia_value_create_4f (vec.r, vec.g, vec.b, vec.a);
       } else if (obj is System.String) {
         ossia_value = Network.ossia_value_create_string ((string)obj);
@@ -201,7 +203,7 @@ namespace Ossia
       case ossia_type.INT:
         {
           if (obj == typeof(float))
-            return GetInt ();
+            return (float)GetInt ();
           else if (obj == typeof(double))
             return (double)GetInt ();
           else if (obj == typeof(System.Int32))
@@ -234,7 +236,7 @@ namespace Ossia
           else if(obj == typeof(Color))
             return new Color(vec.x, vec.y, vec.z, vec.w);
           else if(obj == typeof(Color32))
-            return new Color32((byte)vec.x, (byte)vec.y, (byte)vec.z, (byte)vec.w);
+            return new Color32(ToByte(vec.x), ToByte(vec.y), ToByte(vec.z), ToByte(vec.w));
           break;
         }
       case ossia_type.BOOL:
@@ -242,11 +244,20 @@ namespace Ossia
       case ossia_type.STRING:
         return GetString ();
       case ossia_type.LIST:
+        if (obj == typeof(float[]))
+          return GetFloatArray ();
+        else if (obj == typeof(int[]))
+          return GetIntArray ();
         return GetList ();
       case ossia_type.CHAR:
         return GetChar ();
       }
       return null;
+    }
+
+    static byte ToByte(float f)
+    {
+      return (byte)Mathf.Clamp(Mathf.Round(f), 0, 255);
     }
 
     public ossia_type GetOssiaType()
@@ -283,7 +294,7 @@ namespace Ossia
     }
     public char GetChar()
     {
-      return Network.ossia_value_to_char(ossia_value);
+      return Network.ossia_value_convert_char(ossia_value);
     }
 
     public int[] GetIntArray()
@@ -317,17 +328,18 @@ namespace Ossia
     {
       IntPtr data = IntPtr.Zero;
       UIntPtr sz = UIntPtr.Zero;
-      Network.ossia_value_to_fn(ossia_value, out data, out sz);
+      Network.ossia_value_to_list(ossia_value, out data, out sz);
 
-      Value[] v = new Value[(int) sz];
+      // Each element is a value of its own, freed by its Value; the array is
+      // freed here.
+      int size = (int)sz.ToUInt64 ();
+      Value[] v = new Value[size];
       IntPtr* ptr = (IntPtr*)data.ToPointer ();
-      for (int i = 0; i < (int)sz; i++) {
-        IntPtr p = *ptr;
-        v [i] = new Value (p);
-        ptr = ptr + Marshal.SizeOf (sz);
+      for (int i = 0; i < size; i++) {
+        v [i] = new Value (ptr[i]);
       }
 
-      Network.ossia_value_free_fn (data);
+      Network.ossia_value_free_list (data);
       return v;
     }
 

@@ -63,6 +63,21 @@ namespace Ossia
     public static extern void ossia_protocol_free(
          IntPtr proto);
 
+    [DllImport ("ossia")]
+    public static extern void ossia_oscquery_list_devices(
+      int timeout_ms,
+      out IntPtr names,
+      out IntPtr hosts,
+      out IntPtr ports,
+      out UIntPtr size);
+
+    [DllImport ("ossia")]
+    public static extern void ossia_oscquery_devices_free(
+      IntPtr names,
+      IntPtr hosts,
+      IntPtr ports,
+      UIntPtr size);
+
 
     //// Device ////
     [DllImport ("ossia")]
@@ -186,8 +201,7 @@ namespace Ossia
 
     [DllImport ("ossia")]
     public static extern void ossia_node_remove_parameter (
-      IntPtr node,
-      IntPtr property);
+      IntPtr node);
 
 
     [DllImport ("ossia")]
@@ -313,8 +327,9 @@ namespace Ossia
     public static extern void ossia_parameter_set_unit(
       IntPtr address,
       string unit);
+    // Points into the library's own unit names: never freed
     [DllImport ("ossia")]
-    public static extern string ossia_parameter_get_unit(
+    public static extern IntPtr ossia_parameter_get_unit(
       IntPtr address);
 
     [DllImport ("ossia")]
@@ -393,17 +408,17 @@ namespace Ossia
     public static extern void ossia_parameter_push_in(
       IntPtr property,
       int[] value,
-      int sz);
+      UIntPtr sz);
     [DllImport ("ossia")]
     public static extern void ossia_parameter_push_fn(
       IntPtr property,
       float[] value,
-      int sz);
+      UIntPtr sz);
     [DllImport ("ossia")]
     public static extern void ossia_parameter_push_cn( // pushed as a string
       IntPtr property,
       char[] value,
-      int sz);
+      UIntPtr sz);
 
 
     [DllImport ("ossia")]
@@ -528,9 +543,6 @@ namespace Ossia
     public static extern bool ossia_value_to_bool (IntPtr val);
 
     [DllImport ("ossia")]
-    public static extern char ossia_value_to_char (IntPtr val);
-
-    [DllImport ("ossia")]
     public unsafe static extern void ossia_value_to_byte_array (
       IntPtr val_in,
       out IntPtr val_out,
@@ -542,7 +554,7 @@ namespace Ossia
       out IntPtr val_out,
       out UIntPtr size);
     [DllImport ("ossia")]
-    public static extern void ossia_value_free_list (IntPtr[] tpl);
+    public static extern void ossia_value_free_list (IntPtr tpl);
 
     [DllImport ("ossia")]
     public static extern void ossia_value_to_fn(
@@ -575,7 +587,7 @@ namespace Ossia
     public static extern char ossia_value_convert_char (IntPtr val);
 
     [DllImport ("ossia")]
-    public static extern string ossia_value_convert_byte_array (
+    public static extern void ossia_value_convert_byte_array (
       IntPtr val_in,
       out IntPtr val_out,
       out UIntPtr size);

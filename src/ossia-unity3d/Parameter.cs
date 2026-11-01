@@ -14,9 +14,21 @@ namespace Ossia
 
       IntPtr node = Network.ossia_parameter_get_node (ossia_parameter);
       IntPtr dev = Network.ossia_node_get_device(node);
-      addr_remove_callback = new Network.ossia_parameter_callback((IntPtr ctx, IntPtr addr) => CleanupCallback(addr));
-      IntPtr intptr_delegate = Marshal.GetFunctionPointerForDelegate (addr_remove_callback);
-      addr_ossia_remove_callback = Network.ossia_device_add_parameter_deleting_callback(dev, intptr_delegate, (IntPtr)0);
+      self_handle = GCHandle.Alloc (this, GCHandleType.Weak);
+      addr_ossia_remove_callback = Network.ossia_device_add_parameter_deleting_callback(dev, addr_remove_callback_ptr, GCHandle.ToIntPtr (self_handle));
+    }
+
+    // IL2CPP calls back into C# only through static methods: the Parameter
+    // comes back through a weak handle passed as the callback's context.
+    static readonly Network.ossia_parameter_callback addr_remove_callback = OnParameterDeleting;
+    static readonly IntPtr addr_remove_callback_ptr = Marshal.GetFunctionPointerForDelegate (addr_remove_callback);
+
+    [AOT.MonoPInvokeCallback (typeof (Network.ossia_parameter_callback))]
+    static void OnParameterDeleting(IntPtr ctx, IntPtr addr)
+    {
+      var self = GCHandle.FromIntPtr (ctx).Target as Parameter;
+      if (self != null)
+        self.CleanupCallback (addr);
     }
 
     public void SetAccessMode(ossia_access_mode m)
@@ -59,9 +71,9 @@ namespace Ossia
     public void PushValue(string val)
     { Network.ossia_parameter_push_s (ossia_parameter, val); }
     public void PushValue(float[] val)
-    { Network.ossia_parameter_push_fn (ossia_parameter, val, val.Length); }
+    { Network.ossia_parameter_push_fn (ossia_parameter, val, (UIntPtr)val.Length); }
     public void PushValue(int[] val)
-    { Network.ossia_parameter_push_in (ossia_parameter, val, val.Length); }
+    { Network.ossia_parameter_push_in (ossia_parameter, val, (UIntPtr)val.Length); }
 
     public void SetValueUpdating(bool b)
     {
@@ -113,18 +125,22 @@ namespace Ossia
         Network.ossia_device_remove_parameter_deleting_callback (dev, addr_ossia_remove_callback);
 
         ossia_parameter = IntPtr.Zero;
-        addr_remove_callback = null;
+        addr_ossia_remove_callback = IntPtr.Zero;
+        if (self_handle.IsAllocated)
+          self_handle.Free ();
       }
     }
 
     ~Parameter()
     {
       CleanupCallback (ossia_parameter);
+      if (self_handle.IsAllocated)
+        self_handle.Free ();
     }
 
     internal IntPtr ossia_parameter = IntPtr.Zero;
-    Network.ossia_parameter_callback addr_remove_callback;
     IntPtr addr_ossia_remove_callback;
+    GCHandle self_handle;
 
   }
 }

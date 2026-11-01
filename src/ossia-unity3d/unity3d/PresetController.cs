@@ -33,6 +33,8 @@ public class InspectorButtonAttribute : PropertyAttribute
   }
 }
 
+// The drawer is editor code: a player has no UnityEditor to compile it with
+#if UNITY_EDITOR
 [CustomPropertyDrawer (typeof(InspectorButtonAttribute))]
 public class InspectorButtonPropertyDrawer : PropertyDrawer
 {
@@ -56,6 +58,7 @@ public class InspectorButtonPropertyDrawer : PropertyDrawer
     }
   }
 }
+#endif
 
 
 unsafe public class PresetController : MonoBehaviour
