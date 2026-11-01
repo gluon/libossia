@@ -63,6 +63,20 @@ namespace Ossia
     public static extern void ossia_protocol_free(
          IntPtr proto);
 
+    [DllImport ("ossia")]
+    public static extern void ossia_oscquery_list_devices(
+      out IntPtr names,
+      out IntPtr hosts,
+      out IntPtr ports,
+      out UIntPtr size);
+
+    [DllImport ("ossia")]
+    public static extern void ossia_oscquery_devices_free(
+      IntPtr names,
+      IntPtr hosts,
+      IntPtr ports,
+      UIntPtr size);
+
 
     //// Device ////
     [DllImport ("ossia")]

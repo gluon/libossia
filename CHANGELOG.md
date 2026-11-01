@@ -6,12 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, installed with the Package Manager's "Add package from tarball". Tested with Unity 6.3 LTS on Apple Silicon, Mono scripting backend. Not tested: macOS Intel, Windows, Linux, iOS, IL2CPP players.
+Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, installed with the Package Manager's "Add package from tarball". Tested with Unity 6.3 LTS on Apple Silicon, in the editor and in macOS players, Mono and IL2CPP. Not tested: macOS Intel, Windows, Linux, iOS.
 
 ### Added
 
 - Unity: the `Controller` has the fields `deviceName`, `oscPort` and `wsPort`, set in the inspector; their defaults are the values fixed before in the code: `unity`, 1234, 5678.
 - Unity: the `Controller` field `runInBackground` (on by default) sets `Application.runInBackground` at runtime, without changing the project settings, so that the scene keeps following the values received when Unity loses focus.
+- Unity: the `Controller` reads the name its device is announced under over mDNS, on a thread of its own, five seconds after `Awake`: read-only property `AnnouncedName`, a console line, and a warning when the system announced it under another name than `deviceName` (`unity (2)`, the name being taken on the network). Before, nothing said so.
+- C API: `ossia_oscquery_list_devices`, the OSCQuery devices announced over mDNS (name, host, WebSocket port), freed with `ossia_oscquery_devices_free`; it blocks for five seconds.
 - Unity: the sample "Exposed cube" (Package Manager, Samples): an `OssiaController` and a cube whose transform is exposed.
 - Unity: Edit Mode and Play Mode tests in the package (`Tests/`): a round trip of each value type, the native callbacks, a second Play, the mDNS announcement and its withdrawal, a cube moved by an OSC message from outside.
 - Unity: `LISEZMOI.txt` in the package, and the README's sections on installation, the `Controller`, focus, Max and mDNS.
