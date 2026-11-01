@@ -9,8 +9,21 @@ namespace Ossia {
     internal IntPtr ossia_node = IntPtr.Zero;
     Parameter ossia_parameter = null;
     bool updating = false;
-    Network.ossia_node_callback node_remove_callback = null;
     IntPtr node_ossia_remove_callback = IntPtr.Zero;
+    GCHandle self_handle;
+
+    // IL2CPP calls back into C# only through static methods: the Node comes
+    // back through a weak handle passed as the callback's context.
+    static readonly Network.ossia_node_callback node_remove_callback = OnNodeDeleting;
+    static readonly IntPtr node_remove_callback_ptr = Marshal.GetFunctionPointerForDelegate (node_remove_callback);
+
+    [AOT.MonoPInvokeCallback (typeof (Network.ossia_node_callback))]
+    static void OnNodeDeleting(IntPtr ctx, IntPtr node)
+    {
+      var self = GCHandle.FromIntPtr (ctx).Target as Node;
+      if (self != null)
+        self.CleanupCallback ();
+    }
 
     private void CleanupCallback()
     {
@@ -19,18 +32,18 @@ namespace Ossia {
 
         ossia_node = IntPtr.Zero;
         ossia_parameter = null;
-        node_remove_callback = null;
         node_ossia_remove_callback = IntPtr.Zero;
       }
+      if (self_handle.IsAllocated)
+        self_handle.Free ();
     }
 
     public Node(IntPtr n)
     {
       ossia_node = n;
 
-      node_remove_callback = new Network.ossia_node_callback((IntPtr ctx, IntPtr node) => CleanupCallback());
-      IntPtr intptr_delegate = Marshal.GetFunctionPointerForDelegate (node_remove_callback);
-      node_ossia_remove_callback = Network.ossia_node_add_deleting_callback(ossia_node, intptr_delegate, (IntPtr)0);
+      self_handle = GCHandle.Alloc (this, GCHandleType.Weak);
+      node_ossia_remove_callback = Network.ossia_node_add_deleting_callback(ossia_node, node_remove_callback_ptr, GCHandle.ToIntPtr (self_handle));
 
       var addr = Network.ossia_node_get_parameter (ossia_node);
       if (addr != IntPtr.Zero) {
