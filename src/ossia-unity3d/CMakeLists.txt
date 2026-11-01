@@ -32,12 +32,27 @@ else() # Linux
   )
 endif()
 
+# The Package Manager wants a SemVer version: the tag without its leading v
+if(NOT GIT_TAG)
+  include(ossia_git_info)
+  get_tag(GIT_TAG)
+endif()
+string(REGEX REPLACE "^v" "" OSSIA_UNITY_VERSION "${GIT_TAG}")
+
 configure_file( ${CMAKE_CURRENT_LIST_DIR}/package.json.in ${CMAKE_BINARY_DIR}/package.json @ONLY)
 
 install(
   DIRECTORY .
   DESTINATION ${OSSIA_UNITY_PACKAGE_FOLDER}/Scripts
   FILES_MATCHING PATTERN *.cs
+  PATTERN Tests EXCLUDE
+  PATTERN Samples~ EXCLUDE
+)
+
+# Unity compiles the scripts of a package only through an assembly definition
+install(
+  FILES "${CMAKE_CURRENT_LIST_DIR}/ossia.asmdef"
+  DESTINATION ${OSSIA_UNITY_PACKAGE_FOLDER}/Scripts
 )
 
 install(
@@ -78,4 +93,11 @@ foreach(lib IN LISTS installed_libs)
    \${lib}.meta 
    @ONLY)
 endforeach()
+")
+
+# A package installed from a tarball is read-only: Unity ignores the assets
+# that come without a .meta file, so every other file and folder gets one.
+install(CODE "
+set(OSSIA_UNITY_PACKAGE_ROOT \"${CMAKE_INSTALL_PREFIX}/${OSSIA_UNITY_PACKAGE_FOLDER}\")
+include(\"${CMAKE_CURRENT_LIST_DIR}/unity-meta.cmake\")
 ")
