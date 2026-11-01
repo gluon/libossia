@@ -56,6 +56,12 @@ install(
 )
 
 install(
+  DIRECTORY Tests
+  DESTINATION ${OSSIA_UNITY_PACKAGE_FOLDER}
+  FILES_MATCHING PATTERN *.cs PATTERN *.asmdef
+)
+
+install(
   FILES 
     "${CMAKE_CURRENT_LIST_DIR}/README.md"
     "${CMAKE_BINARY_DIR}/package.json"
