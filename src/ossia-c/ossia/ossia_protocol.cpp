@@ -97,7 +97,8 @@ void ossia_protocol_free(ossia_protocol_t proto)
   return safe_function(__func__, [=] { delete proto; });
 }
 
-void ossia_oscquery_list_devices(char*** names, char*** hosts, int** ports, size_t* size)
+void ossia_oscquery_list_devices(
+    int timeout_ms, char*** names, char*** hosts, int** ports, size_t* size)
 {
   if(!names || !hosts || !ports || !size)
   {
@@ -110,7 +111,8 @@ void ossia_oscquery_list_devices(char*** names, char*** hosts, int** ports, size
   *size = 0;
 
   return safe_function(__func__, [=] {
-    const auto devices = ossia::net::list_oscquery_devices();
+    const auto devices
+        = ossia::net::list_oscquery_devices(std::chrono::milliseconds{timeout_ms});
     const auto n = devices.size();
     if(n == 0)
       return;
