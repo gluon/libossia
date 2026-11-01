@@ -19,6 +19,7 @@ Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, i
 ### Fixed
 
 - Unity: the package the build assembles installs and compiles: it carries `ossia.asmdef`, without which Unity compiled none of its scripts, and a `.meta` file for each file and folder, without which Unity ignored them all in a package installed from a tarball (150 assets ignored). Its version is the tag without its leading `v`; its macOS library is enabled for any CPU, no longer for x86_64 only, which the Apple Silicon editor did not load.
+- Unity: a player builds: `PresetController.cs` declared its inspector drawer, editor code, outside `#if UNITY_EDITOR`, and any player build, Mono or IL2CPP, failed to compile (`PropertyDrawer` not found).
 - Unity: the scene follows the values received when Unity loses focus: with the project's Run In Background off, Unity stopped `Update`, where the `Controller` applies them, until its window was focused again.
 - Unity: `Vector4` and `Quaternion` are sent x, y, z, w, the order they are read in and the order of ossia's `orientation.quaternion`; they were sent w, x, y, z. A peer that reordered the components it received from Unity must stop doing so.
 - Unity: a `Color32` no longer throws `InvalidCastException`: it is sent and read with components from 0 to 255 (`color.rgba8`).
