@@ -1,8 +1,31 @@
 # Changelog
 
-All notable changes to **ossia-prism**, the Max package built from this repository (ossia 2.1.0 for Max plus `ossia.v8connector`), are documented in this file. The rest of libossia has no changelog here.
+All notable changes to **ossia-prism**, the Max package built from this repository (ossia 2.1.0 for Max plus `ossia.v8connector`), and to **ossia (PRISM)**, the Unity package built from it (`io.ossia.ossia-unity`), are documented in this file. The rest of libossia has no changelog here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
+
+## [Unreleased]
+
+Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, installed with the Package Manager's "Add package from tarball". Tested with Unity 6.3 LTS on Apple Silicon, Mono scripting backend. Not tested: macOS Intel, Windows, Linux, iOS, IL2CPP players.
+
+### Added
+
+- Unity: the `Controller` has the fields `deviceName`, `oscPort` and `wsPort`, set in the inspector; their defaults are the values fixed before in the code: `unity`, 1234, 5678.
+- Unity: the `Controller` field `runInBackground` (on by default) sets `Application.runInBackground` at runtime, without changing the project settings, so that the scene keeps following the values received when Unity loses focus.
+- Unity: the sample "Exposed cube" (Package Manager, Samples): an `OssiaController` and a cube whose transform is exposed.
+- Unity: Edit Mode and Play Mode tests in the package (`Tests/`): a round trip of each value type, the native callbacks, a second Play, the mDNS announcement and its withdrawal, a cube moved by an OSC message from outside.
+- Unity: `LISEZMOI.txt` in the package, and the README's sections on installation, the `Controller`, focus, Max and mDNS.
+
+### Fixed
+
+- Unity: the package the build assembles installs and compiles: it carries `ossia.asmdef`, without which Unity compiled none of its scripts, and a `.meta` file for each file and folder, without which Unity ignored them all in a package installed from a tarball (150 assets ignored). Its version is the tag without its leading `v`; its macOS library is enabled for any CPU, no longer for x86_64 only, which the Apple Silicon editor did not load.
+- Unity: the scene follows the values received when Unity loses focus: with the project's Run In Background off, Unity stopped `Update`, where the `Controller` applies them, until its window was focused again.
+- Unity: `Vector4` and `Quaternion` are sent x, y, z, w, the order they are read in and the order of ossia's `orientation.quaternion`; they were sent w, x, y, z. A peer that reordered the components it received from Unity must stop doing so.
+- Unity: a `Color32` no longer throws `InvalidCastException`: it is sent and read with components from 0 to 255 (`color.rgba8`).
+- Unity: `Value.GetList()` reads the list it is given; it read it as a list of floats, past its end, and a list of ints aborted Unity.
+- Unity: every native function the binding imports exists in the library with that signature: `ossia_value_to_char`, `ossia_devices_read_json`, `ossia_preset_set_debug_logger`, `ossia_preset_free_string` and `ossia_devices_get_node_parameter` did not exist (`EntryPointNotFoundException` when called), eight others had a wrong signature.
+- Unity: the native callbacks (node and parameter deletion, debug log) are static methods marked `[MonoPInvokeCallback]`, which an IL2CPP player requires; they were lambdas.
+- C API: the strings it returns are allocated with `malloc`, as `ossia_string_free` and `ossia_free_string` free them with `free`; some were allocated with `new[]`.
 
 ## [2.1.0+prism.6] - 2026-11-01
 
