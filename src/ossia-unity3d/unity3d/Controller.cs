@@ -18,9 +18,7 @@ namespace Ossia
         set = true;
 
         // Setup the log so that the errors in the C API are shown in the
-        // Unity3D console
-        callback_delegate = new DebugLogDelegate (DebugLogCallback);
-
+        // Unity3D console.
         // Convert callback_delegate into a function pointer that can be
         // used in unmanaged code.
         IntPtr intptr_delegate =
@@ -66,6 +64,7 @@ namespace Ossia
       return local_device;
     }
 
+    [AOT.MonoPInvokeCallback (typeof (DebugLogDelegate))]
     static void DebugLogCallback (string str)
     {
       Debug.Log ("OSSIA : " + str);
@@ -121,6 +120,7 @@ namespace Ossia
 
     public delegate void DebugLogDelegate (string str);
 
-    DebugLogDelegate callback_delegate = null;
+    // Static, so that IL2CPP can call it and the GC never collects it
+    static readonly DebugLogDelegate callback_delegate = DebugLogCallback;
   }
 }
