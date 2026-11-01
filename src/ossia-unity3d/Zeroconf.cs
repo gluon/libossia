@@ -13,12 +13,12 @@ namespace Ossia
       public int Port;
     }
 
-    //! The OSCQuery devices announced over mDNS. Blocks for five seconds.
-    internal static List<Announced> ListOscqueryDevices()
+    //! The OSCQuery devices announced over mDNS. Blocks for timeoutMs.
+    internal static List<Announced> ListOscqueryDevices(int timeoutMs)
     {
       IntPtr names, hosts, ports;
       UIntPtr sz;
-      Network.ossia_oscquery_list_devices (out names, out hosts, out ports, out sz);
+      Network.ossia_oscquery_list_devices (timeoutMs, out names, out hosts, out ports, out sz);
 
       int size = (int)sz.ToUInt64 ();
       var list = new List<Announced> (size);

@@ -65,6 +65,7 @@ namespace Ossia
 
     [DllImport ("ossia")]
     public static extern void ossia_oscquery_list_devices(
+      int timeout_ms,
       out IntPtr names,
       out IntPtr hosts,
       out IntPtr ports,

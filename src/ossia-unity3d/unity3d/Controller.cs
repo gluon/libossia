@@ -22,6 +22,9 @@ namespace Ossia
     [Tooltip ("Keep the player loop running when the application loses focus. "
             + "Off, Update stops and the values received are no longer applied until the window is focused again.")]
     public bool runInBackground = true;
+    [Tooltip ("Read the name the device is announced under over mDNS, about two seconds after the start: "
+            + "AnnouncedName, a console line, and a warning when it is not deviceName")]
+    public bool resolveAnnouncedName = true;
 
     void Awake ()
     {
@@ -54,26 +57,31 @@ namespace Ossia
         oscq_protocol = new Ossia.OSCQuery (oscPort, wsPort);
         local_protocol.ExposeTo (oscq_protocol);
 
-        LookUpAnnouncedName ();
+        // Once the server runs: its creation fails when a port is taken
+        if (resolveAnnouncedName && oscq_protocol.ossia_protocol != IntPtr.Zero)
+          LookUpAnnouncedName ();
       }
     }
 
     //! The name the device is announced under over mDNS (_oscjson._tcp),
-    //! null until it is found, a few seconds after Awake. It differs from
+    //! null until it is found, about two seconds after Awake. It differs from
     //! deviceName when another device of the network already had that name:
     //! the system then announces this one as "name (2)".
     public string AnnouncedName { get; private set; }
 
-    // Browsing blocks for five seconds: on a thread of its own, which hands
-    // the name over to Update, on the main thread. Once only: in the editor,
-    // the domain reload of the next Play waits for the thread, which cannot
-    // leave the library before the end of its five seconds.
+    // Long enough to see the announcement the server made in Awake, short
+    // enough not to hold the next Play: in the editor, its domain reload
+    // waits for the browsing thread, which cannot leave the library before.
+    const int announcedNameTimeoutMs = 2000;
+
+    // Browsing blocks: on a thread of its own, once, which hands the name
+    // over to Update, on the main thread.
     void LookUpAnnouncedName ()
     {
       int port = wsPort;
       string self = System.Net.Dns.GetHostName ();
       var thread = new Thread (() => {
-        found_name = Zeroconf.AnnouncedName (Zeroconf.ListOscqueryDevices (), self, port) ?? "";
+        found_name = Zeroconf.AnnouncedName (Zeroconf.ListOscqueryDevices (announcedNameTimeoutMs), self, port) ?? "";
       });
       thread.IsBackground = true;
       thread.Name = "ossia mdns lookup";
