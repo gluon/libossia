@@ -59,9 +59,9 @@ namespace Ossia
     public void PushValue(string val)
     { Network.ossia_parameter_push_s (ossia_parameter, val); }
     public void PushValue(float[] val)
-    { Network.ossia_parameter_push_fn (ossia_parameter, val, val.Length); }
+    { Network.ossia_parameter_push_fn (ossia_parameter, val, (UIntPtr)val.Length); }
     public void PushValue(int[] val)
-    { Network.ossia_parameter_push_in (ossia_parameter, val, val.Length); }
+    { Network.ossia_parameter_push_in (ossia_parameter, val, (UIntPtr)val.Length); }
 
     public void SetValueUpdating(bool b)
     {

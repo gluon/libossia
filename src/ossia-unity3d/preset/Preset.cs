@@ -65,16 +65,6 @@ namespace Namespace {
     /* Devices handling */
 
     /// <summary>
-    /// Read a JSON file to fill a device
-    /// </summary>
-    /// <returns>The result code for the operation.</returns>
-    /// <param name="ossia_device">A pointer to a device that will be filled with the JSON data</param>
-    /// <param name="str">A string containing the JSON data</param>
-
-    [DllImport ("ossia")]
-    public static extern ossia_preset_result_enum ossia_devices_read_json (IntPtr * ossia_device, string str);
-
-    /// <summary>
     /// Write a JSON string corresponding to the device's structure
     /// </summary>
     /// <returns>The result code for the operation.</returns>
@@ -93,7 +83,7 @@ namespace Namespace {
     /// <param name="keep_arch">If set to <c>true</c>, keeps device architecture intact (<c>true</c> by default).</param>
 
     [DllImport ("ossia")]
-    public static extern ossia_preset_result_enum ossia_devices_apply_preset (IntPtr ossia_device, IntPtr preset, bool keep_arch);
+    public static extern ossia_preset_result_enum ossia_devices_apply_preset (IntPtr ossia_device, IntPtr preset, [MarshalAs(UnmanagedType.I1)] bool keep_arch);
 
     /// <summary>
     /// Make a preset from a device
@@ -114,14 +104,6 @@ namespace Namespace {
 
     [DllImport ("ossia")]
     public static extern ossia_preset_result_enum ossia_devices_to_string (IntPtr ossia_device, IntPtr* buffer);
-
-    /// <summary>
-    /// Set the debug log
-    /// </summary>
-    /// <param name="fp">Fp.</param>
-
-    [DllImport ("ossia")]
-    public static extern void ossia_preset_set_debug_logger( IntPtr fp );
 
     /* Miscellaneous */
 
@@ -164,17 +146,12 @@ namespace Namespace {
     /// <param name="str">The string to free.</param>
 
     [DllImport ("ossia")]
-    public static extern ossia_preset_result_enum ossia_preset_free_string (IntPtr str);
-
-    [DllImport ("ossia")]
-    public static extern ossia_preset_result_enum ossia_devices_get_node_parameter (IntPtr node, IntPtr* addr);
+    public static extern ossia_preset_result_enum ossia_free_string (IntPtr str);
 
     public static Ossia.Parameter GetNodeParameter(Ossia.Node node) {
-      IntPtr addr;
-      ossia_preset_result_enum code;
-      code = ossia_devices_get_node_parameter (node.GetNode (), &addr);
-      if (code != ossia_preset_result_enum.OSSIA_PRESETS_OK) {
-        throw new Exception ("Error code " + code);
+      IntPtr addr = Network.ossia_node_get_parameter (node.GetNode ());
+      if (addr == IntPtr.Zero) {
+        throw new Exception ("Node has no parameter");
       }
       return new Ossia.Parameter (addr);
     }
@@ -200,7 +177,7 @@ namespace Namespace {
       if (code == ossia_preset_result_enum.OSSIA_PRESETS_OK) {
         string str = Marshal.PtrToStringAnsi (ptr);
         Debug.Log ("Wrote json \"" + str + "\"");
-        BlueYetiAPI.ossia_preset_free_string (ptr);
+        BlueYetiAPI.ossia_free_string (ptr);
         return str;
       } else {
         throw new Exception ("Error code " + code);
@@ -212,7 +189,7 @@ namespace Namespace {
       ossia_preset_result_enum code = BlueYetiAPI.ossia_presets_to_string (preset, &strptr);
       if (code == ossia_preset_result_enum.OSSIA_PRESETS_OK) {
         System.String str = Marshal.PtrToStringAnsi (strptr);
-        BlueYetiAPI.ossia_preset_free_string (strptr);
+        BlueYetiAPI.ossia_free_string (strptr);
         return str;
       } else {
         throw new Exception ("Error code " + code);
