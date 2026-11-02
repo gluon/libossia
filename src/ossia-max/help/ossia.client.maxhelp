@@ -2494,6 +2494,1034 @@
 				}
 
 			}
+,
+{
+	"box": {
+		"id": "obj-prism",
+		"maxclass": "newobj",
+		"numinlets": 0,
+		"numoutlets": 0,
+		"patcher": {
+			"fileversion": 1,
+			"appversion": {
+				"major": 9,
+				"minor": 2,
+				"revision": 0,
+				"architecture": "x64",
+				"modernui": 1
+			},
+			"classnamespace": "box",
+			"rect": [
+				0.0,
+				26.0,
+				968.0,
+				923.0
+			],
+			"boxes": [
+				{
+					"box": {
+						"id": "obj-1",
+						"maxclass": "jsui",
+						"patching_rect": [
+							8.0,
+							7.0,
+							674.0,
+							142.0
+						],
+						"border": 0,
+						"filename": "helpdetails.js",
+						"ignoreclick": 1,
+						"jsarguments": [
+							"ossia.client"
+						],
+						"numinlets": 1,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-2",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							165.0,
+							700.0,
+							21.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "What ossia-prism adds to ossia.client. ossia-prism, PRISM (CNRS), https://www.prism.cnrs.fr",
+						"fontface": 1
+					}
+				},
+				{
+					"box": {
+						"id": "obj-3",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							200.0,
+							540.0,
+							78.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "1. The device to connect to is in this tab, in p server: click the first message to expose it on 7413 and 7414, free ports, then connect by name (2) or by address (3). Create the client without argument, as here: [ossia.client <name>] sends itself connect without argument as it is created, then, every second, connect with nothing after it and the help of the protocols in the console, until a connect with arguments or a disconnect.",
+						"linecount": 5
+					}
+				},
+				{
+					"box": {
+						"id": "obj-4",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							200.0,
+							193.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "expose oscquery 7413 7414"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-5",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							292.0,
+							540.0,
+							78.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "2. connect <name> finds the OSCQuery device announced over mDNS under that name, in this Max, another Max or TouchDesigner of the same network. Until it is found, the outlet sends connect 0 <name> every second, then connect 1 <name>. Connected by name, the client reads the tree of the device again: the outlet reports every node removed, then created, and the ossia.remote objects register again.",
+						"linecount": 5
+					}
+				},
+				{
+					"box": {
+						"id": "obj-6",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							292.0,
+							235.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "connect ossia_prism_help_server"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-7",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							384.0,
+							540.0,
+							35.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "3. connect oscquery ws://<host>:<port> connects without mDNS, on a thread of its own, so that Max does not wait for the server: connect 1 once the tree is read.",
+						"linecount": 2
+					}
+				},
+				{
+					"box": {
+						"id": "obj-8",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							384.0,
+							270.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "connect oscquery ws://127.0.0.1:7414"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-9",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							433.0,
+							540.0,
+							64.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "4. When the server goes away (stop 0 here), the outlet sends connect 0 with the connection parameters (by address) or disconnected (by name, once the device is no longer announced), and the client tries again every second; expose again (1): connect 1, and every ossia.remote follows again. disconnect ends the connection and the attempts.",
+						"linecount": 4
+					}
+				},
+				{
+					"box": {
+						"id": "obj-10",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							433.0,
+							60.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "stop 0"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-11",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							463.0,
+							88.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "disconnect"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-12",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							511.0,
+							540.0,
+							49.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "5. @reconnect 0 turns off the attempts after a loss. A first connection that fails, an unreachable URL or a name not found, is tried again every second whatever @reconnect says, until it succeeds, a disconnect or a new connect.",
+						"linecount": 3
+					}
+				},
+				{
+					"box": {
+						"id": "obj-13",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							511.0,
+							95.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "reconnect 0"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-14",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							541.0,
+							95.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "reconnect 1"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-15",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							585.0,
+							540.0,
+							64.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "6. @bundle groups what ossia.remote, ossia.parameter and ossia.view push during a tick of the scheduler: the values leave at the end of the tick, in OSC bundles of at most 1400 bytes over UDP, one bundle over the WebSocket for a @critical parameter. -1 (the default): bundles over OSCQuery; 0: one message per value.",
+						"linecount": 4
+					}
+				},
+				{
+					"box": {
+						"id": "obj-16",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							585.0,
+							81.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "bundle -1"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-17",
+						"maxclass": "message",
+						"patching_rect": [
+							600.0,
+							615.0,
+							74.0,
+							22.0
+						],
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"text": "bundle 0"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-18",
+						"maxclass": "newobj",
+						"patching_rect": [
+							600.0,
+							669.0,
+							85.0,
+							22.0
+						],
+						"text": "ossia.client",
+						"numinlets": 1,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						]
+					}
+				},
+				{
+					"box": {
+						"id": "obj-19",
+						"maxclass": "newobj",
+						"patching_rect": [
+							600.0,
+							709.0,
+							80.0,
+							22.0
+						],
+						"text": "print client",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"outlettype": []
+					}
+				},
+				{
+					"box": {
+						"id": "obj-20",
+						"maxclass": "newobj",
+						"patching_rect": [
+							805.0,
+							200.0,
+							140.0,
+							22.0
+						],
+						"text": "s prism_help_expose",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"outlettype": []
+					}
+				},
+				{
+					"box": {
+						"id": "obj-21",
+						"maxclass": "newobj",
+						"patching_rect": [
+							672.0,
+							433.0,
+							140.0,
+							22.0
+						],
+						"text": "s prism_help_expose",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"outlettype": []
+					}
+				},
+				{
+					"box": {
+						"id": "obj-22",
+						"maxclass": "comment",
+						"patching_rect": [
+							600.0,
+							744.0,
+							170.0,
+							20.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "client: ossia.remote level",
+						"linecount": 1
+					}
+				},
+				{
+					"box": {
+						"id": "obj-23",
+						"maxclass": "comment",
+						"patching_rect": [
+							780.0,
+							744.0,
+							170.0,
+							20.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "server: its parameter level",
+						"linecount": 1
+					}
+				},
+				{
+					"box": {
+						"id": "obj-24",
+						"maxclass": "flonum",
+						"patching_rect": [
+							600.0,
+							769.0,
+							60.0,
+							22.0
+						],
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							"bang"
+						],
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-25",
+						"maxclass": "newobj",
+						"patching_rect": [
+							600.0,
+							799.0,
+							120.0,
+							22.0
+						],
+						"text": "ossia.remote level",
+						"numinlets": 1,
+						"numoutlets": 3,
+						"outlettype": [
+							"",
+							"",
+							""
+						]
+					}
+				},
+				{
+					"box": {
+						"id": "obj-26",
+						"maxclass": "flonum",
+						"patching_rect": [
+							600.0,
+							829.0,
+							60.0,
+							22.0
+						],
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							"bang"
+						],
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-27",
+						"maxclass": "flonum",
+						"patching_rect": [
+							780.0,
+							769.0,
+							60.0,
+							22.0
+						],
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							"bang"
+						],
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-28",
+						"maxclass": "newobj",
+						"patching_rect": [
+							780.0,
+							799.0,
+							125.0,
+							22.0
+						],
+						"text": "s prism_help_level",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"outlettype": []
+					}
+				},
+				{
+					"box": {
+						"id": "obj-29",
+						"maxclass": "newobj",
+						"patching_rect": [
+							780.0,
+							829.0,
+							150.0,
+							22.0
+						],
+						"text": "r prism_help_level_out",
+						"numinlets": 0,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						]
+					}
+				},
+				{
+					"box": {
+						"id": "obj-30",
+						"maxclass": "flonum",
+						"patching_rect": [
+							780.0,
+							859.0,
+							60.0,
+							22.0
+						],
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							"bang"
+						],
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-31",
+						"maxclass": "newobj",
+						"numinlets": 0,
+						"numoutlets": 0,
+						"patcher": {
+							"fileversion": 1,
+							"appversion": {
+								"major": 9,
+								"minor": 2,
+								"revision": 0,
+								"architecture": "x64",
+								"modernui": 1
+							},
+							"classnamespace": "box",
+							"rect": [
+								100.0,
+								100.0,
+								420.0,
+								300.0
+							],
+							"boxes": [
+								{
+									"box": {
+										"id": "obj-1",
+										"maxclass": "newobj",
+										"patching_rect": [
+											20.0,
+											20.0,
+											140.0,
+											22.0
+										],
+										"text": "r prism_help_expose",
+										"numinlets": 0,
+										"numoutlets": 1,
+										"outlettype": [
+											""
+										]
+									}
+								},
+								{
+									"box": {
+										"id": "obj-2",
+										"maxclass": "newobj",
+										"patching_rect": [
+											20.0,
+											60.0,
+											230.0,
+											22.0
+										],
+										"text": "ossia.device ossia_prism_help_server",
+										"numinlets": 1,
+										"numoutlets": 1,
+										"outlettype": [
+											""
+										]
+									}
+								},
+								{
+									"box": {
+										"id": "obj-3",
+										"maxclass": "newobj",
+										"patching_rect": [
+											20.0,
+											100.0,
+											85.0,
+											22.0
+										],
+										"text": "print server",
+										"numinlets": 1,
+										"numoutlets": 0,
+										"outlettype": []
+									}
+								},
+								{
+									"box": {
+										"id": "obj-4",
+										"maxclass": "newobj",
+										"patching_rect": [
+											20.0,
+											150.0,
+											125.0,
+											22.0
+										],
+										"text": "r prism_help_level",
+										"numinlets": 0,
+										"numoutlets": 1,
+										"outlettype": [
+											""
+										]
+									}
+								},
+								{
+									"box": {
+										"id": "obj-5",
+										"maxclass": "newobj",
+										"patching_rect": [
+											20.0,
+											190.0,
+											300.0,
+											22.0
+										],
+										"text": "ossia.parameter level @type float @min 0. @max 1.",
+										"numinlets": 1,
+										"numoutlets": 3,
+										"outlettype": [
+											"",
+											"",
+											""
+										]
+									}
+								},
+								{
+									"box": {
+										"id": "obj-6",
+										"maxclass": "newobj",
+										"patching_rect": [
+											20.0,
+											230.0,
+											150.0,
+											22.0
+										],
+										"text": "s prism_help_level_out",
+										"numinlets": 1,
+										"numoutlets": 0,
+										"outlettype": []
+									}
+								}
+							],
+							"lines": [
+								{
+									"patchline": {
+										"source": [
+											"obj-1",
+											0
+										],
+										"destination": [
+											"obj-2",
+											0
+										]
+									}
+								},
+								{
+									"patchline": {
+										"source": [
+											"obj-2",
+											0
+										],
+										"destination": [
+											"obj-3",
+											0
+										]
+									}
+								},
+								{
+									"patchline": {
+										"source": [
+											"obj-4",
+											0
+										],
+										"destination": [
+											"obj-5",
+											0
+										]
+									}
+								},
+								{
+									"patchline": {
+										"source": [
+											"obj-5",
+											0
+										],
+										"destination": [
+											"obj-6",
+											0
+										]
+									}
+								}
+							]
+						},
+						"patching_rect": [
+							780.0,
+							669.0,
+							70.0,
+							22.0
+						],
+						"text": "p server"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-32",
+						"maxclass": "comment",
+						"patching_rect": [
+							30.0,
+							669.0,
+							540.0,
+							49.0
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"numinlets": 1,
+						"numoutlets": 0,
+						"text": "p server holds the device of this tab, ossia.device ossia_prism_help_server, and its parameter level. The number boxes on the right set and show the level of the client and of the server: a value set on either side reaches the other.",
+						"linecount": 3
+					}
+				}
+			],
+			"lines": [
+				{
+					"patchline": {
+						"source": [
+							"obj-18",
+							0
+						],
+						"destination": [
+							"obj-19",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-4",
+							0
+						],
+						"destination": [
+							"obj-20",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-6",
+							0
+						],
+						"destination": [
+							"obj-18",
+							0
+						],
+						"midpoints": [
+							609.5,
+							319.0,
+							588.0,
+							319.0,
+							588.0,
+							661.0,
+							609.5,
+							661.0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-8",
+							0
+						],
+						"destination": [
+							"obj-18",
+							0
+						],
+						"midpoints": [
+							609.5,
+							411.0,
+							588.0,
+							411.0,
+							588.0,
+							661.0,
+							609.5,
+							661.0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-10",
+							0
+						],
+						"destination": [
+							"obj-21",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-11",
+							0
+						],
+						"destination": [
+							"obj-18",
+							0
+						],
+						"midpoints": [
+							609.5,
+							490.0,
+							588.0,
+							490.0,
+							588.0,
+							661.0,
+							609.5,
+							661.0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-13",
+							0
+						],
+						"destination": [
+							"obj-18",
+							0
+						],
+						"midpoints": [
+							609.5,
+							538.0,
+							588.0,
+							538.0,
+							588.0,
+							661.0,
+							609.5,
+							661.0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-14",
+							0
+						],
+						"destination": [
+							"obj-18",
+							0
+						],
+						"midpoints": [
+							609.5,
+							568.0,
+							588.0,
+							568.0,
+							588.0,
+							661.0,
+							609.5,
+							661.0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-16",
+							0
+						],
+						"destination": [
+							"obj-18",
+							0
+						],
+						"midpoints": [
+							609.5,
+							612.0,
+							588.0,
+							612.0,
+							588.0,
+							661.0,
+							609.5,
+							661.0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-17",
+							0
+						],
+						"destination": [
+							"obj-18",
+							0
+						],
+						"midpoints": [
+							609.5,
+							642.0,
+							588.0,
+							642.0,
+							588.0,
+							661.0,
+							609.5,
+							661.0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-24",
+							0
+						],
+						"destination": [
+							"obj-25",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-25",
+							0
+						],
+						"destination": [
+							"obj-26",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-27",
+							0
+						],
+						"destination": [
+							"obj-28",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-29",
+							0
+						],
+						"destination": [
+							"obj-30",
+							0
+						]
+					}
+				}
+			],
+			"showontab": 1
+		},
+		"patching_rect": [
+			395.0,
+			242.0,
+			58.0,
+			22.0
+		],
+		"text": "p PRISM"
+	}
+}
  ],
 		"lines" : [  ],
 		"originid" : "pat-20",
