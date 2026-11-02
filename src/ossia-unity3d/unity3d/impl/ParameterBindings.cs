@@ -57,6 +57,8 @@ namespace Ossia
         if (!new_val.Equals (cur_val)) {
           field.SetValue (parent.component, new_val);
         }
+        // A value received does not leave again: SendUpdates sees no change
+        previousValue = new_val;
       } catch (Exception e) {
         Debug.LogWarning (e.Message);
       }
@@ -119,6 +121,7 @@ namespace Ossia
           if (!new_val.Equals (cur_val)) {
             field.SetValue (parent.component, new_val, null);
           }
+          previousValue = new_val;
         } catch (Exception e) {
           Debug.LogWarning (e.Message);
         }
