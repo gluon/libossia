@@ -7,7 +7,9 @@ namespace Ossia
 {
   public abstract class ExposedObject : MonoBehaviour
   {
-    public bool sendUpdates = false;
+    //! Pushes to the clients, each frame, what changed in Unity. On by default;
+    //! a scene keeps the value it saved.
+    public bool sendUpdates = true;
     public Ossia.Node child_node;
     internal List<OssiaEnabledComponent> ossia_components = new List<OssiaEnabledComponent>();
     protected Ossia.Controller controller = null;
