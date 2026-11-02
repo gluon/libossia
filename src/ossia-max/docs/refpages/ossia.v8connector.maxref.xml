@@ -46,7 +46,7 @@
 	<inletlist>
 		<inlet id="0" name="Message input" type="any">
 			<digest>Messages to ossia.v8connector</digest>
-			<description>add, remove, clear, bind, unbind and set messages</description>
+			<description>add, remove, clear, set, bind, unbind, address, namespace and get messages</description>
 		</inlet>
 	</inletlist>
 
@@ -59,7 +59,7 @@
 		</outlet>
 		<outlet id="1" name="Info outlet" type="any">
 			<digest>Status and errors</digest>
-			<description>address, add, remove, clear, bind, unbind and error messages</description>
+			<description>address, add, remove, clear, bind, unbind and error messages; namespace_size then one line per parameter after <m>namespace</m>; the attribute name and its value after <m>get</m></description>
 		</outlet>
 	</outletlist>
 
@@ -162,13 +162,25 @@
 			</description>
 		</method>
 
+		<method name="get">
+			<arglist>
+				<arg name="attribute" type="symbol" optional="0"/>
+			</arglist>
+			<digest>
+				Output the value of a node attribute
+			</digest>
+			<description>
+				The message <m>get</m> followed by global_address, description, tags, invisible, priority, recall_safe or zombie outputs that attribute of the instance's node on the right outlet. An instance without a name, or that only binds, has no node of its own: nothing comes out.
+			</description>
+		</method>
+
 		<method name="namespace">
 			<arglist/>
 			<digest>
 				Output list of all parameters and their current values
 			</digest>
 			<description>
-				The <m>namespace</m> message outputs on the right outlet the list of all parameters registered under this node, and their current values
+				The <m>namespace</m> message outputs on the right outlet namespace_size followed by the number of entries, then one namespace message per parameter registered under this node, with its address and current value. An instance without a name, or that only binds, outputs namespace_size 0.
 			</description>
 		</method>
 
@@ -190,7 +202,7 @@
 				Set description to node
 			</digest>
 			<description>
-				The <at>description</at> attribute allows to set a description to the node
+				The <at>description</at> attribute (default: none) sets the description of the node. Without a name, the instance has no node of its own and the attribute does nothing.
 			</description>
 		</attribute>
 
@@ -199,16 +211,16 @@
 				Hide node from remote client
 			</digest>
 			<description>
-				The <at>invisible</at> attribute allows to hide the node from remote clients
+				The <at>invisible</at> attribute (default: 0) hides the node from remote clients. Without a name, the attribute does nothing.
 			</description>
 		</attribute>
 
-		<attribute name="priority" get="1" set="1" type="int" size="1">
+		<attribute name="priority" get="1" set="1" type="float" size="1">
 			<digest>
 				Set priority
 			</digest>
 			<description>
-				The <at>priority</at> attribute is stored on the node, as <o>ossia.model</o> does. It does not order the outputs of <o>ossia.v8connector</o>: ossia-max orders the outputs of <o>ossia.parameter</o> and <o>ossia.remote</o> only. The default of a leaf comes out of the left outlet once the leaf exists, and a bound address outputs the value it finds as soon as it reaches the parameter, in declaration order.
+				The <at>priority</at> attribute (default: 0) is stored on the node, as <o>ossia.model</o> does. It does not order the outputs of <o>ossia.v8connector</o>: ossia-max orders the outputs of <o>ossia.parameter</o> and <o>ossia.remote</o> only. The default of a leaf comes out of the left outlet once the leaf exists, and a bound address outputs the value it finds as soon as it reaches the parameter, in declaration order.
 			</description>
 		</attribute>
 
@@ -217,7 +229,7 @@
 				Enable or disable value update when recalling preset
 			</digest>
 			<description>
-				The <at>recall_safe</at> attribute (default: off) allows to prevent value update when recalling a preset.
+				The <at>recall_safe</at> attribute (default: off) allows to prevent value update when recalling a preset. Without a name, the attribute does nothing.
 			</description>
 		</attribute>
 
@@ -226,16 +238,16 @@
 				Tags associated with this node
 			</digest>
 			<description>
-				The <at>tags</at> attribute allows to associate a variable number of tags for this node.
+				The <at>tags</at> attribute (default: none) associates a variable number of tags with this node. Without a name, the attribute does nothing.
 			</description>
 		</attribute>
 
 		<attribute name="trim_address" get="1" set="1" type="boolean" size="1">
 			<digest>
-				Output absolute or relative address path
+				Inherited from the ossia objects, unused here
 			</digest>
 			<description>
-				The <at>trim_address</at> attribute sets whether the address is output as a relative or absolute path
+				The <at>trim_address</at> attribute (default: 1) comes with the ossia objects, where it trims the address reported on the right outlet. <o>ossia.v8connector</o> does not read it: its right outlet reports the absolute address of its node, and its left outlet the addresses relative to that node.
 			</description>
 		</attribute>
 

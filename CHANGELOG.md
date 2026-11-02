@@ -4,6 +4,20 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [2.1.0+prism.8] - 2026-11-02
+
+A documentation release: no object of the Max package and no script of the Unity package behaves differently from `2.1.0+prism.7`. Published for macOS universal (Apple Silicon and Intel), as `2.1.0+prism.7`.
+
+### Added
+
+- Unity: the sample "Custom parameters" (Package Manager, Samples): the script `CustomParameters.cs`, whose fields `speed` (`float`), `axis` (`int`), `spin` (`bool`), `color` (`Color`) and `size` (`Vector3`) are marked `[Ossia.Expose]` and turn, scale and color a cube, exposed under `/Shape/CustomParameters`; its scene, with an `OssiaController` and `ExposeAttributes` sending updates; and the Max patch `CustomParameters.maxpat`, an `ossia.client` connected by name with one `ossia.remote` per field. The build writes a `.meta` file for each script of a sample, its GUID derived from its path, so that the sample's scene finds its script once imported.
+
+### Changed
+
+- Unity: the package's README is rewritten: installation from a new project, declaring your own parameters with the code of the sample, the tree a client gets (`curl` output), the values in both directions and Send Updates, the accepted types, the limits of `[Ossia.Expose]` (a name only: no range, unit, access mode), `ExposeComponents` with an example, `CustomDevice.cs` and its port conflict with the `Controller`, a reference of every component with its defaults, troubleshooting. The upstream section, whose paths and settings no longer applied, is removed. `LISEZMOI.txt` becomes a short English pointer to the README.
+- Max: the README gives the installation and the update in English, declaring parameters with `ossia.v8connector` and the tree a client gets, the attributes of the object and of `add` with their defaults, the helper's functions, the limits not written before, a troubleshooting table and the cross test with Unity; the upstream README, whose downloads install the official package, is replaced by a short section on upstream. `docs/prism/LISEZMOI.txt`, copied at the root of the package, becomes a short English pointer to the README.
+- Max: the reference of `ossia.v8connector` lists `get` and `namespace` with what they output, and the defaults of its attributes (`@priority` is a float); the reference of `ossia.client` documents `get devices` instead of a `getdevices` message that does not exist, and the messages of its outlet; the reference of `ossia.device` names `announced` on its outlet. The help of `ossia.v8connector`: the right outlet's messages, a sentence on models that contradicted the README, and the platforms line no longer tied to `2.1.0+prism.5`.
+
 ## [2.1.0+prism.7] - 2026-11-02
 
 Published for macOS universal (Apple Silicon and Intel): the Max package and the Unity package. Windows x64 to come: same version, added to the Release later.

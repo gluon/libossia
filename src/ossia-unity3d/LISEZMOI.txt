@@ -1,23 +1,9 @@
-ossia (PRISM) pour Unity
-========================
+ossia (PRISM) for Unity
+=======================
 
-Expose des objets d'une scène Unity en OSCQuery, pilotables depuis Max
-(ossia-prism), TouchDesigner ou tout client OSCQuery.
+Exposes the objects of a Unity scene, and the fields of your own scripts,
+over OSCQuery, for Max (ossia-prism), TouchDesigner or any OSCQuery client.
 
-Installation
-1. Window > Package Management > Package Manager, "+" > Add package from
-   tarball, choisir le fichier .tgz.
-2. Onglet Samples du package : Import "Exposed cube", ouvrir la scène
-   ExposedCube, Play.
-3. Vérifier : curl http://localhost:5678 renvoie l'arbre, avec
-   /Cube/transform/position.
-
-Depuis Max : [ossia.client], message "connect unity" (par mDNS) ou
-"connect oscquery ws://127.0.0.1:5678", puis
-[ossia.remote /Cube/transform/position].
-
-Réglages du composant Controller (GameObject "OssiaController") :
-deviceName (unity), oscPort (1234), wsPort (5678), runInBackground
-(activé : la scène suit les valeurs même quand Unity n'a pas le focus).
-
-Détails : README.md du package.
+The documentation is README.md, next to this file: installation, the
+samples "Custom parameters" and "Exposed cube", declaring your own
+parameters, reference, limits and troubleshooting.
