@@ -278,6 +278,10 @@ Known defects, not fixed:
 
 `expose oscquery` on an `ossia.device` announces it over mDNS as `_oscjson._tcp`, under the device's name, with the WebSocket port (also the HTTP port) in the SRV record and the host name of the machine as its target; no `_osc._udp`. `connect <name>` on an `ossia.client` connects to it, from the same Max, another Max or a TouchDesigner component of the same network. The client keeps the mirror the zeroconf listener built for that device, follows its WebSocket and tries again every second (`@reconnect`). The listener builds a mirror for every announced device, on a thread of its own, and tries a failed build again every second while the device is announced.
 
+Create the client without argument, `[ossia.client]`, and send it `connect <name>`. Created with a name only, `[ossia.client <name>]` sends itself a `connect` with no argument as it is created (`client.cpp`, `client::create`): from then on, every second, the outlet sends `connect` with nothing after it and the console prints the help of the protocols ("Available protocols..."), until a `connect` with arguments or a `disconnect`. `[ossia.client <name> 0.]`, a float, does not connect; `[ossia.client <name> 0]`, an integer, connects by name to `<name>` itself.
+
+When it connects by name, the client reads the device's tree again (`client.cpp`, `finish_connect` then `update`), although the listener's mirror holds it already: the mirror empties its root and builds it again from the answer (`json_reader_detail.cpp`, `parse_namespace`). The outlet therefore sends `parameter removed` and `node removed` for every node of the device, then `node created` and `parameter created` for each, the `ossia.remote` objects register again, and the values that arrive in between, for addresses not yet built again, come out as `osc <address> <values>`. Measured with the sample "Custom parameters" of the Unity package. A connection by URL reads the tree once, on its own thread.
+
 mDNS works within one subnet: the machines must share a VLAN, multicast 224.0.0.251 on UDP 5353 must pass between them, Wi-Fi client isolation must be off. On Windows, mDNS in Max needs the Bonjour service. Where discovery cannot work, connect by address: `connect oscquery ws://<ip>:<port>`.
 
 ### Known limits
@@ -295,7 +299,7 @@ mDNS works within one subnet: the machines must share a VLAN, multicast 224.0.0.
 
 ### Cross test with Unity and TouchDesigner
 
-- **Unity**: the Unity package's sample "Custom parameters" ships `CustomParameters.maxpat`: `[ossia.client custom]`, `connect unity`, one `ossia.remote` per field of a Unity script (`float`, `int`, `bool`, `Color`, `Vector3`), with what Unity sends back shown next to each. Steps in the Unity package's [README](src/ossia-unity3d/README.md#driving-from-max).
+- **Unity**: the Unity package's sample "Custom parameters" ships `CustomParameters.maxpat`: `[ossia.client]`, `connect unity`, one `ossia.remote` per field of a Unity script (`float`, `int`, `bool`, `Color`, `Vector3`), with what Unity sends back shown next to each. Steps in the Unity package's [README](src/ossia-unity3d/README.md#driving-from-max).
 - **TouchDesigner**: the OSCQuery component of PRISM (prism-td-oscquery) decodes the bundles of ossia-prism, as server and as client, and an `ossia.client` connects to it by name or by address (see [Discovery by name](#discovery-by-name)); its procedure is in that component's documentation.
 
 ### Troubleshooting
@@ -310,6 +314,7 @@ mDNS works within one subnet: the machines must share a VLAN, multicast 224.0.0.
 | `refused <address> ... already declared with other attributes` | The same address declared again with other attributes. | `remove` it first, or declare it once. |
 | `refused <address> already exists` | Without a name, the address is taken by another instance or an `ossia.parameter`. | Give the instance a name, or another address. |
 | Max quits or crashes on `expose` | The port is already in use, by a second `expose` or another program. | `stop <index>` before exposing again (`stop 0` for the first `expose`); `lsof -nP -iTCP:<port> -sTCP:LISTEN` names the program holding it; choose free ports. |
+| From the opening of a patch, every second, `connect` with nothing after it on the outlet of `ossia.client`, and "Available protocols..." in the console | The object is created with a name only, `[ossia.client <name>]`: it sends itself `connect` without argument. | `[ossia.client]` without argument, then `connect <name>`; a `connect` with arguments or a `disconnect` stops it. |
 | `ossia.client` stays on `connect 0 <name>` | The device is not announced on this network: mDNS blocked (another subnet, VLAN, Wi-Fi isolation, multicast 224.0.0.251 UDP 5353 filtered), or on Windows, no Bonjour service. | `dns-sd -B _oscjson._tcp` lists what is announced; connect by address, `connect oscquery ws://<ip>:<port>`. |
 | The device is announced as `name (2)` | Another device of the network already has the name; `ossia.device` sends `announced name (2)` and warns in the console. | Rename the device, or connect with `connect name (2)`. |
 | The console shows `remote_endpoint: Invalid argument` at each connection | Logged by the server, without effect on the served tree (known defect). | Nothing to do. |

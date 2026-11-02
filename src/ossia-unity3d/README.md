@@ -178,7 +178,7 @@ The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`
 
 With the package `ossia-prism` in Max, the sample's `CustomParameters.maxpat`:
 
-- `[ossia.client custom]`, message `connect unity`: connects by name (mDNS); the console shows `client: connect 1 unity` once the device is found. Or `connect oscquery ws://127.0.0.1:5678`, by address.
+- `[ossia.client]`, without argument, message `connect unity`: connects by name (mDNS); the console shows `client: connect 1 unity` once the device is found, `client: connect 0 unity` every second until then. Created with a name, `[ossia.client <name>]` would print the help of its protocols every second from the opening of the patch (see the README of ossia-prism, Discovery by name). Or `connect oscquery ws://127.0.0.1:5678`, by address.
 - one `[ossia.remote /Shape/CustomParameters/<name>]` per field: a number box for `speed`, a number box from 0 to 2 for `axis`, a toggle for `spin`, four number boxes into `[pak 1. 0.5 0. 1.]` for `color`, three into `[pak 1. 1. 1.]` for `size`;
 - right of each remote, a message box shows what Unity sends back (Send Updates is checked in the sample's scene).
 
