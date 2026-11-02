@@ -10,7 +10,7 @@ set(MAXSDK_PATH "${OSSIA_3RDPARTY_FOLDER}/max-sdk" CACHE PATH "Path to Max SDK f
 # Name and version of the Max package, and name of the script-driven node
 # object. All are defined here only; the sources read them as compile definitions.
 set(OSSIA_MAX_PACKAGE_NAME "ossia-prism")
-set(OSSIA_MAX_PACKAGE_VERSION "2.1.0+prism.7")
+set(OSSIA_MAX_PACKAGE_VERSION "2.1.0+prism.8")
 set(OSSIA_V8CONNECTOR_NAME "ossia.v8connector")
 
 include(GenerateExportHeader)

@@ -13,6 +13,11 @@
       "displayName": "Exposed cube",
       "description": "An OssiaController and a cube whose transform is exposed over OSCQuery, on ports 1234 (OSC) and 5678 (HTTP and WebSocket).",
       "path": "Samples~/ExposedCube"
+    },
+    {
+      "displayName": "Custom parameters",
+      "description": "A script whose own fields (float, int, bool, Color, Vector3) are marked [Ossia.Expose] and exposed under /Shape/CustomParameters, with the Max patch CustomParameters.maxpat that drives and follows them.",
+      "path": "Samples~/CustomParameters"
     }
   ]
 }
