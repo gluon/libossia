@@ -1,9 +1,26 @@
 ossia-prism (PRISM, CNRS)
 ===
 
-**ossia-prism** is the Max package built from this repository: [ossia](https://ossia.io) 2.1.0 for Max (every `ossia.*` object of the official package, unchanged except for the fixes listed under [Differences from ossia 2.1.0](#differences-from-ossia-210)) plus one object, **`ossia.v8connector`**. It replaces the official `ossia` package: both contain the same objects and cannot be installed together. Binaries are published on the project's [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page: macOS universal (Apple Silicon and Intel) for `2.1.0+prism.4`; Windows x64 to come, same version, added to the Release later; the French installation notes are in [docs/prism/LISEZMOI.txt](docs/prism/LISEZMOI.txt).
+PRISM's fork of [libossia](https://ossia.io), which exposes the parameters of an application over OSCQuery. It builds two packages under one version: **ossia-prism** for Max and **ossia (PRISM)** for Unity.
 
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
+
+| Package | Latest version | Documentation | Changes | Binaries |
+|---|---|---|---|---|
+| ossia-prism (Max) | `2.1.0+prism.7` | [this README](#ossiav8connector), [LISEZMOI](docs/prism/LISEZMOI.txt) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.7`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.7) |
+| ossia (PRISM), `io.ossia.ossia-unity` (Unity) | `2.1.0+prism.7` | [README](src/ossia-unity3d/README.md), [LISEZMOI](src/ossia-unity3d/LISEZMOI.txt) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.7`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.7) |
+
+Both are published for macOS universal (Apple Silicon and Intel); Windows x64 to come, same version, added to the Release later. Every version is on the [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page.
+
+**ossia-prism** is the Max package built from this repository: [ossia](https://ossia.io) 2.1.0 for Max (every `ossia.*` object of the official package, unchanged except for the fixes listed under [Differences from ossia 2.1.0](#differences-from-ossia-210)) plus one object, **`ossia.v8connector`**. It replaces the official `ossia` package: both contain the same objects and cannot be installed together. It installs in the Packages folder of Max; the scripts `ossia.v8connector` serves are `v8` and `v8ui`, objects of Max 9. The French installation notes are in [docs/prism/LISEZMOI.txt](docs/prism/LISEZMOI.txt).
+
+### Unity quick start
+
+Tested with Unity 6.3 LTS on macOS Apple Silicon, in the editor and in players built with Mono and IL2CPP; the rest is in the package's [README](src/ossia-unity3d/README.md).
+
+1. Download `io.ossia.ossia-unity-2.1.0+prism.7.tgz` from the [Release](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.7).
+2. Unity: Window > Package Management > Package Manager, `+` > Add package from tarball, choose the file.
+3. In the package's Samples tab, Import "Exposed cube", open the scene `ExposedCube`, Play: `curl http://localhost:5678` returns the tree.
 
 ### ossia.v8connector
 
@@ -124,7 +141,7 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 ### Differences from ossia 2.1.0
 
-State on 2026-10-31, `2.1.0+prism.6`. "Fixed" means fixed in ossia-prism, not in ossia.
+State on 2026-11-01, `2.1.0+prism.7`, for the Max package; the changes of the Unity package and of the C API are in the [CHANGELOG](CHANGELOG.md). "Fixed" means fixed in ossia-prism, not in ossia.
 
 Changed in ossia-prism:
 

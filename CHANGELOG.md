@@ -4,7 +4,11 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [Unreleased]
+## [2.1.0+prism.7] - 2026-11-02
+
+Published for macOS universal (Apple Silicon and Intel): the Max package and the Unity package. Windows x64 to come: same version, added to the Release later.
+
+Max package **ossia-prism**: its objects behave as in `2.1.0+prism.6`. The changes of the core below serve the Unity package; ossia-max calls none of them.
 
 Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, installed with the Package Manager's "Add package from tarball". Tested with Unity 6.3 LTS on Apple Silicon, in the editor and in macOS players, Mono and IL2CPP. Not tested: macOS Intel, Windows, Linux, iOS.
 
@@ -13,8 +17,8 @@ Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, i
 - Unity: the `Controller` has the fields `deviceName`, `oscPort` and `wsPort`, set in the inspector; their defaults are the values fixed before in the code: `unity`, 1234, 5678.
 - Unity: the `Controller` field `runInBackground` (on by default) sets `Application.runInBackground` at runtime, without changing the project settings, so that the scene keeps following the values received when Unity loses focus.
 - Unity: the `Controller` reads the name its device is announced under over mDNS (field `resolveAnnouncedName`, on by default), on a thread of its own that browses for two seconds once the server runs: read-only property `AnnouncedName`, a console line, and a warning when the system announced it under another name than `deviceName` (`unity (2)`, the name being taken on the network). Before, nothing said so.
-- C API: `ossia_oscquery_list_devices`, the OSCQuery devices announced over mDNS (name, host, WebSocket port) within the given browsing time, freed with `ossia_oscquery_devices_free`.
-- `ossia::net::list_oscquery_devices(timeout)`: browses for the given time; `list_oscquery_devices()` still browses for five seconds.
+- C API: `ossia_oscquery_list_devices`, the OSCQuery devices announced over mDNS (name, host, WebSocket port) within the given browsing time, freed with `ossia_oscquery_devices_free`. No effect in Max: ossia-max does not call the C API.
+- `ossia::net::list_oscquery_devices(timeout)`: browses for the given time; `list_oscquery_devices()` still browses for five seconds. No effect in Max: ossia-max calls neither.
 - Unity: the sample "Exposed cube" (Package Manager, Samples): an `OssiaController` and a cube whose transform is exposed.
 - Unity: Edit Mode and Play Mode tests in the package (`Tests/`): a round trip of each value type, the native callbacks, a second Play, the mDNS announcement and its withdrawal, a cube moved by an OSC message from outside.
 - Unity: `LISEZMOI.txt` in the package, and the README's sections on installation, the `Controller`, focus, Max and mDNS.
@@ -29,7 +33,7 @@ Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, i
 - Unity: `Value.GetList()` reads the list it is given; it read it as a list of floats, past its end, and a list of ints aborted Unity.
 - Unity: every native function the binding imports exists in the library with that signature: `ossia_value_to_char`, `ossia_devices_read_json`, `ossia_preset_set_debug_logger`, `ossia_preset_free_string` and `ossia_devices_get_node_parameter` did not exist (`EntryPointNotFoundException` when called), eight others had a wrong signature.
 - Unity: the native callbacks (node and parameter deletion, debug log) are static methods marked `[MonoPInvokeCallback]`, which an IL2CPP player requires; they were lambdas.
-- C API: the strings it returns are allocated with `malloc`, as `ossia_string_free` and `ossia_free_string` free them with `free`; some were allocated with `new[]`.
+- C API: the strings it returns are allocated with `malloc`, as `ossia_string_free` frees them with `free`; some were allocated with `new[]`. `ossia_free_string` (presets) frees them with `free` too, no longer with `delete[]`. No effect in Max: ossia-max does not call the C API.
 
 ## [2.1.0+prism.6] - 2026-11-01
 
