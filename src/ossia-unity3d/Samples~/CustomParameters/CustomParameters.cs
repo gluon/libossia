@@ -5,8 +5,8 @@ using UnityEngine.Rendering;
 // component of the same GameObject finds the fields marked [Ossia.Expose]
 // and publishes each one under /<GameObject name>/<script class>/<name>,
 // here /Shape/CustomParameters/speed, /Shape/CustomParameters/axis, ...
-// A value sent by a client changes the field; with Send Updates checked on
-// ExposeAttributes, a change made in Unity is sent to the clients.
+// A value sent by a client changes the field; with Send Updates on (the
+// default) on ExposeAttributes, a change made in Unity is sent to the clients.
 public class CustomParameters : MonoBehaviour
 {
   // Rotation speed, in degrees per second

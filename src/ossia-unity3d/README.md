@@ -25,7 +25,7 @@ Prerequisites: Unity 6.3 LTS on macOS (the library is universal, arm64 and x86_6
 | Sample | Content |
 |---|---|
 | Custom parameters | The scene `CustomParameters`: an `OssiaController` and a cube named `Shape` with the script `CustomParameters.cs`, whose five fields (`float`, `int`, `bool`, `Color`, `Vector3`) are exposed under `/Shape/CustomParameters`; `ExposeAttributes` with Send Updates checked. The Max patch `CustomParameters.maxpat` drives each field and shows what Unity sends back. |
-| Exposed cube | The scene `ExposedCube`: an `OssiaController` and a cube whose transform is exposed (`/Cube/transform/position`, `rotation`, `localScale`, ...), with no script of its own. |
+| Exposed cube | The scene `ExposedCube`: an `OssiaController` and a cube whose transform is exposed (`/Cube/transform/position`, `rotation`, `localScale`, ...), with no script of its own. Its `ExposeAttributes` keeps Send Updates unchecked, as the scene saved it: the cube follows the clients and sends nothing back. |
 
 Both run on ports 1234 (OSC) and 5678 (HTTP and WebSocket), under the device name `unity`.
 
@@ -47,8 +47,8 @@ using UnityEngine.Rendering;
 // component of the same GameObject finds the fields marked [Ossia.Expose]
 // and publishes each one under /<GameObject name>/<script class>/<name>,
 // here /Shape/CustomParameters/speed, /Shape/CustomParameters/axis, ...
-// A value sent by a client changes the field; with Send Updates checked on
-// ExposeAttributes, a change made in Unity is sent to the clients.
+// A value sent by a client changes the field; with Send Updates on (the
+// default) on ExposeAttributes, a change made in Unity is sent to the clients.
 public class CustomParameters : MonoBehaviour
 {
   // Rotation speed, in degrees per second
@@ -125,7 +125,9 @@ Pipe it into `python3 -m json.tool` to read it indented. In short:
 ### Values in both directions
 
 - **Client to Unity, always.** A value sent by a client (an `ossia.remote` in Max, an OSC message to UDP port 1234, a WebSocket message) changes the field, in the `Update` of the Controller, on the main thread, at the next frame. Measured on the sample: after `/Shape/CustomParameters/speed 90.` (`,f`), `axis 0` (`,i`), `spin` false (`,F`), `color 0. 1. 0. 1.` and `size 2. 1. 0.5`, the fields read `speed=90 axis=0 spin=False color=RGBA(0, 1, 0, 1) size=(2, 1, 0.5)`, and the cube's scale is `(2, 1, 0.5)`.
-- **Unity to client, with Send Updates checked** on `ExposeAttributes` (field `sendUpdates`, off by default, on in the sample's scene). Each frame, a field whose value changed, in the Inspector or by a script, is pushed to the clients that listen to it (an `ossia.remote` shows it on its outlet). Measured on the sample: after setting in Unity `speed=12.5 axis=2 color=(0, 0, 1, 1) size=(0.5, 0.5, 0.5)`, `?VALUE` returns `12.5`, `2`, `[0.0,0.0,1.0,1.0]` and `[0.5,0.5,0.5]`. With Send Updates unchecked, `speed` set to 7 in Unity stays `12.5` for the client.
+- **Unity to client, with Send Updates** on `ExposeAttributes` (field `sendUpdates`, on by default; a scene keeps the value it saved, unchecked in the sample "Exposed cube"). Each frame, a field whose value changed, whatever changed it (the Inspector, a script, an animation), is pushed to the clients that listen to it (an `ossia.remote` shows it on its outlet). Measured on the sample: after setting in Unity `speed=12.5 axis=2 color=(0, 0, 1, 1) size=(0.5, 0.5, 0.5)`, `?VALUE` returns `12.5`, `2`, `[0.0,0.0,1.0,1.0]` and `[0.5,0.5,0.5]`. With Send Updates unchecked, `speed` set to 7 in Unity stays `12.5` for the client.
+
+- **No echo.** A value received from a client and applied to the field does not leave again: neither back to its sender nor to the other clients (see [Limits](#limits)). Measured with a libossia OSCQuery client (the core of `ossia.remote`) and a script writing the same address in turns for 5 s: 297 writes each; the client received 298 messages, the script's 297 and its last one, none of its own; Unity and the client ended on the last value written, and nothing moved once both stopped (`Tests/Runtime/ConcurrentWriteTests.cs`).
 
 The initial values of the fields are published when the scene starts, whatever Send Updates says. When a script sets a field every frame (as the sample does with `transform.localScale = size`), what a client sends to that field is overwritten at the next frame.
 
@@ -155,6 +157,9 @@ What is read: the public fields declared in the script's own class, and its publ
 - The name is required: `[Ossia.Expose]` without one creates a parameter with an empty name, at `/<GameObject>/<class>/`, that a client can hardly address.
 - The node of a script is its full class name: a class `Params` in the namespace `MyGame` gives `/<GameObject>/MyGame.Params/...`.
 - The GameObject's name is read once, when the scene starts: renaming it in Play does not move its parameters.
+- A value one client sends is applied in Unity but not forwarded to the other clients: they see it only when Unity changes the field again. Forwarding it, to every client but its sender, is what the server of libossia does when its device echoes, which the C API the package uses does not expose.
+- The values leave one message each, not grouped in OSC bundles: the C API has no bundle function, and the server it creates (the WebSocket++ one) sends a bundle one value at a time. ossia-prism in Max groups them.
+- Unity is a server only: no component connects to a device of Max or TouchDesigner, in this version.
 - `bool` parameters read `"VALUE":null` over HTTP (`curl`, the tree at connection), while their OSC and WebSocket values are right.
 
 ### ExposeComponents
@@ -166,7 +171,7 @@ curl -s "http://localhost:5678/Lamp/Light/intensity?VALUE"
 {"VALUE":1.0}
 ```
 
-The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`, `/Lamp/Light/spotAngle`, `/Lamp/Light/enabled` and some forty other properties of `Light`. An OSC message `/Lamp/Light/intensity 3.5` sets the light's intensity to 3.5. The node of a component is its class name without namespace (`Light`), under Node Name (default `Object`). Its fields: `NodeName` (`Object`), `components` (empty), `sendUpdates` (off). It writes one `Prop: <name> => <type>` line in the console for each property it reads.
+The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`, `/Lamp/Light/spotAngle`, `/Lamp/Light/enabled` and some forty other properties of `Light`. An OSC message `/Lamp/Light/intensity 3.5` sets the light's intensity to 3.5. The node of a component is its class name without namespace (`Light`), under Node Name (default `Object`). Its fields: `NodeName` (`Object`), `components` (empty), `sendUpdates` (on). It writes one `Prop: <name> => <type>` line in the console for each property it reads.
 
 ### Low-level API: CustomDevice.cs
 
@@ -200,13 +205,13 @@ On the GameObject named `OssiaController`.
 | `appName` | `Unity` | Name used by `PresetController` and `Logger` |
 | `AnnouncedName` (read only) | null | The name the device is announced under, once found |
 
-The device starts in `Awake` and stops when Play stops (`OnApplicationQuit`), which frees its ports and withdraws its mDNS announcement: a second Play in the same editor gets them back. The values received are applied in the Controller's `Update`.
+The device starts in `Awake` and is freed when the Controller is destroyed or Play stops (`OnDestroy`, `OnApplicationQuit`), which frees its ports and withdraws its mDNS announcement: a Controller created again on the same ports, in the same Play or the next one, serves its own tree. An exposed object whose Controller is destroyed stops publishing. The values received are applied in the Controller's `Update`.
 
 ### Ossia.ExposeAttributes
 
 | Field | Default | Role |
 |---|---|---|
-| `sendUpdates` | off | Pushes to the clients, each frame, the fields and transform values changed in Unity |
+| `sendUpdates` | on | Pushes to the clients, each frame, the fields and transform values changed in Unity, whatever changed them; never a value received from a client. A scene keeps the value it saved |
 
 Publishes the transform (`position`, `localPosition`, `eulerAngles`, `localEulerAngles`, `right`, `up`, `forward`, `rotation`, `localRotation`, `localScale`, `lossyScale`) and the fields and properties marked `[Ossia.Expose]` of every component of its GameObject.
 
@@ -246,7 +251,7 @@ In the editor, a Play started less than two seconds after the previous one waits
 | Max connected by name finds `unity (2)`, or `connect unity` reaches another device | Another device of the network is already announced as `unity`. | Read the warning in the console; connect with `connect unity (2)`, or rename `deviceName`. |
 | The scene follows the values only when Unity has the focus | `runInBackground` is off on the Controller, and the project's Run In Background (Project Settings > Player > Resolution and Presentation) is off: Unity stops `Update` when it loses focus, the values wait. | Turn `runInBackground` on (the default): the Controller then sets `Application.runInBackground` at runtime, without changing the project settings. |
 | A value sent from Max does not move anything | The address is wrong (check with `curl`), or the script overwrites the field every frame. | Copy the `FULL_PATH` from `curl`; set the visible property from the field, not the other way round. |
-| Max does not show what changes in Unity | Send Updates is off on `ExposeAttributes`. | Check it. |
+| Max does not show what changes in Unity | Send Updates is unchecked on `ExposeAttributes` (on by default; a scene keeps the value it saved, as "Exposed cube" does). | Check it. |
 | The cube of a sample is pink | The Exposed cube scene uses Unity's built-in default material, which the Universal and HD render pipelines cannot draw. | Cosmetic: the values still pass. Give the cube a material of your pipeline. |
 
 ## Tests
@@ -257,7 +262,7 @@ The package carries Edit Mode and Play Mode tests (`Tests/`). To run them, list 
 "testables": [ "io.ossia.ossia-unity" ]
 ```
 
-then Window > General > Test Runner, or in batch mode: `Unity -batchmode -projectPath <project> -runTests -testPlatform EditMode -testResults results.xml`. The second Play and mDNS tests use ports 1234, 5678, 21234 and 25678, and `dns-sd` (macOS).
+then Window > General > Test Runner, or in batch mode: `Unity -batchmode -projectPath <project> -runTests -testPlatform EditMode -testResults results.xml`. The tests use ports 1234 and 5678 (second Play), 11234 and 15678, 21234 to 21237 and 25678 to 25681, 27234 and 27678, 28234 and 28678, 41234, 41235, 45678 and 45679 (mDNS), UDP 10203 or the next free port (the client of the concurrent test), and `dns-sd` (macOS).
 
 ## Not tested
 

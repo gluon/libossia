@@ -4,6 +4,24 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [2.1.0+prism.9]
+
+Unity package: Send Updates on by default, no echo of a received value, a Controller that frees its ports when it is destroyed. Max package: a PRISM tab in two helps; no object behaves differently from `2.1.0+prism.8`.
+
+### Added
+
+- Max: the helps of `ossia.device` and `ossia.client` have a PRISM tab, with examples on ports 7411 to 7414: for `ossia.device`, `expose oscquery` and the mDNS announcement, `announced <name>`, `stop <index>`, `@bundle`; for `ossia.client`, connection by name and by address to a device of the tab, reconnection and `@reconnect` as it behaves, the loop of `[ossia.client <name>]` at its creation, the tree read again by name, `@bundle`, values in both directions.
+- Unity: Play Mode tests of a client and Unity writing the same address (a libossia OSCQuery mirror in the test, a script, the Inspector, an animation), and of a Controller destroyed then created again on the same ports; an Edit Mode test of the default of Send Updates.
+
+### Changed
+
+- Unity: Send Updates (`sendUpdates` of `ExposeAttributes` and `ExposeComponents`) is on by default: what changes in Unity reaches the clients without a box to tick. The box stays, to turn it off, and a scene keeps the value it saved: the sample "Exposed cube" keeps it unchecked, "Custom parameters" checked. A change of behaviour, not listed under Breaking: the binding had no user yet.
+
+### Fixed
+
+- Unity: a value received from a client does not leave again. With Send Updates, it was applied to the field, then seen as a change and pushed back to every client that listens, its sender included. Measured with a client and a script writing the same address in turns for 5 s, 297 writes each: before, every value the client wrote came back to it (298, its 297 writes and its last one), none after; the client then receives the script's 297 values and its last one, Unity and the client end on the last value written, and nothing moves once both stop. A value one client sends is therefore no longer forwarded to the other clients (see the limits of the Unity package's README).
+- Unity: a `Controller` destroyed without leaving Play frees its device, its ports and its mDNS announcement. The C API keeps a device by its name until it is freed: the Controller kept its server, and a new Controller of the same name got the old device back, its tree and its server, its own server failing on the ports (`Underlying Transport Error`). An exposed object stops publishing once its Controller is gone.
+
 ## [2.1.0+prism.8] - 2026-11-02
 
 Documentation, and one fix in the Unity package: no object of the Max package behaves differently from `2.1.0+prism.7`. Published for macOS universal (Apple Silicon and Intel), as `2.1.0+prism.7`.
