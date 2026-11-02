@@ -8,7 +8,7 @@ Prerequisites: Unity 6.3 LTS on macOS (the library is universal, arm64 and x86_6
 
 1. Download `io.ossia.ossia-unity-2.1.0+prism.N.tgz` from the [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page. Keep the file where it is: the project refers to it by its path.
 2. Unity Hub > New project, template "Universal 3D" or "3D (Built-In Render Pipeline)", Create project.
-3. In the editor: Window > Package Management > Package Manager, `+` (top left) > Install package from tarball, choose the `.tgz`. The package appears as "ossia (PRISM)".
+3. In the editor: Window > Package Management > Package Manager, `+` (top left) > Install package from tarball…, choose the `.tgz`. The package appears as "ossia (PRISM)".
 4. Select it in the Package Manager, Samples tab, Import "Custom parameters". The sample is copied into `Assets/Samples/ossia (PRISM)/<version>/Custom parameters`.
 5. Open the scene `CustomParameters` from that folder, press Play. The console shows `OSSIA: Starting`, then `OSSIA: announced "unity" over mDNS (_oscjson._tcp)`; the cube turns.
 6. From a terminal:
