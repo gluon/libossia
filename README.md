@@ -294,6 +294,7 @@ mDNS works within one subnet: the machines must share a VLAN, multicast 224.0.0.
 - `[ossia]`, the global device, shows a `@bundle` attribute, but the objects registered under it are never bundled: only `ossia.device` and `ossia.client` group what their objects push.
 - `@reconnect` on `ossia.client` governs only the attempts after a loss: with `@reconnect 0`, a client connected by URL or by name whose server goes away reports it (`connect 0 ...`, `disconnected` by name) and tries nothing more. A first connection that fails, an unreachable URL or a name not found, is tried again every second whatever `@reconnect` says, until it succeeds, a `disconnect` or a new `connect` (as in ossia 2.1.0).
 - `examples/ossia.v8connector.load.maxpat` exposes its device on ports 7301 and 7302 when it loads: opening it twice is a second `expose` on busy ports (see [Differences from ossia 2.1.0](#differences-from-ossia-210), known defects).
+- Not proven by an automatic test: that a value an `ossia.device` or `ossia.client` receives and applies does not leave again (no echo, no oscillation when two peers write the same address), and that a change leaves whatever its source (the patch's interface, a preset, a script); the bench tests the values of a script only.
 - Not tested: Intel Macs, Windows (not built), Max 8 and earlier.
 - The defects of ossia that ossia-prism does not fix are listed under [Differences from ossia 2.1.0](#differences-from-ossia-210).
 
