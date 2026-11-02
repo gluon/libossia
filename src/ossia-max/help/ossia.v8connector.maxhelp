@@ -271,11 +271,11 @@
                                     "fontname": "Lato Regular",
                                     "fontsize": 12.0,
                                     "id": "obj-17",
-                                    "linecount": 4,
+                                    "linecount": 5,
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 12.5, 560.0, 536.0, 64.0 ],
+                                    "patching_rect": [ 12.5, 560.0, 556.0, 78.0 ],
                                     "text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind, unbind and errors, and the replies to namespace and get. Every refusal also comes out here: refused <address> <reason>."
                                 }
                             },
@@ -288,7 +288,7 @@
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 12.5, 625.0, 438.0, 64.0 ],
+                                    "patching_rect": [ 12.5, 646.0, 556.0, 64.0 ],
                                     "text": "The node registers like ossia.model: under the nearest ossia.model, ossia.device or ossia.client in the patcher hierarchy (here the ossia.device of the parent patcher), otherwise under the global device. It is created by the first add and stays, even empty, until the object is deleted; an instance that only binds creates no node."
                                 }
                             },
@@ -298,11 +298,11 @@
                                     "fontname": "Lato Regular",
                                     "fontsize": 12.0,
                                     "id": "obj-19",
-                                    "linecount": 2,
+                                    "linecount": 1,
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 12.5, 696.0, 420.0, 35.0 ],
+                                    "patching_rect": [ 12.5, 718.0, 556.0, 20.0 ],
                                     "text": "Two instances with the same name become synth and synth.1, like two ossia.model."
                                 }
                             },
@@ -315,7 +315,7 @@
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 12.5, 735.0, 444.0, 64.0 ],
+                                    "patching_rect": [ 12.5, 746.0, 556.0, 64.0 ],
                                     "text": "Initialization follows ossia-max: the default of a leaf is stored quietly, then comes out of the left outlet once the leaf exists; bind outputs the value it finds as soon as it reaches the parameter. @priority is stored on the nodes but does not order these outputs: ossia-max orders the outputs of ossia.parameter and ossia.remote only."
                                 }
                             },
@@ -420,11 +420,11 @@
                                     "fontname": "Lato Regular",
                                     "fontsize": 12.0,
                                     "id": "obj-29",
-                                    "linecount": 4,
+                                    "linecount": 5,
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 580.0, 530.0, 363.0, 64.0 ],
+                                    "patching_rect": [ 580.0, 530.0, 380.0, 78.0 ],
                                     "text": "Attributes of add use the names of ossia.parameter: @type (required), @min, @max, @range, @unit, @default, @clip, @mode, @description, @tags, @priority, @rate, @critical, @invisible, @mute, @repetitions, @enable, @recall_safe. @clip none is the free mode. A unit imposes its type: @type vec4f @unit color.rgb is refused."
                                 }
                             },
@@ -437,7 +437,7 @@
                                     "maxclass": "comment",
                                     "numinlets": 1,
                                     "numoutlets": 0,
-                                    "patching_rect": [ 580.0, 605.0, 360.0, 78.0 ],
+                                    "patching_rect": [ 580.0, 618.0, 380.0, 78.0 ],
                                     "text": "bind follows a parameter that exists elsewhere, without creating anything: here the ossia.parameter above, addressed like an ossia.remote would (relative to the device). set pushes to it with the owner's type and range; its changes come back on the left outlet under the bound address."
                                 }
                             },
@@ -448,7 +448,7 @@
                                     "numinlets": 2,
                                     "numoutlets": 1,
                                     "outlettype": [ "" ],
-                                    "patching_rect": [ 490.0, 690.0, 80.0, 22.0 ],
+                                    "patching_rect": [ 580.0, 706.0, 80.0, 22.0 ],
                                     "text": "bind manual"
                                 }
                             },
@@ -459,7 +459,7 @@
                                     "numinlets": 2,
                                     "numoutlets": 1,
                                     "outlettype": [ "" ],
-                                    "patching_rect": [ 580.0, 690.0, 90.0, 22.0 ],
+                                    "patching_rect": [ 670.0, 706.0, 90.0, 22.0 ],
                                     "text": "unbind manual"
                                 }
                             },
@@ -472,7 +472,7 @@
                                     "numoutlets": 2,
                                     "outlettype": [ "", "bang" ],
                                     "parameter_enable": 0,
-                                    "patching_rect": [ 690.0, 690.0, 50.0, 22.0 ]
+                                    "patching_rect": [ 780.0, 706.0, 50.0, 22.0 ]
                                 }
                             },
                             {
@@ -482,7 +482,7 @@
                                     "numinlets": 2,
                                     "numoutlets": 1,
                                     "outlettype": [ "" ],
-                                    "patching_rect": [ 690.0, 720.0, 100.0, 22.0 ],
+                                    "patching_rect": [ 780.0, 736.0, 100.0, 22.0 ],
                                     "text": "set manual $1"
                                 }
                             }
@@ -562,14 +562,14 @@
                             {
                                 "patchline": {
                                     "destination": [ "obj-14", 0 ],
-                                    "midpoints": [ 499.5, 810.0, 9.0, 810.0, 9.0, 477.0, 22.0, 477.0 ],
+                                    "midpoints": [ 589.5, 820.0, 9.0, 820.0, 9.0, 477.0, 22.0, 477.0 ],
                                     "source": [ "obj-31", 0 ]
                                 }
                             },
                             {
                                 "patchline": {
                                     "destination": [ "obj-14", 0 ],
-                                    "midpoints": [ 589.5, 810.0, 9.0, 810.0, 9.0, 477.0, 22.0, 477.0 ],
+                                    "midpoints": [ 679.5, 820.0, 9.0, 820.0, 9.0, 477.0, 22.0, 477.0 ],
                                     "source": [ "obj-32", 0 ]
                                 }
                             },
@@ -582,7 +582,7 @@
                             {
                                 "patchline": {
                                     "destination": [ "obj-14", 0 ],
-                                    "midpoints": [ 699.5, 753.0, 955.9140625, 753.0, 955.9140625, 511.45703125, 366.0, 511.45703125, 366.0, 465.0, 22.0, 465.0 ],
+                                    "midpoints": [ 789.5, 820.0, 9.0, 820.0, 9.0, 477.0, 22.0, 477.0 ],
                                     "source": [ "obj-34", 0 ]
                                 }
                             },
