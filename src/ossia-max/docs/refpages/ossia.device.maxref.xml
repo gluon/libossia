@@ -35,7 +35,7 @@
 	<outletlist>
 			<outlet id="0" name="Info outlet" type="any">
 			<digest>Various information messages</digest>
-			<description>Messages and information in reply to various messages</description>
+			<description>Messages and information in reply to various messages. After <m>expose</m> oscquery, <m>announced</m> followed by the name the device is announced under over mDNS, about a second later (see <m>expose</m>).</description>
 		</outlet>
 	</outletlist>
 

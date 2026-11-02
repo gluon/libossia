@@ -276,7 +276,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 12.5, 560.0, 536.0, 64.0 ],
-                                    "text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind and errors. Every refusal also comes out here: refused <address> <reason>."
+                                    "text": "Left outlet: <address> <value> for every value changed by another source (network, other ossia objects), bounded to the parameter's range then filtered by it (mute, enable, repetitions) like the outlet of any ossia object; a set sent here comes back only if the bounded value differs from the one sent. 'ready' once the object has registered. Right outlet: address, add, remove, clear, bind, unbind and errors, and the replies to namespace and get. Every refusal also comes out here: refused <address> <reason>."
                                 }
                             },
                             {
@@ -824,7 +824,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 30.0, 260.0, 685.0, 35.0 ],
-                                    "text": "An ossia.model (or ossia.view) added to the patcher after the object has registered does not take it under its node: send 'address <name>' to the object, or reload the patcher. Models present at load, created, renamed or removed afterwards are followed."
+                                    "text": "An ossia.model (or ossia.view) added to the patcher after the object has registered does not take it under its node: send 'address <name>' to the object, or reload the patcher. Models present when the object registers are followed when they are renamed or removed afterwards."
                                 }
                             },
                             {
@@ -876,7 +876,7 @@
                                     "numinlets": 1,
                                     "numoutlets": 0,
                                     "patching_rect": [ 30.0, 470.0, 638.0, 35.0 ],
-                                    "text": "macOS universal (x86_64 and arm64) for 2.1.0+prism.5; Windows x64 to come, same version, added to the Release later. The OSCQuery server is the one of ossia.device."
+                                    "text": "macOS universal (x86_64 and arm64), tested on Apple Silicon; Windows x64 to come, added to a Release later. The OSCQuery server is the one of ossia.device."
                                 }
                             },
                             {

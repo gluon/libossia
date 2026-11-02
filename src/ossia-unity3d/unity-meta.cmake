@@ -2,7 +2,9 @@
 # package that has none yet. The GUID derives from the path in the package,
 # so it is the same from one build to the next: the sample scene and the
 # projects that use the package keep their references to the scripts.
-# Folders whose name ends with ~ (Samples~) are not imported by Unity.
+# Folders whose name ends with ~ (Samples~) are not imported by Unity, except
+# the scripts of the samples: Unity copies a sample into the project with its
+# .meta files, and its scene finds its scripts by their GUID.
 
 file(GLOB_RECURSE entries
   LIST_DIRECTORIES true
@@ -10,7 +12,10 @@ file(GLOB_RECURSE entries
   "${OSSIA_UNITY_PACKAGE_ROOT}/*")
 
 foreach(path IN LISTS entries)
-  if(path MATCHES "\\.meta$" OR path MATCHES "~(/|$)" OR path MATCHES "(^|/)\\.")
+  if(path MATCHES "\\.meta$" OR path MATCHES "(^|/)\\.")
+    continue()
+  endif()
+  if(path MATCHES "~(/|$)" AND NOT path MATCHES "^Samples~/.+\\.cs$")
     continue()
   endif()
   set(full "${OSSIA_UNITY_PACKAGE_ROOT}/${path}")
