@@ -37,6 +37,7 @@ namespace Ossia
         Application.runInBackground = true;
       if (!set) {
         set = true;
+        live++;
 
         // Setup the log so that the errors in the C API are shown in the
         // Unity3D console.
@@ -124,7 +125,35 @@ namespace Ossia
     {
       Debug.Log ("OSSIA: Quitting");
       quitting = true;
-      Network.ossia_device_reset_static ();
+      Release ();
+      // Frees what remains in the library, devices made without a Controller
+      // included, once no Controller still holds its own
+      if (live == 0)
+        Network.ossia_device_reset_static ();
+    }
+
+    // Destroyed without leaving Play: the library keeps a device by its name
+    // until it is freed, and with it its server and its ports.
+    void OnDestroy ()
+    {
+      Release ();
+    }
+
+    void Release ()
+    {
+      if (!set)
+        return;
+      set = false;
+      live--;
+      Hash.Clear ();
+      Queue.Free ();
+      // Clears the tree, then deletes the device, its protocols and their
+      // servers
+      local_device.Free ();
+      local_device = null;
+      local_protocol = null;
+      oscq_protocol = null;
+      scene_node = null;
     }
 
     public Ossia.Device GetDevice ()
@@ -176,6 +205,8 @@ namespace Ossia
 
 
     bool set = false;
+    // Controllers whose device is not freed yet
+    static int live = 0;
     volatile bool quitting = false;
     volatile string found_name = null;
     bool name_reported = false;

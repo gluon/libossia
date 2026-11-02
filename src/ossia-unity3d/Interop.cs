@@ -652,7 +652,17 @@ namespace Ossia
 
     ~MessageQueue()
     {
-      Network.ossia_mq_free (ossia_mq);
+      Free ();
+    }
+
+    //! Before the device it listens to is freed: the queue removes its
+    //! callbacks from the parameters.
+    public void Free()
+    {
+      if (ossia_mq != IntPtr.Zero) {
+        Network.ossia_mq_free (ossia_mq);
+        ossia_mq = IntPtr.Zero;
+      }
     }
 
     public void Register(Ossia.Parameter p)

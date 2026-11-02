@@ -45,6 +45,10 @@ namespace Ossia
 
     public void Update()
     {
+      // Its Controller was destroyed, and its parameters with it
+      if (child_node != null && controller == null)
+        return;
+
       if (child_node == null) {
         Debug.Log("Object not registered.");  
         Start ();
