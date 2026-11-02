@@ -22,6 +22,8 @@ namespace Ossia
     public Ossia.Parameter ossia_parameter;
 
     object previousValue;
+    // The last value SendUpdates pushed, until a value from elsewhere replaces it
+    object published;
 
     public OssiaEnabledField (FieldInfo f, string attr, OssiaEnabledComponent par, ossia_type t)
     {
@@ -32,6 +34,9 @@ namespace Ossia
       ossia_node = parent.component_node.AddChild (attr);
       ossia_parameter = ossia_node.CreateParameter (f.FieldType, t);
       SendUpdates ();
+      // Pushed before the Controller registers the parameter: no message
+      // comes back for it.
+      published = null;
     }
 
     //! Ossia -> C#
@@ -39,9 +44,16 @@ namespace Ossia
     {
       try {
         var value = ossia_parameter.GetValue ();
-        var cur_val = field.GetValue (parent.component);
         var new_val = value.Get (field.FieldType);
 
+        // The message queue also receives the values pushed here: while
+        // the parameter holds the value SendUpdates published, applying it
+        // would undo what the script changed since.
+        if (new_val.Equals (published))
+          return;
+        published = null;
+
+        var cur_val = field.GetValue (parent.component);
         if (!new_val.Equals (cur_val)) {
           field.SetValue (parent.component, new_val);
         }
@@ -56,6 +68,7 @@ namespace Ossia
       var val = field.GetValue (parent.component);
       if (!val.Equals (previousValue)) {
         previousValue = val;
+        published = val;
         ossia_parameter.PushValue (new Value (val));
       }
     }
@@ -73,6 +86,8 @@ namespace Ossia
     public Ossia.Parameter ossia_parameter;
 
     object previousValue;
+    // The last value SendUpdates pushed, until a value from elsewhere replaces it
+    object published;
 
     public OssiaEnabledProperty (PropertyInfo f, string attr, OssiaEnabledComponent par, ossia_type t)
     {
@@ -83,6 +98,7 @@ namespace Ossia
       ossia_node = parent.component_node.AddChild (attr);
       ossia_parameter = ossia_node.CreateParameter (f.PropertyType, t);
       SendUpdates ();
+      published = null;
     }
 
     //! Ossia -> C#
@@ -91,9 +107,15 @@ namespace Ossia
       if (field.CanRead && field.CanWrite) {   
         try {
           var value = ossia_parameter.GetValue ();
-          var cur_val = field.GetValue (parent.component, null);
           var new_val = value.Get (field.PropertyType);
 
+          // As for a field: a published transform set back would hold the
+          // object a frame behind the script that moves it.
+          if (new_val.Equals (published))
+            return;
+          published = null;
+
+          var cur_val = field.GetValue (parent.component, null);
           if (!new_val.Equals (cur_val)) {
             field.SetValue (parent.component, new_val, null);
           }
@@ -110,6 +132,7 @@ namespace Ossia
         var val = field.GetValue (parent.component, null);
         if (!val.Equals (previousValue)) {
           previousValue = val;
+          published = val;
           ossia_parameter.PushValue (new Value (val));
         }
       }
