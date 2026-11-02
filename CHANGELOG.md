@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2.1.0+prism.8] - 2026-11-02
 
-A documentation release: no object of the Max package and no script of the Unity package behaves differently from `2.1.0+prism.7`. Published for macOS universal (Apple Silicon and Intel), as `2.1.0+prism.7`.
+Documentation, and one fix in the Unity package: no object of the Max package behaves differently from `2.1.0+prism.7`. Published for macOS universal (Apple Silicon and Intel), as `2.1.0+prism.7`.
 
 ### Added
 
@@ -20,6 +20,10 @@ A documentation release: no object of the Max package and no script of the Unity
 - Max: `@reconnect` of `ossia.client` is documented as the code behaves: it governs only the attempts after a loss. A first connection that fails, an unreachable URL or a name not found, is tried again every second whatever `@reconnect` says, until it succeeds, a `disconnect` or a new `connect`, as in ossia 2.1.0. The notes of `2.1.0+prism.6` said that `@reconnect 0` stops the attempts without this limit; the reference of `ossia.client` said that off, nothing is tried.
 - Max: the README writes `stop <index>` for `ossia.device`, `stop 0` for the first `expose`, in the known defects and the troubleshooting; it said `stop`, which the object refuses with "missing arguments for message "stop"".
 - Unity: the Package Manager's menu item is "Install package from tarball…" in Unity 6.3; the notes of `2.1.0+prism.7` said "Add package from tarball".
+
+### Fixed
+
+- Unity: with Send Updates checked on `ExposeAttributes`, the `Controller` set back a field or a transform value to what `ExposeAttributes` had published the frame before, once Unity called the script that changes it between the two (Unity chooses that order). The values a binding pushes come back to it through the `Controller`'s message queue, and were applied again: the cube of the sample "Custom parameters" turned by jerks, measured in the editor at 60 frames per second at 0.45 to 0.6 times its speed, 1.0 with the fix. A binding no longer applies the value it published while the parameter still holds it; a value from a client is applied as before. The binding is that of ossia 2.1.0 (`unity3d/impl/ParameterBindings.cs`).
 
 ## [2.1.0+prism.7] - 2026-11-02
 
