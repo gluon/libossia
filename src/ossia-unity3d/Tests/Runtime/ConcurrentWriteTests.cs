@@ -15,7 +15,7 @@ namespace Ossia.Tests
     public float value = 0;
   }
 
-  // A client and Unity write the same address (D-0042, acte 13): a value
+  // A client and Unity write the same address: a value
   // received is applied, every local change leaves whatever its source
   // (script, Inspector, animation), and a value received does not leave
   // again. The client is an OSCQuery mirror of libossia, the core ossia-max
