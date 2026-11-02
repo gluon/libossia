@@ -163,7 +163,7 @@
 				Reconnect when the server goes away
 			</digest>
 			<description>
-				The <at>reconnect</at> attribute (default: on) makes a client connected by URL (<m>connect</m> oscquery &lt;url&gt;) or by name (<m>connect</m> &lt;name&gt;) try again every second when the server's WebSocket goes down, or, by name, when the device is no longer announced, until the server answers. Off, the loss is reported on the outlet and nothing is tried.
+				The <at>reconnect</at> attribute (default: on) makes a client connected by URL (<m>connect</m> oscquery &lt;url&gt;) or by name (<m>connect</m> &lt;name&gt;) try again every second when the server's WebSocket goes down, or, by name, when the device is no longer announced, until the server answers. Off, the loss is reported on the outlet and nothing is tried. The attribute governs only the attempts after a loss: a first connection that fails (an unreachable URL, a name not found) is tried again every second whatever <at>reconnect</at> says, until it succeeds, a <m>disconnect</m> or a new <m>connect</m>.
 			</description>
 		</attribute>
 
