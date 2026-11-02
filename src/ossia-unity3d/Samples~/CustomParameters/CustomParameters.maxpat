@@ -113,7 +113,7 @@
 						120,
 						22
 					],
-					"text": "ossia.client custom",
+					"text": "ossia.client",
 					"outlettype": [
 						"",
 						"",
