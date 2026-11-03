@@ -18,7 +18,7 @@ namespace Ossia.Tests
   // A client and Unity write the same address: a value
   // received is applied, every local change leaves whatever its source
   // (script, Inspector, animation), and a value received does not leave
-  // again. The client is an OSCQuery mirror of libossia, the core ossia-max
+  // again; the server answers only the writes that crossed one of its values. The client is an OSCQuery mirror of libossia, the core ossia-max
   // uses, in this process: it follows the address as ossia.remote does.
   public class ConcurrentWriteTests
   {
@@ -156,13 +156,39 @@ namespace Ossia.Tests
       var after = Drain();
       all.AddRange(after);
 
-      var echoes = all.Count(v => v >= ClientBase && v < ScriptBase);
+      // Each write of the client follows a value of Unity by a frame: the
+      // server takes it for a crossing and answers it with its own value
+      var answers = all.Count(v => v >= ClientBase && v < ScriptBase);
       var fromScript = all.Count(v => v >= ScriptBase && v < InspectorValue);
       Debug.Log("CONCURRENT clientWrites=" + clientWrites + " scriptWrites=" + scriptWrites
-        + " received=" + all.Count + " fromScript=" + fromScript + " echoes=" + echoes + " afterStop=" + after.Length);
-      Assert.AreEqual(0, echoes, "values the client wrote came back to it");
+        + " received=" + all.Count + " fromScript=" + fromScript + " answers=" + answers + " afterStop=" + after.Length);
       Assert.AreEqual(0, after.Length, "messages after both stopped");
-      Assert.LessOrEqual(all.Count, scriptWrites + 1, "the client receives at most one message per change in Unity");
+      Assert.LessOrEqual(fromScript, scriptWrites + 1, "at most one message per change in Unity");
+      Assert.LessOrEqual(answers, clientWrites + 1, "at most one answer per write of the client");
+    }
+
+    // Out of any crossing, nothing the client writes comes back: Unity
+    // applies it and does not send it again.
+    [UnityTest]
+    public IEnumerator ValuesOfTheClientAloneDoNotComeBack()
+    {
+      yield return Setup();
+      fields.value = ScriptBase;
+      yield return Until(() => received.Contains(ScriptBase), 2);
+      // Past the server's crossing window
+      yield return new WaitForSecondsRealtime(0.3f);
+      Drain();
+
+      for (int i = 0; i < 20; i++) {
+        ossia_parameter_push_f(param, ClientBase + i);
+        yield return new WaitForSecondsRealtime(0.15f);
+      }
+      yield return Until(() => fields.value == ClientBase + 19, 2);
+      yield return new WaitForSecondsRealtime(0.3f);
+      var back = Drain();
+      Debug.Log("CONCURRENT client alone: 20 writes, field=" + fields.value + " came back=" + back.Length);
+      Assert.AreEqual(ClientBase + 19, fields.value, "Unity applies the client's values");
+      Assert.IsEmpty(back, "values the client wrote came back to it");
     }
 
     // Every source of a change in Unity publishes.

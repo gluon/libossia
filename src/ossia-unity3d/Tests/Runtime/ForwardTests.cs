@@ -35,6 +35,8 @@ namespace Ossia.Tests
     [DllImport("ossia")] static extern void ossia_parameter_remove_callback(IntPtr param, IntPtr index);
     [DllImport("ossia")] static extern void ossia_parameter_push_f(IntPtr param, float value);
     [DllImport("ossia")] static extern float ossia_value_to_float(IntPtr value);
+    [DllImport("ossia")] static extern IntPtr ossia_parameter_get_value(IntPtr param);
+    [DllImport("ossia")] static extern void ossia_value_free(IntPtr value);
 
     delegate void ValueCallback(IntPtr ctx, IntPtr value);
     static readonly ValueCallback onValue = OnValue;
@@ -53,6 +55,7 @@ namespace Ossia.Tests
     GameObject controllerObject, shape;
     Controller controller;
     ForwardFields fields;
+    ExposeAttributes expose;
     readonly IntPtr[] mirrors = new IntPtr[2], parameters = new IntPtr[2], callbacks = new IntPtr[2];
 
     IEnumerator Setup(bool forward)
@@ -75,7 +78,7 @@ namespace Ossia.Tests
 
       shape = new GameObject("Shape");
       fields = shape.AddComponent<ForwardFields>();
-      shape.AddComponent<ExposeAttributes>();
+      expose = shape.AddComponent<ExposeAttributes>();
       yield return null;
       yield return null;
 
@@ -151,6 +154,36 @@ namespace Ossia.Tests
       Debug.Log("FORWARD B wrote 0.5, Unity 0.75: A received=[" + string.Join(" ", a) + "] B received=[" + string.Join(" ", b) + "]");
       Assert.AreEqual(new[] { 0.5f, 0.75f }, a, "A receives B's value, then Unity's");
       Assert.AreEqual(new[] { 0.75f }, b, "B receives Unity's value, not its own");
+    }
+
+    // A script changes the field and a client writes another value right
+    // after the Controller sent the script's value: each value crosses the
+    // other. The server answers the client
+    // with its final value, and all end on it.
+    [UnityTest]
+    public IEnumerator CrossedWritesConverge()
+    {
+      yield return Setup(true);
+      int divergences = 0;
+      for (int i = 0; i < 20; i++) {
+        fields.value = 100 + i;
+        // The end of the frame: the object publishes, the Controller sends
+        expose.SendUpdates();
+        typeof(Controller).GetMethod("LateUpdate", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(controller, null);
+        ossia_parameter_push_f(parameters[0], 200 + i);
+        yield return new WaitForSecondsRealtime(0.3f);
+        var v = ossia_parameter_get_value(parameters[0]);
+        float atClient = ossia_value_to_float(v);
+        ossia_value_free(v);
+        if (fields.value != atClient) {
+          divergences++;
+          Debug.Log("FORWARD crossing " + i + ": Unity " + fields.value + ", client " + atClient);
+        }
+        Drain(0);
+        Drain(1);
+      }
+      Debug.Log("FORWARD crossed writes: " + divergences + " divergences in 20");
+      Assert.AreEqual(0, divergences);
     }
 
     [UnityTest]
