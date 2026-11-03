@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <optional>
 #include <string>
 #include <unordered_map>
 namespace osc
@@ -128,9 +129,12 @@ protected:
   // A value the server sent on its own (a local change, another client's
   // value it forwards), to every client but skipped
   void record_sent(std::string address, const ossia::value& v, uintptr_t skipped = 0);
-  // After a write of origin to address: its answer, when the write crossed
-  // a value sent to it (set_crossing_window). The answer opens no window.
-  void answer_crossing(std::string_view address, uintptr_t origin);
+  // Before a write of origin to address is applied: the value the server
+  // sent it there within the crossing window, if any
+  std::optional<ossia::value> sent_within_window(std::string_view address, uintptr_t origin);
+  // After the write: its answer, when it left the address with another value
+  // than sent. The answer opens no window.
+  void answer_crossing(std::string_view address, uintptr_t origin, const ossia::value& sent);
 
   // List of connected clients
   oscquery_client* find_client(const connection_handler& hdl);

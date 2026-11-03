@@ -629,20 +629,23 @@ void oscquery_server_protocol_base::record_sent(
       std::move(address), sent_value{std::chrono::steady_clock::now(), v, skipped});
 }
 
-void oscquery_server_protocol_base::answer_crossing(std::string_view address, uintptr_t origin)
+std::optional<ossia::value>
+oscquery_server_protocol_base::sent_within_window(std::string_view address, uintptr_t origin)
 {
   const auto window = crossing_window();
   if(window.count() <= 0)
-    return;
-  ossia::value sent;
-  {
-    std::lock_guard lock{m_sentMutex};
-    auto it = m_sent.find(std::string(address));
-    if(it == m_sent.end() || it->second.skipped == origin
-       || std::chrono::steady_clock::now() - it->second.time > window)
-      return;
-    sent = it->second.value;
-  }
+    return std::nullopt;
+  std::lock_guard lock{m_sentMutex};
+  auto it = m_sent.find(std::string(address));
+  if(it == m_sent.end() || it->second.skipped == origin
+     || std::chrono::steady_clock::now() - it->second.time > window)
+    return std::nullopt;
+  return it->second.value;
+}
+
+void oscquery_server_protocol_base::answer_crossing(
+    std::string_view address, uintptr_t origin, const ossia::value& sent)
+{
   auto* node = ossia::net::find_node(m_device->get_root_node(), address);
   auto* param = node ? node->get_parameter() : nullptr;
   if(!param)
@@ -691,11 +694,14 @@ void oscquery_server_protocol_base::on_osc_message(
 try
 {
   auto id = ossia::net::message_origin_identifier{*this, origin};
+  // Read before the value is applied: forwarding it to the other clients
+  // replaces what was sent
+  auto sent = origin ? sent_within_window(m.AddressPattern(), origin) : std::nullopt;
   ossia::net::on_input_message<true>(
       m.AddressPattern(), ossia::net::osc_message_applier{id, m}, m_listening, *m_device,
       m_logger);
-  if(origin)
-    answer_crossing(m.AddressPattern(), origin);
+  if(sent)
+    answer_crossing(m.AddressPattern(), origin, *sent);
 }
 catch(const std::exception& e)
 {
