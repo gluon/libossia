@@ -279,6 +279,69 @@ OSSIA_EXPORT
 int ossia_device_update_namespace(ossia_device_t device);
 
 /**
+ * @brief Whether the device is connected to its server.
+ * @return 1 while the WebSocket of an OSCQuery mirror is up, 0 once it went
+ * down (the server stopped); 1 for the protocols that do not connect.
+ *
+ * Nothing reconnects a mirror whose WebSocket went down: free the device and
+ * create it again.
+ *
+ * @see ossia::net::protocol_base::connected
+ * @note Multithread guarantees: MT-Safe
+ */
+OSSIA_EXPORT
+int ossia_device_connected(ossia_device_t device);
+
+/**
+ * @brief Apply the tree changes an OSCQuery mirror received.
+ *
+ * The nodes the server adds, removes or changes after the namespace was read
+ * wait in the mirror's queue until this function is called. Call it
+ * regularly, always from the same thread. No effect on the other protocols.
+ *
+ * @see ossia::oscquery::oscquery_mirror_protocol::run_commands
+ * @note Multithread guarantees: Unsafe
+ */
+OSSIA_EXPORT
+void ossia_device_run_commands(ossia_device_t device);
+
+/**
+ * @brief Send the values a server receives from a client to its other
+ * clients.
+ * @param echo 1 to forward, 0 not to (default)
+ *
+ * With a server created by ossia_protocol_oscquery_server_create, the client
+ * that sent a value does not receive it back; one created by
+ * ossia_protocol_oscquery_server_asio_create sends it back to it too.
+ *
+ * @see ossia::net::device_base::set_echo
+ * @note Multithread guarantees: MT-Safe
+ */
+OSSIA_EXPORT
+void ossia_device_set_echo(ossia_device_t device, int echo);
+
+/**
+ * @brief Set n values on parameters of a device, and send them together.
+ * @param parameters n parameters of the device
+ * @param values the n values, in the same order
+ *
+ * Each value is set on its parameter, whose local callbacks run, as with
+ * ossia_parameter_push_value. The values then leave as OSC bundles: an
+ * OSCQuery mirror sends them to its server, an OSCQuery server created with
+ * ossia_protocol_oscquery_server_asio_create to each of its clients, under
+ * a multiplex protocol too; a bundle is split when it would exceed a
+ * datagram. The other protocols send them one by one. A parameter of another
+ * device is ignored.
+ *
+ * @see ossia::net::protocol_base::push_bundle
+ * @note Multithread guarantees: MT-Safe
+ */
+OSSIA_EXPORT
+void ossia_device_push_bundle(
+    ossia_device_t device, const ossia_parameter_t* parameters,
+    const ossia_value_t* values, int n);
+
+/**
  * @brief Get the root node of a device
  *
  * @note Never null.
@@ -1816,6 +1879,28 @@ void ossia_network_context_free(ossia_network_context_t);
  */
 OSSIA_EXPORT
 void ossia_network_context_poll(ossia_network_context_t);
+
+/**
+ * @brief Instantiate an OSCQuery server that runs on a network context.
+ * @param ctx the network context: the server answers, receives and sends
+ * only while it is polled
+ * @param osc_port Local OSC port
+ * @param ws_port Local websocket port
+ *
+ * Unlike ossia_protocol_oscquery_server_create, it sends a bundle
+ * (ossia_device_push_bundle) as OSC bundles to its clients. The values it
+ * receives are applied on the thread that polls ctx.
+ *
+ * The ports are opened when the protocol is given to a device
+ * (ossia_device_create, ossia_protocol_multiplex_expose_to), which logs an
+ * error when one is taken.
+ *
+ * @see ossia::oscquery_asio::oscquery_server_protocol
+ * @note Multithread guarantees: MT-safe
+ */
+OSSIA_EXPORT
+ossia_protocol_t ossia_protocol_oscquery_server_asio_create(
+    ossia_network_context_t ctx, int osc_port, int ws_port);
 
 /** @}*/
 

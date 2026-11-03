@@ -184,6 +184,9 @@ if(OSSIA_C)
   ossia_add_test(devices_c  "${CMAKE_CURRENT_SOURCE_DIR}/C/unit-tests/unit-tests-devices.cpp")
   ossia_add_test(api_c      "${CMAKE_CURRENT_SOURCE_DIR}/C/unit-tests/unit-tests-c-api.cpp")
   ossia_add_test(presets_c  "${CMAKE_CURRENT_SOURCE_DIR}/C/unit-tests/unit-tests-presets.cpp")
+  if(OSSIA_PROTOCOL_OSCQUERY)
+    ossia_add_test(network_c "${CMAKE_CURRENT_SOURCE_DIR}/C/unit-tests/unit-tests-c-network.cpp")
+  endif()
 endif()
 
 ### Benchmarks ###
