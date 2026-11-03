@@ -18,6 +18,11 @@
       "displayName": "Custom parameters",
       "description": "A script whose own fields (float, int, bool, Color, Vector3) are marked [Ossia.Expose] and exposed under /Shape/CustomParameters, with the Max patch CustomParameters.maxpat that drives and follows them.",
       "path": "Samples~/CustomParameters"
+    },
+    {
+      "displayName": "Follow a device",
+      "description": "An Ossia.Client and a cube whose Ossia.Remote components follow follow_me, the device the Max patch FollowADevice.maxpat exposes: Max sets the cube's size, color and spin, Unity sends its angle back.",
+      "path": "Samples~/FollowADevice"
     }
   ]
 }
