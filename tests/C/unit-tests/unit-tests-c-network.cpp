@@ -441,11 +441,9 @@ TEST_CASE("C API: ossia_device_set_echo", "[network_c]")
   REQUIRE(!b.has(0.6f));
 }
 
-// The client that sent a value does not receive it back. Fails on this
-// server: it does not tell which client a value comes from
-// (oscquery_server_protocol_base::on_osc_message, on_binary_ws_message), and
-// forwards it to every client, the sender included. Hidden until it does.
-TEST_CASE("C API: ossia_device_set_echo spares the sender", "[.][network_c_echo_sender]")
+// The client that sent a value does not receive it back: the server knows it
+// by the UDP port its values come from.
+TEST_CASE("C API: ossia_device_set_echo spares the sender", "[network_c]")
 {
   server s{"c_echo_sender_server"};
   float_parameter(s.dev, "/level");
@@ -453,6 +451,27 @@ TEST_CASE("C API: ossia_device_set_echo spares the sender", "[.][network_c_echo_
   mirror b{s.url(), "c_echo_sender_b"};
   auto pa = a.listen("/level");
   b.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  ossia_device_set_echo(s.dev, 1);
+  ossia_parameter_push_f(pa, 0.5f);
+  REQUIRE(wait_for([&] { return b.has(0.5f); }, 2000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  INFO("a received " << a.values().size() << " values");
+  REQUIRE(a.values().empty());
+}
+
+// The same over the WebSocket: a mirror sends the values of a critical
+// parameter there, and the server knows the client by its connection.
+TEST_CASE("C API: ossia_device_set_echo spares the sender over the WebSocket", "[network_c]")
+{
+  server s{"c_echo_ws_server"};
+  ossia_parameter_set_critical(float_parameter(s.dev, "/level"), 1);
+  mirror a{s.url(), "c_echo_ws_a"};
+  mirror b{s.url(), "c_echo_ws_b"};
+  auto pa = a.listen("/level");
+  b.listen("/level");
+  REQUIRE(ossia_parameter_get_critical(pa) == 1);
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
   ossia_device_set_echo(s.dev, 1);
