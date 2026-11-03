@@ -129,7 +129,8 @@ Pipe it into `python3 -m json.tool` to read it indented. In short:
 - **Unity to client, with Send Updates** on `ExposeAttributes` (field `sendUpdates`, on by default; a scene keeps the value it saved, unchecked in the sample "Exposed cube"). Each frame, a field whose value changed, whatever changed it (the Inspector, a script, an animation), is pushed to the clients that listen to it (an `ossia.remote` shows it on its outlet). Measured on the sample: after setting in Unity `speed=12.5 axis=2 color=(0, 0, 1, 1) size=(0.5, 0.5, 0.5)`, `?VALUE` returns `12.5`, `2`, `[0.0,0.0,1.0,1.0]` and `[0.5,0.5,0.5]`. With Send Updates unchecked, `speed` set to 7 in Unity stays `12.5` for the client.
 
 - **The changes of a frame leave together.** What the exposed objects change during a frame leaves at its end, after every `Update`, in OSC bundles (`bundles` on the Controller, on by default): measured, eight fields changed in one frame reach a client in one datagram of eight messages; with `bundles` off, in eight datagrams (`Tests/Runtime/ServerBundleTests.cs`). A bundle is split when it would exceed a datagram (1400 bytes).
-- **No echo.** A value received from a client and applied to the field does not leave again: neither back to its sender nor to the other clients (see [Limits](#limits)). Measured with a libossia OSCQuery client (the core of `ossia.remote`) and a script writing the same address in turns for 5 s: 297 writes each; the client received 298 messages, the script's 297 and its last one, none of its own; Unity and the client ended on the last value written, and nothing moved once both stopped (`Tests/Runtime/ConcurrentWriteTests.cs`).
+- **No echo.** A value received from a client and applied to the field does not leave again from Unity. Measured with a libossia OSCQuery client (the core of `ossia.remote`) and a script writing the same address in turns for 5 s: 297 writes each; the client received 298 messages, the script's 297 and its last one, none of its own; Unity and the client ended on the last value written, and nothing moved once both stopped (`Tests/Runtime/ConcurrentWriteTests.cs`).
+- **Clients see each other.** The server forwards a value one client sends to the other clients, never back to its sender, as `ossia.device` does in Max (`forwardToClients` on the Controller, on by default). Measured with two libossia clients A and B: A writes 0.25, Unity applies it, B receives it once, A receives nothing; B writes 0.5 and Unity then sets 0.75, A receives 0.5 then 0.75, B only 0.75. With `forwardToClients` off, B receives nothing of what A writes (`Tests/Runtime/ForwardTests.cs`).
 
 The initial values of the fields are published when the scene starts, whatever Send Updates says. When a script sets a field every frame (as the sample does with `transform.localScale = size`), what a client sends to that field is overwritten at the next frame.
 
@@ -159,7 +160,6 @@ What is read: the public fields declared in the script's own class, and its publ
 - The name is required: `[Ossia.Expose]` without one creates a parameter with an empty name, at `/<GameObject>/<class>/`, that a client can hardly address.
 - The node of a script is its full class name: a class `Params` in the namespace `MyGame` gives `/<GameObject>/MyGame.Params/...`.
 - The GameObject's name is read once, when the scene starts: renaming it in Play does not move its parameters.
-- A value one client sends is applied in Unity but not forwarded to the other clients: they see it only when Unity changes the field again. The server the Controller uses, that of ossia-max, can forward it (`Device.SetEcho`), but sends it back to its sender too: measured with two libossia clients A and B, B received the value A wrote, and A received its own value back (`tests/C/unit-tests/unit-tests-c-network.cpp`, `ossia_device_set_echo spares the sender`). The Controller leaves it off, so that no client gets its own values back.
 - `bool` parameters read `"VALUE":null` over HTTP (`curl`, the tree at connection), while their OSC and WebSocket values are right.
 
 ### ExposeComponents
@@ -269,6 +269,7 @@ On the GameObject named `OssiaController`.
 | `runInBackground` | on | Keeps the scene following the values received when Unity loses focus (see [Troubleshooting](#troubleshooting)) |
 | `resolveAnnouncedName` | on | Reads the name the device is announced under over mDNS (see [mDNS](#mdns)) |
 | `bundles` | on | Sends what changes during a frame at its end, in OSC bundles; off, each value at once in its own message |
+| `forwardToClients` | on | Forwards a value a client sends to the other clients, never back to its sender |
 | `appName` | `Unity` | Name used by `PresetController` and `Logger` |
 | `AnnouncedName` (read only) | null | The name the device is announced under, once found |
 
@@ -358,7 +359,7 @@ The package carries Edit Mode and Play Mode tests (`Tests/`). To run them, list 
 "testables": [ "io.ossia.ossia-unity" ]
 ```
 
-then Window > General > Test Runner, or in batch mode: `Unity -batchmode -projectPath <project> -runTests -testPlatform EditMode -testResults results.xml`. The tests use ports 1234 and 5678 (second Play), 11234 and 15678, 21234 to 21237 and 25678 to 25681, 27234 and 27678, 28234 and 28678, 29234 to 29238 and 29678 to 29682 (the clients), 30234 and 30678, 41234, 41235, 45678 and 45679 (mDNS), UDP 10203 or the next free ports (the libossia clients of the tests), UDP ports the system chooses (the tests that count datagrams), the mDNS name `ossia_unity_client_test_<process>`, and `dns-sd` (macOS).
+then Window > General > Test Runner, or in batch mode: `Unity -batchmode -projectPath <project> -runTests -testPlatform EditMode -testResults results.xml`. The tests use ports 1234 and 5678 (second Play), 11234 and 15678, 21234 to 21237 and 25678 to 25681, 27234 and 27678, 28234 and 28678, 29234 to 29238 and 29678 to 29682 (the clients), 30234 and 30678, 32234 and 32678, 41234, 41235, 45678 and 45679 (mDNS), UDP 10203 or the next free ports (the libossia clients of the tests), UDP ports the system chooses (the tests that count datagrams), the mDNS name `ossia_unity_client_test_<process>`, and `dns-sd` (macOS).
 
 ## Not tested
 
