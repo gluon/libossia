@@ -6,21 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2.1.0+prism.9]
 
-Unity package: Send Updates on by default, no echo of a received value, a Controller that frees its ports when it is destroyed. Max package: a PRISM tab in two helps; no object behaves differently from `2.1.0+prism.8`.
+Unity package: Send Updates on by default, no echo of a received value, a Controller that frees its ports when it is destroyed, the server of ossia-max with the changes of a frame in OSC bundles, and a client, `Ossia.Client` and `Ossia.Remote`, that follows a remote device. C API: five functions for a client and for a server that sends bundles. Max package: a PRISM tab in two helps; no object behaves differently from `2.1.0+prism.8`.
 
 ### Added
 
 - Max: the helps of `ossia.device` and `ossia.client` have a PRISM tab, with examples on ports 7411 to 7414: for `ossia.device`, `expose oscquery` and the mDNS announcement, `announced <name>`, `stop <index>`, `@bundle`; for `ossia.client`, connection by name and by address to a device of the tab, reconnection and `@reconnect` as it behaves, the loop of `[ossia.client <name>]` at its creation, the tree read again by name, `@bundle`, values in both directions.
+- Unity: `Ossia.Client` follows a remote OSCQuery device, by its mDNS name or by `ws://host:port`, on a thread of its own, shows where the connection stands, applies the tree changes, and connects again every second when the server goes away, until it is back. `Ossia.Remote` binds a field or a property of a script to an address of that device, both ways, on the main thread: every change of the field leaves whatever its source, a value received does not go back, and the changes of a frame leave in one OSC bundle. Measured against a libossia server: the tree read, the server's value applied, the field sent (script, Inspector, animation), 0 echo over 5 s of concurrent writes, reconnection, connection by name, eight changes of a frame in one datagram.
+- Unity: the sample "Follow a device", a scene that follows the device `follow_me` of the Max patch `FollowADevice.maxpat`: Max sets a cube's size, color and spin, Unity sends its angle back.
+- C API: `ossia_device_connected` (whether a mirror's WebSocket is up), `ossia_device_run_commands` (applies the tree changes a mirror received), `ossia_device_set_echo` (a server forwards a client's value to its other clients), `ossia_device_push_bundle` (sets values and sends them as OSC bundles) and `ossia_protocol_oscquery_server_asio_create` (the OSCQuery server of ossia-max, on a network context). Each has its test (`tests/C/unit-tests/unit-tests-c-network.cpp`).
 - Unity: Play Mode tests of a client and Unity writing the same address (a libossia OSCQuery mirror in the test, a script, the Inspector, an animation), and of a Controller destroyed then created again on the same ports; an Edit Mode test of the default of Send Updates.
 
 ### Changed
 
 - Unity: Send Updates (`sendUpdates` of `ExposeAttributes` and `ExposeComponents`) is on by default: what changes in Unity reaches the clients without a box to tick. The box stays, to turn it off, and a scene keeps the value it saved: the sample "Exposed cube" keeps it unchecked, "Custom parameters" checked. A change of behaviour, not listed under Breaking: the binding had no user yet.
 
+- Unity: the Controller exposes its device through the OSCQuery server of ossia-max (it was the WebSocket++ server of the C API), on a network context a thread of the Controller runs; the values received still wait for the main thread. What the exposed objects change during a frame leaves at its end, in OSC bundles: eight fields changed in one frame reach a client in one datagram, where they took eight. `bundles` on the Controller, on by default, turns it off.
+
 ### Fixed
 
 - Unity: a value received from a client does not leave again. With Send Updates, it was applied to the field, then seen as a change and pushed back to every client that listens, its sender included. Measured with a client and a script writing the same address in turns for 5 s, 297 writes each: before, every value the client wrote came back to it (298, its 297 writes and its last one), none after; the client then receives the script's 297 values and its last one, Unity and the client end on the last value written, and nothing moves once both stop. A value one client sends is therefore no longer forwarded to the other clients (see the limits of the Unity package's README).
 - Unity: a `Controller` destroyed without leaving Play frees its device, its ports and its mDNS announcement. The C API keeps a device by its name until it is freed: the Controller kept its server, and a new Controller of the same name got the old device back, its tree and its server, its own server failing on the ports (`Underlying Transport Error`). An exposed object stops publishing once its Controller is gone.
+
+### Known
+
+- The OSCQuery server of ossia-max does not tell which client a value comes from (`oscquery_server_protocol_base::on_osc_message`, `on_binary_ws_message`): when its device echoes, it forwards a client's value to every client, its sender included. Measured with the C API, two clients A and B and `ossia_device_set_echo`: B receives the value A wrote, and A receives it back. The Unity Controller leaves the echo off; `ossia.device` turns it on when it exposes over OSCQuery (`src/ossia-max/src/device.cpp`).
 
 ## [2.1.0+prism.8] - 2026-11-02
 
