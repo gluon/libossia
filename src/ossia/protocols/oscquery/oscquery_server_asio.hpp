@@ -99,9 +99,13 @@ public:
 protected:
   explicit oscquery_server_protocol_base(ossia::net::network_context_ptr ctx) = delete;
 
-  // OSC callback
-  void on_osc_message(const oscpack::ReceivedMessage& m);
-  void process_raw_osc_data(const char* data, std::size_t sz);
+  // OSC callback. origin: the client the message comes from, 0 when unknown;
+  // a value its device echoes is not sent back to it.
+  void on_osc_message(const oscpack::ReceivedMessage& m, uintptr_t origin);
+  void process_raw_osc_data(const char* data, std::size_t sz, uintptr_t origin);
+  // The client whose OSC sender has that UDP port (LOCAL_SENDER_PORT of its
+  // START_OSC_STREAMING), 0 if none.
+  uintptr_t client_of_sender_port(int port);
 
   // List of connected clients
   oscquery_client* find_client(const connection_handler& hdl);
