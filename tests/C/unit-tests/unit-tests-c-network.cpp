@@ -620,3 +620,41 @@ TEST_CASE("C API: the answer to a crossing opens no window", "[network_c]")
   REQUIRE(late == 0);
   REQUIRE(value_of(remote) == 429.f);
 }
+
+// The same while the server forwards each client's values to the others: the
+// value the server forwards for the client must not hide the one it sent.
+TEST_CASE("C API: crossed writes converge while the server forwards", "[network_c]")
+{
+  server s{"c_cross_echo_server"};
+  auto level = float_parameter(s.dev, "/level");
+  ossia_device_set_echo(s.dev, 1);
+  mirror m{s.url(), "c_cross_echo_a"};
+  mirror other{s.url(), "c_cross_echo_b"};
+  auto remote = m.listen("/level");
+  auto seen = other.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  int divergences = 0;
+  for(int i = 0; i < 20; i++)
+  {
+    std::atomic_bool go{false};
+    std::thread client([&] {
+      while(!go)
+      {
+      }
+      ossia_parameter_push_f(remote, 200.f + i);
+    });
+    go = true;
+    ossia_parameter_push_f(level, 100.f + i);
+    client.join();
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    const float at_server = value_of(level), at_client = value_of(remote), at_other = value_of(seen);
+    if(at_server != at_client || at_server != at_other)
+    {
+      divergences++;
+      UNSCOPED_INFO("trial " << i << ": server " << at_server << ", client " << at_client << ", other " << at_other);
+    }
+  }
+  INFO("divergences " << divergences << " in 20");
+  REQUIRE(divergences == 0);
+}
