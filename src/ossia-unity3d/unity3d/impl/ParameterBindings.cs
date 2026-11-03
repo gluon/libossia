@@ -34,7 +34,7 @@ namespace Ossia
 
       ossia_node = parent.component_node.AddChild (attr);
       ossia_parameter = ossia_node.CreateParameter (f.FieldType, t);
-      SendUpdates ();
+      SendUpdates (null);
       // Pushed before the Controller registers the parameter: no message
       // comes back for it.
       published = null;
@@ -71,14 +71,17 @@ namespace Ossia
       }
     }
 
-    //! C# -> Ossia
-    public void SendUpdates ()
+    //! C# -> Ossia, through the Controller; at once without it
+    public void SendUpdates (Controller controller)
     {
       var val = field.GetValue (parent.component);
       if (!val.Equals (previousValue)) {
         previousValue = val;
         published = val;
-        ossia_parameter.PushValue (new Value (val));
+        if (controller != null)
+          controller.Publish (ossia_parameter, new Value (val));
+        else
+          ossia_parameter.PushValue (new Value (val));
       }
     }
   }
@@ -106,7 +109,7 @@ namespace Ossia
 
       ossia_node = parent.component_node.AddChild (attr);
       ossia_parameter = ossia_node.CreateParameter (f.PropertyType, t);
-      SendUpdates ();
+      SendUpdates (null);
       published = null;
     }
 
@@ -139,15 +142,18 @@ namespace Ossia
       }
     }
 
-    //! C# -> Ossia
-    public void SendUpdates ()
+    //! C# -> Ossia, through the Controller; at once without it
+    public void SendUpdates (Controller controller)
     {
       if (field.CanRead) {
         var val = field.GetValue (parent.component, null);
         if (!val.Equals (previousValue)) {
           previousValue = val;
           published = val;
-          ossia_parameter.PushValue (new Value (val));
+          if (controller != null)
+            controller.Publish (ossia_parameter, new Value (val));
+          else
+            ossia_parameter.PushValue (new Value (val));
         }
       }
     }
@@ -180,13 +186,13 @@ namespace Ossia
     }
 
     //! C# -> Ossia
-    public void SendUpdates ()
+    public void SendUpdates (Controller controller)
     {
       foreach (var field in fields) {
-        field.SendUpdates ();
+        field.SendUpdates (controller);
       }
       foreach (var property in properties) {
-        property.SendUpdates ();
+        property.SendUpdates (controller);
       }
     }
   }
