@@ -28,6 +28,8 @@ namespace Ossia
     [Tooltip ("Send the values that change during a frame together, at the end of the frame, in OSC bundles. "
             + "Off, each value leaves as its own message as soon as it changes.")]
     public bool bundles = true;
+    [Tooltip ("Forward a value a client sends to the other clients, never back to its sender, as ossia.device does in Max")]
+    public bool forwardToClients = true;
 
     void Awake ()
     {
@@ -63,6 +65,7 @@ namespace Ossia
         network_context = new Ossia.NetworkContext ();
         oscq_protocol = new Ossia.OSCQuery (network_context, oscPort, wsPort);
         local_protocol.ExposeTo (oscq_protocol);
+        local_device.SetEcho (forwardToClients);
         network_context.Start ();
 
         // Once the server runs: its creation fails when a port is taken
