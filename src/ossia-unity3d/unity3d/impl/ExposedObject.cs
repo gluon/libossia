@@ -39,7 +39,7 @@ namespace Ossia
         child_node.SetValueUpdating (false);
 
       foreach (var component in ossia_components) {
-        component.SendUpdates ();
+        component.SendUpdates (controller);
       }
     }
 
