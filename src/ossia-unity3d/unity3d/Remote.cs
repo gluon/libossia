@@ -35,32 +35,49 @@ namespace Ossia
 #else
         client = FindObjectOfType<Client> ();
 #endif
-      if (client == null) {
-        Debug.LogWarning ("OSSIA remote " + address + ": no Client in the scene");
-        return;
-      }
-      if (!Resolve ())
-        return;
-      client.Add (this);
+      Register ();
     }
 
     void OnDisable ()
     {
+      if (registered != null)
+        registered.Remove (this);
+      registered = null;
+    }
+
+    // A script that adds the component sets its Client afterwards
+    void Update ()
+    {
+      if (client != registered)
+        Register ();
+    }
+
+    // Its target is read when it binds: a script can add it, then set it
+    void Register ()
+    {
+      if (registered != null)
+        registered.Remove (this);
+      registered = client;
       if (client != null)
-        client.Remove (this);
+        client.Add (this);
+      else if (!warned)
+        Debug.LogWarning ("OSSIA remote " + address + ": no Client in the scene");
+      warned = client == null;
     }
 
     bool Resolve ()
     {
-      if (target == null) {
-        Debug.LogWarning ("OSSIA remote " + address + ": no target script");
+      if (field != null || property != null)
+        return true;
+      if (target == null || string.IsNullOrEmpty (member))
         return false;
-      }
       const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance;
       field = target.GetType ().GetField (member, flags);
       property = field == null ? target.GetType ().GetProperty (member, flags) : null;
       if (field == null && property == null) {
-        Debug.LogWarning ("OSSIA remote " + address + ": " + target.GetType () + " has no public field or property \"" + member + "\"");
+        if (!warned)
+          Debug.LogWarning ("OSSIA remote " + address + ": " + target.GetType () + " has no public field or property \"" + member + "\"");
+        warned = true;
         return false;
       }
       return true;
@@ -87,7 +104,7 @@ namespace Ossia
     //! field takes its value.
     internal Ossia.Parameter Bind (Ossia.Device device)
     {
-      if (target == null || (field == null && property == null))
+      if (!Resolve ())
         return null;
       var node = Ossia.Node.FindNode (device.GetRootNode (), address);
       if (node == null)
@@ -151,5 +168,7 @@ namespace Ossia
     object previousValue;
     // The last value sent, until a value from the device replaces it
     object published;
+    bool warned;
+    Client registered;
   }
 }
