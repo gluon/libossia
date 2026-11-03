@@ -310,9 +310,7 @@ void ossia_device_run_commands(ossia_device_t device);
  * clients.
  * @param echo 1 to forward, 0 not to (default)
  *
- * With a server created by ossia_protocol_oscquery_server_create, the client
- * that sent a value does not receive it back; one created by
- * ossia_protocol_oscquery_server_asio_create sends it back to it too.
+ * The client that sent a value does not receive it back.
  *
  * @see ossia::net::device_base::set_echo
  * @note Multithread guarantees: MT-Safe
