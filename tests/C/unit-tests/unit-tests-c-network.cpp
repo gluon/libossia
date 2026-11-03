@@ -22,6 +22,8 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cstdio>
+#include <cstdlib>
 #include <chrono>
 #include <functional>
 #include <mutex>
@@ -31,9 +33,38 @@
 
 namespace
 {
-// A port the system chooses, out of the ports other programs use
+// With OSSIA_TEST_PORTS=<first>-<last>, the next free port of that range, in
+// turn, out of the ports the system gives to outgoing connections; else a
+// port the system chooses.
+uint16_t free_port_in_range(bool tcp)
+{
+  const char* range = std::getenv("OSSIA_TEST_PORTS");
+  if(!range)
+    return 0;
+  int first = 0, last = 0;
+  if(std::sscanf(range, "%d-%d", &first, &last) != 2 || first <= 0 || last < first || last > 65535)
+    return 0;
+  static int next = 0;
+  for(int i = 0; i <= last - first; i++)
+  {
+    const int port = first + (next++ % (last - first + 1));
+    int fd = ::socket(AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    const bool ok = ::bind(fd, (sockaddr*)&addr, sizeof(addr)) == 0;
+    ::close(fd);
+    if(ok)
+      return static_cast<uint16_t>(port);
+  }
+  return 0;
+}
+
 uint16_t free_port(bool tcp)
 {
+  if(const auto port = free_port_in_range(tcp))
+    return port;
   int fd = ::socket(AF_INET, tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -480,4 +511,112 @@ TEST_CASE("C API: ossia_device_set_echo spares the sender over the WebSocket", "
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   INFO("a received " << a.values().size() << " values");
   REQUIRE(a.values().empty());
+}
+
+// The server sets a value and a client writes another one to the same
+// address in the same instant: each value crosses the other. The server
+// applies the client's value last, the client applies the server's after
+// its own; without an answer from the server, each keeps the other's value.
+TEST_CASE("C API: crossed writes converge", "[network_c]")
+{
+  server s{"c_cross_server"};
+  auto level = float_parameter(s.dev, "/level");
+  mirror m{s.url(), "c_cross_mirror"};
+  auto remote = m.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  int divergences = 0;
+  std::chrono::steady_clock::duration latest{};
+  for(int i = 0; i < 20; i++)
+  {
+    std::atomic_bool go{false};
+    std::thread client([&] {
+      while(!go)
+      {
+      }
+      ossia_parameter_push_f(remote, 200.f + i);
+    });
+    go = true;
+    const auto sent = std::chrono::steady_clock::now();
+    ossia_parameter_push_f(level, 100.f + i);
+    client.join();
+    // How long after it sent its value the server holds the client's
+    wait_for([&] { return value_of(level) == 200.f + i; }, 300);
+    latest = std::max(latest, std::chrono::steady_clock::now() - sent);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    const float at_server = value_of(level), at_client = value_of(remote);
+    if(at_server != at_client)
+    {
+      divergences++;
+      UNSCOPED_INFO("trial " << i << ": server " << at_server << ", client " << at_client);
+    }
+  }
+  const double ms = std::chrono::duration<double, std::milli>(latest).count();
+  WARN("crossed writes: " << divergences << " divergences in 20; the client's value reached the server "
+       << ms << " ms after it sent its own, at most");
+  REQUIRE(divergences == 0);
+}
+
+// Out of a crossing, nothing comes back: writes long after the server's last
+// value are not answered.
+TEST_CASE("C API: a write that crossed nothing is not sent back", "[network_c]")
+{
+  server s{"c_nocross_server"};
+  auto level = float_parameter(s.dev, "/level");
+  mirror m{s.url(), "c_nocross_mirror"};
+  auto remote = m.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  ossia_parameter_push_f(level, 1.f);
+  REQUIRE(wait_for([&] { return m.has(1.f); }, 2000));
+  // Past the window
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  for(int i = 0; i < 20; i++)
+  {
+    ossia_parameter_push_f(remote, 300.f + i);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  REQUIRE(wait_for([&] { return value_of(level) == 319.f; }, 2000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  auto got = m.values();
+  INFO("the client received " << got.size() << " values");
+  REQUIRE(got == std::vector<float>{1.f});
+}
+
+// The answer to a crossing is the client's own value: it opens no window.
+// A client that keeps writing after a crossing gets answers only within the
+// window of the server's value.
+TEST_CASE("C API: the answer to a crossing opens no window", "[network_c]")
+{
+  server s{"c_answer_server"};
+  auto level = float_parameter(s.dev, "/level");
+  mirror m{s.url(), "c_answer_mirror"};
+  auto remote = m.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  const auto sent = std::chrono::steady_clock::now();
+  ossia_parameter_push_f(level, 1.f);
+  std::vector<std::chrono::steady_clock::duration> at;
+  for(int i = 0; i < 30; i++)
+  {
+    at.push_back(std::chrono::steady_clock::now() - sent);
+    ossia_parameter_push_f(remote, 400.f + i);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  REQUIRE(wait_for([&] { return value_of(level) == 429.f; }, 2000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+  int answered = 0, late = 0;
+  for(float v : m.values())
+  {
+    if(v < 400.f)
+      continue;
+    answered++;
+    // Written past the window and a margin for the trip
+    if(at[int(v - 400.f)] > std::chrono::milliseconds(150))
+      late++;
+  }
+  INFO(answered << " writes answered, " << late << " of them written past the window");
+  REQUIRE(late == 0);
+  REQUIRE(value_of(remote) == 429.f);
 }
