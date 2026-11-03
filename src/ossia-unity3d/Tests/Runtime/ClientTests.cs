@@ -147,13 +147,12 @@ namespace Ossia.Tests
 
     Remote AddRemote (string address, string member)
     {
+      // As a script adds one: enabled at once, set right after
       var r = shape.AddComponent<Remote> ();
-      r.enabled = false;
       r.client = client;
       r.address = address;
       r.target = fields;
       r.member = member;
-      r.enabled = true;
       return r;
     }
 
@@ -256,6 +255,23 @@ namespace Ossia.Tests
       Assert.AreEqual (0, echoes, "values the server wrote came back to it");
       Assert.AreEqual (0, after.Length, "messages after both stopped");
       Assert.LessOrEqual (all.Count, scriptWrites + 1, "at most one message per change of the field");
+    }
+
+    // A node the server adds after the connection reaches the client, and
+    // the Remote waiting for it binds
+    [UnityTest]
+    public IEnumerator AddressAddedLaterBinds ()
+    {
+      yield return Connect (null, 4);
+      var later = AddRemote ("/later", "p0");
+      yield return new WaitForSecondsRealtime (0.5f);
+      Assert.IsFalse (later.Bound, "no /later yet");
+
+      var p = Node.CreateNode (server.Device.GetRootNode (), "/later").CreateParameter (ossia_type.FLOAT);
+      p.PushValue (0.7f);
+      yield return Until (() => later.Bound && fields.p0 == 0.7f, 3);
+      Assert.IsTrue (later.Bound, "bound once the server added it");
+      Assert.AreEqual (0.7f, fields.p0, "its value applied");
     }
 
     [UnityTest]
