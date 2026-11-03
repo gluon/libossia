@@ -136,10 +136,42 @@ public:
         });
   }
 
+  // As receive, with the endpoint each datagram comes from:
+  // f(data, size, sender)
+  template <typename F>
+  void receive_from(F f)
+  {
+    m_socket.async_receive_from(
+        boost::asio::mutable_buffer(&m_data[0], std::size(m_data)), m_sender,
+        [this, f](auto ec, std::size_t sz) {
+      if(ec == boost::asio::error::operation_aborted)
+        return;
+
+      if(!ec && sz > 0)
+      {
+        try
+        {
+          f(m_data, sz, m_sender);
+        }
+        catch(const std::exception& e)
+        {
+          ossia::logger().error("[udp_socket::receive_from]: {}", e.what());
+        }
+        catch(...)
+        {
+          ossia::logger().error("[udp_socket::receive_from]: unknown error");
+        }
+      }
+
+      this->receive_from(f);
+        });
+  }
+
   Nano::Signal<void()> on_close;
 
   boost::asio::io_context& m_context;
   proto::endpoint m_endpoint;
+  proto::endpoint m_sender;
   proto::socket m_socket;
   std::shared_ptr<detail::udp_socket_life> m_life{std::make_shared<detail::udp_socket_life>()};
   std::string m_multicast_group;

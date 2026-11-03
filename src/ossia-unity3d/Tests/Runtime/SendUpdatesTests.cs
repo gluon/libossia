@@ -72,6 +72,14 @@ namespace Ossia.Tests
       typeof(Controller).GetMethod("Update", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(controller, null);
     }
 
+    // What the object and the Controller do in a frame: the object publishes,
+    // the Controller sends the bundle at the end of the frame.
+    void Publish()
+    {
+      expose.SendUpdates();
+      typeof(Controller).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(controller, null);
+    }
+
     // The next test looks up its Controller by name: this one must be gone.
     [UnityTearDown]
     public IEnumerator Destroy()
@@ -104,7 +112,7 @@ namespace Ossia.Tests
       yield return Setup();
 
       fields.speed = 10;
-      expose.SendUpdates();   // publishes 10
+      Publish();              // publishes 10
       fields.speed = 20;      // the script changes it again
       ControllerUpdate();     // receives the publication of 10
       Assert.AreEqual(20f, fields.speed);
@@ -117,7 +125,7 @@ namespace Ossia.Tests
       var t = fields.transform;
 
       for (int i = 0; i < 10; i++) {
-        expose.SendUpdates();
+        Publish();
         t.Rotate(Vector3.up, 5);
         var rotated = t.rotation;
         ControllerUpdate();
@@ -134,7 +142,7 @@ namespace Ossia.Tests
       var speed = Find("speed");
 
       fields.speed = 10;
-      expose.SendUpdates();
+      Publish();
       ControllerUpdate();
 
       speed.PushValue(30f);   // as a client sets it

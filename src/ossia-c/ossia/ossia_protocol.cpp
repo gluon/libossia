@@ -10,6 +10,7 @@
 #include <ossia/network/oscquery/oscquery_mirror.hpp>
 #include <ossia/network/oscquery/oscquery_server.hpp>
 #include <ossia/network/zeroconf/zeroconf.hpp>
+#include <ossia/protocols/oscquery/oscquery_server_asio.hpp>
 extern "C" {
 // MOVEME
 void ossia_string_free(char* str)
@@ -75,6 +76,24 @@ ossia_protocol_t ossia_protocol_oscquery_server_create(int osc_port, int ws_port
   return safe_function(__func__, [=] {
     return new ossia_protocol{
         new ossia::oscquery::oscquery_server_protocol(osc_port, ws_port)};
+  });
+#else
+  return nullptr;
+#endif
+}
+
+ossia_protocol_t ossia_protocol_oscquery_server_asio_create(
+    ossia_network_context_t ctx, int osc_port, int ws_port)
+{
+#if defined(OSSIA_PROTOCOL_OSCQUERY)
+  if(!ctx)
+  {
+    ossia_log_error("ossia_protocol_oscquery_server_asio_create: ctx is null");
+    return nullptr;
+  }
+  return safe_function(__func__, [=] {
+    return new ossia_protocol{new ossia::oscquery_asio::oscquery_server_protocol(
+        *reinterpret_cast<ossia::net::network_context_ptr*>(ctx), osc_port, ws_port)};
   });
 #else
   return nullptr;

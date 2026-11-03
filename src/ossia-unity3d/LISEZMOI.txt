@@ -2,8 +2,10 @@ ossia (PRISM) for Unity
 =======================
 
 Exposes the objects of a Unity scene, and the fields of your own scripts,
-over OSCQuery, for Max (ossia-prism), TouchDesigner or any OSCQuery client.
+over OSCQuery, for Max (ossia-prism), TouchDesigner or any OSCQuery client;
+follows a remote OSCQuery device with Ossia.Client and Ossia.Remote.
 
 The documentation is README.md, next to this file: installation, the
-samples "Custom parameters" and "Exposed cube", declaring your own
-parameters, reference, limits and troubleshooting.
+samples "Custom parameters", "Exposed cube" and "Follow a device",
+declaring your own parameters, following a device, reference, limits and
+troubleshooting.

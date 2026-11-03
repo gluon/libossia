@@ -13,6 +13,10 @@
 #include <nano_signal_slot.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <optional>
+#include <string>
+#include <unordered_map>
 namespace osc
 {
 template <typename T>
@@ -87,6 +91,21 @@ public:
   bool force_ws() const noexcept { return m_forceWS.load(std::memory_order_relaxed); }
   void set_force_ws(bool forceWS) noexcept;
 
+  //! A value a client writes less than this after the server sent it a
+  //! different value on the same address crossed that value: the client
+  //! applied the server's value after it sent its own, which the server
+  //! applied last. The server then sends that client its final value, so
+  //! that both hold it. 0 turns it off.
+  static constexpr std::chrono::milliseconds default_crossing_window{100};
+  void set_crossing_window(std::chrono::milliseconds window) noexcept
+  {
+    m_crossingWindow.store(window.count(), std::memory_order_relaxed);
+  }
+  std::chrono::milliseconds crossing_window() const noexcept
+  {
+    return std::chrono::milliseconds{m_crossingWindow.load(std::memory_order_relaxed)};
+  }
+
   const std::vector<ossia::net::osc_server_configuration>&
   get_transports() const noexcept
   {
@@ -99,9 +118,23 @@ public:
 protected:
   explicit oscquery_server_protocol_base(ossia::net::network_context_ptr ctx) = delete;
 
-  // OSC callback
-  void on_osc_message(const oscpack::ReceivedMessage& m);
-  void process_raw_osc_data(const char* data, std::size_t sz);
+  // OSC callback. origin: the client the message comes from, 0 when unknown;
+  // a value its device echoes is not sent back to it.
+  void on_osc_message(const oscpack::ReceivedMessage& m, uintptr_t origin);
+  void process_raw_osc_data(const char* data, std::size_t sz, uintptr_t origin);
+  // The client whose OSC sender has that UDP port (LOCAL_SENDER_PORT of its
+  // START_OSC_STREAMING), 0 if none.
+  uintptr_t client_of_sender_port(int port);
+
+  // A value the server sent on its own (a local change, another client's
+  // value it forwards), to every client but skipped
+  void record_sent(std::string address, const ossia::value& v, uintptr_t skipped = 0);
+  // Before a write of origin to address is applied: the value the server
+  // sent it there within the crossing window, if any
+  std::optional<ossia::value> sent_within_window(std::string_view address, uintptr_t origin);
+  // After the write: its answer, when it left the address with another value
+  // than sent. The answer opens no window.
+  void answer_crossing(std::string_view address, uintptr_t origin, const ossia::value& sent);
 
   // List of connected clients
   oscquery_client* find_client(const connection_handler& hdl);
@@ -160,6 +193,17 @@ protected:
 
   // Will only send changes through WS
   std::atomic_bool m_forceWS{};
+
+  struct sent_value
+  {
+    std::chrono::steady_clock::time_point time;
+    ossia::value value;
+    uintptr_t skipped{};
+  };
+  // By address, the last value the server sent on its own
+  std::mutex m_sentMutex;
+  std::unordered_map<std::string, sent_value> m_sent;
+  std::atomic<int64_t> m_crossingWindow{default_crossing_window.count()};
 };
 
 class OSSIA_EXPORT oscquery_server_protocol : public oscquery_server_protocol_base

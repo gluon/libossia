@@ -56,6 +56,12 @@ namespace Ossia
       int ws_port);
 
     [DllImport ("ossia")]
+    public static extern IntPtr ossia_protocol_oscquery_server_asio_create(
+      IntPtr ctx,
+      int osc_port,
+      int ws_port);
+
+    [DllImport ("ossia")]
     public static extern IntPtr ossia_protocol_oscquery_mirror_create(
       string host);
 
@@ -92,6 +98,26 @@ namespace Ossia
     [DllImport ("ossia")]
     public static extern int ossia_device_update_namespace (
       IntPtr device);
+
+    [DllImport ("ossia")]
+    public static extern int ossia_device_connected (
+      IntPtr device);
+
+    [DllImport ("ossia")]
+    public static extern void ossia_device_run_commands (
+      IntPtr device);
+
+    [DllImport ("ossia")]
+    public static extern void ossia_device_set_echo (
+      IntPtr device,
+      int echo);
+
+    [DllImport ("ossia")]
+    public static extern void ossia_device_push_bundle (
+      IntPtr device,
+      IntPtr[] parameters,
+      IntPtr[] values,
+      int n);
 
 
     [DllImport ("ossia")]
@@ -634,6 +660,15 @@ namespace Ossia
     [DllImport ("ossia")]
     public static extern void ossia_mq_free(IntPtr mq);
 
+    /// NETWORK CONTEXT ///
+
+    [DllImport ("ossia")]
+    public static extern IntPtr ossia_network_context_create();
+    [DllImport ("ossia")]
+    public static extern void ossia_network_context_free(IntPtr ctx);
+    [DllImport ("ossia")]
+    public static extern void ossia_network_context_poll(IntPtr ctx);
+
   }
 
   public class Message
@@ -652,7 +687,17 @@ namespace Ossia
 
     ~MessageQueue()
     {
-      Network.ossia_mq_free (ossia_mq);
+      Free ();
+    }
+
+    //! Before the device it listens to is freed: the queue removes its
+    //! callbacks from the parameters.
+    public void Free()
+    {
+      if (ossia_mq != IntPtr.Zero) {
+        Network.ossia_mq_free (ossia_mq);
+        ossia_mq = IntPtr.Zero;
+      }
     }
 
     public void Register(Ossia.Parameter p)

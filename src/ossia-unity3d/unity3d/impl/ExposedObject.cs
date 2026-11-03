@@ -7,7 +7,9 @@ namespace Ossia
 {
   public abstract class ExposedObject : MonoBehaviour
   {
-    public bool sendUpdates = false;
+    //! Pushes to the clients, each frame, what changed in Unity. On by default;
+    //! a scene keeps the value it saved.
+    public bool sendUpdates = true;
     public Ossia.Node child_node;
     internal List<OssiaEnabledComponent> ossia_components = new List<OssiaEnabledComponent>();
     protected Ossia.Controller controller = null;
@@ -37,12 +39,16 @@ namespace Ossia
         child_node.SetValueUpdating (false);
 
       foreach (var component in ossia_components) {
-        component.SendUpdates ();
+        component.SendUpdates (controller);
       }
     }
 
     public void Update()
     {
+      // Its Controller was destroyed, and its parameters with it
+      if (child_node != null && controller == null)
+        return;
+
       if (child_node == null) {
         Debug.Log("Object not registered.");  
         Start ();

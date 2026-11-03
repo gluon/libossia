@@ -25,6 +25,11 @@ namespace Ossia
     [Tooltip ("Read the name the device is announced under over mDNS, about two seconds after the start: "
             + "AnnouncedName, a console line, and a warning when it is not deviceName")]
     public bool resolveAnnouncedName = true;
+    [Tooltip ("Send the values that change during a frame together, at the end of the frame, in OSC bundles. "
+            + "Off, each value leaves as its own message as soon as it changes.")]
+    public bool bundles = true;
+    [Tooltip ("Forward a value a client sends to the other clients, never back to its sender, as ossia.device does in Max")]
+    public bool forwardToClients = true;
 
     void Awake ()
     {
@@ -37,6 +42,7 @@ namespace Ossia
         Application.runInBackground = true;
       if (!set) {
         set = true;
+        live++;
 
         // Setup the log so that the errors in the C API are shown in the
         // Unity3D console.
@@ -54,8 +60,13 @@ namespace Ossia
 
         Queue = new Ossia.MessageQueue (local_device);
 
-        oscq_protocol = new Ossia.OSCQuery (oscPort, wsPort);
+        // The server of ossia-max, which sends bundles, on a network
+        // context that a thread of its own runs
+        network_context = new Ossia.NetworkContext ();
+        oscq_protocol = new Ossia.OSCQuery (network_context, oscPort, wsPort);
         local_protocol.ExposeTo (oscq_protocol);
+        local_device.SetEcho (forwardToClients);
+        network_context.Start ();
 
         // Once the server runs: its creation fails when a port is taken
         if (resolveAnnouncedName && oscq_protocol.ossia_protocol != IntPtr.Zero)
@@ -115,6 +126,33 @@ namespace Ossia
       }
     }
 
+    // After the Update of every object: what they published this frame
+    void LateUpdate ()
+    {
+      Flush ();
+    }
+
+    //! What an exposed object sends: queued until the end of the frame and
+    //! sent in one bundle, or sent at once when bundles is off.
+    internal void Publish (Ossia.Parameter p, Ossia.Value v)
+    {
+      if (!bundles) {
+        p.PushValue (v);
+        return;
+      }
+      pending_parameters.Add (p);
+      pending_values.Add (v);
+    }
+
+    void Flush ()
+    {
+      if (!set || pending_parameters.Count == 0)
+        return;
+      local_device.PushBundle (pending_parameters, pending_values);
+      pending_parameters.Clear ();
+      pending_values.Clear ();
+    }
+
     public Ossia.Node SceneNode ()
     {
       return scene_node;
@@ -124,7 +162,41 @@ namespace Ossia
     {
       Debug.Log ("OSSIA: Quitting");
       quitting = true;
-      Network.ossia_device_reset_static ();
+      Release ();
+      // Frees what remains in the library, devices made without a Controller
+      // included, once no Controller still holds its own
+      if (live == 0)
+        Network.ossia_device_reset_static ();
+    }
+
+    // Destroyed without leaving Play: the library keeps a device by its name
+    // until it is freed, and with it its server and its ports.
+    void OnDestroy ()
+    {
+      Release ();
+    }
+
+    void Release ()
+    {
+      if (!set)
+        return;
+      set = false;
+      live--;
+      // No network event while the device goes away
+      network_context.Stop ();
+      Hash.Clear ();
+      pending_parameters.Clear ();
+      pending_values.Clear ();
+      Queue.Free ();
+      // Clears the tree, then deletes the device, its protocols and their
+      // servers
+      local_device.Free ();
+      network_context.Free ();
+      local_device = null;
+      local_protocol = null;
+      oscq_protocol = null;
+      network_context = null;
+      scene_node = null;
     }
 
     public Ossia.Device GetDevice ()
@@ -176,6 +248,8 @@ namespace Ossia
 
 
     bool set = false;
+    // Controllers whose device is not freed yet
+    static int live = 0;
     volatile bool quitting = false;
     volatile string found_name = null;
     bool name_reported = false;
@@ -183,6 +257,9 @@ namespace Ossia
     Ossia.Local local_protocol = null;
     Ossia.Device local_device = null;
     Ossia.OSCQuery oscq_protocol = null;
+    Ossia.NetworkContext network_context = null;
+    readonly List<Ossia.Parameter> pending_parameters = new List<Ossia.Parameter> ();
+    readonly List<Ossia.Value> pending_values = new List<Ossia.Value> ();
 
     Ossia.Node scene_node;
     Ossia.Network main;

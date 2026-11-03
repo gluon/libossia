@@ -5,7 +5,11 @@
 #include <ossia/detail/config.hpp>
 
 #include <ossia/detail/flat_map.hpp>
+#include <ossia/network/base/bundle.hpp>
 #include <ossia/network/generic/generic_device.hpp>
+#include <ossia/network/local/local.hpp>
+#include <ossia/network/oscquery/oscquery_mirror.hpp>
+#include <ossia/protocols/oscquery/oscquery_server_asio.hpp>
 
 #include <map>
 
@@ -111,6 +115,108 @@ int ossia_device_update_namespace(ossia_device_t device)
     else
     {
       return false;
+    }
+  });
+}
+
+int ossia_device_connected(ossia_device_t device)
+{
+  return safe_function(__func__, [=]() -> int {
+    if(!device || !device->device)
+    {
+      ossia_log_error("ossia_device_connected: device is null");
+      return 0;
+    }
+    return device->device->get_protocol().connected() ? 1 : 0;
+  });
+}
+
+void ossia_device_run_commands(ossia_device_t device)
+{
+  return safe_function(__func__, [=] {
+    if(!device || !device->device)
+    {
+      ossia_log_error("ossia_device_run_commands: device is null");
+      return;
+    }
+    if(auto* mirror = dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(
+           &device->device->get_protocol()))
+      mirror->run_commands();
+  });
+}
+
+void ossia_device_set_echo(ossia_device_t device, int echo)
+{
+  return safe_function(__func__, [=] {
+    if(!device || !device->device)
+    {
+      ossia_log_error("ossia_device_set_echo: device is null");
+      return;
+    }
+    device->device->set_echo(echo != 0);
+  });
+}
+
+void ossia_device_push_bundle(
+    ossia_device_t device, const ossia_parameter_t* parameters,
+    const ossia_value_t* values, int n)
+{
+  return safe_function(__func__, [=] {
+    if(!device || !device->device)
+    {
+      ossia_log_error("ossia_device_push_bundle: device is null");
+      return;
+    }
+    if(n <= 0)
+      return;
+    if(!parameters || !values)
+    {
+      ossia_log_error("ossia_device_push_bundle: parameters or values is null");
+      return;
+    }
+
+    auto& dev = *device->device;
+    std::vector<ossia::bundle_element> elements;
+    elements.reserve(n);
+    for(int i = 0; i < n; i++)
+    {
+      auto* param = convert_parameter(parameters[i]);
+      if(!param || !values[i] || &param->get_node().get_device() != &dev)
+        continue;
+      // The local callbacks run here, as with a push
+      auto v = param->set_value(values[i]->value);
+      if(v.valid())
+        elements.push_back({param, std::move(v)});
+    }
+    if(elements.empty())
+      return;
+
+    std::span<ossia::bundle_element> all{elements};
+    auto& protocol = dev.get_protocol();
+    if(dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(&protocol))
+    {
+      // Split under 1400 bytes over UDP
+      protocol.push_bundle(all);
+    }
+    else if(auto* multiplex = dynamic_cast<ossia::net::multiplex_protocol*>(&protocol))
+    {
+      multiplex->for_each_protocol([&](ossia::net::protocol_base& p) {
+        if(dynamic_cast<ossia::oscquery_asio::oscquery_server_protocol_base*>(&p))
+          p.push_bundle(all);
+        else
+          for(auto& e : elements)
+            p.push(*e.parameter, e.values);
+      });
+    }
+    else if(dynamic_cast<ossia::oscquery_asio::oscquery_server_protocol_base*>(&protocol))
+    {
+      protocol.push_bundle(all);
+    }
+    else
+    {
+      // protocol_base::push_bundle would set the values again
+      for(auto& e : elements)
+        protocol.push(*e.parameter, e.values);
     }
   });
 }
