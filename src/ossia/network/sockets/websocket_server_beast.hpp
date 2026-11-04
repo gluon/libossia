@@ -89,6 +89,7 @@ public:
   ~websocket_server_beast() override;
 
   void listen(uint16_t port) override;
+  void listen(const std::string& address, uint16_t port) override;
   void run() override;
   void stop() override;
   void close(ws_connection_handle hdl) override;

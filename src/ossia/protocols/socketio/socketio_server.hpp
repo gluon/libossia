@@ -113,6 +113,8 @@ public:
   ~socketio_server() override;
 
   void listen(uint16_t port) override;
+  // On one address: as the interface, it throws
+  using websocket_server_interface::listen;
   void run() override;
   void stop() override;
   void close(ws_connection_handle hdl) override;

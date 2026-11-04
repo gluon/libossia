@@ -41,6 +41,10 @@ public:
   virtual ~websocket_server_interface();
 
   virtual void listen(uint16_t port) = 0;
+  //! On one address only, e.g. 127.0.0.1: the other interfaces of the machine
+  //! refuse the connections. A server that cannot throws, rather than listen
+  //! on every interface
+  virtual void listen(const std::string& address, uint16_t port);
   virtual void run() = 0;
   virtual void stop() = 0;
   virtual void close(ws_connection_handle hdl) = 0;

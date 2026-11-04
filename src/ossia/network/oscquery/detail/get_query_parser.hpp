@@ -174,6 +174,9 @@ public:
             {
               ossia::net::udp_server_configuration conf;
               conf.bind = "0.0.0.0";
+              if constexpr(requires { proto.get_bind(); })
+                if(!proto.bound_to_every_interface())
+                  conf.bind = proto.get_bind();
               conf.port = proto.get_osc_port();
               return {conf};
             }

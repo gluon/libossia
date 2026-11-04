@@ -375,6 +375,20 @@ void websocket_server_beast::listen(uint16_t port)
   do_accept();
 }
 
+void websocket_server_beast::listen(const std::string& address, uint16_t port)
+{
+  // That address only: no dual stack, the other interfaces refuse the
+  // connections. An address that does not parse or cannot be bound throws,
+  // rather than leave a server that listens nowhere.
+  const boost::asio::ip::tcp::endpoint endpoint{boost::asio::ip::make_address(address), port};
+  m_acceptor.open(endpoint.protocol());
+  m_acceptor.set_option(boost::asio::socket_base::reuse_address(true));
+  m_acceptor.bind(endpoint);
+  m_acceptor.listen(boost::asio::socket_base::max_listen_connections);
+
+  do_accept();
+}
+
 void websocket_server_beast::run()
 {
   m_context->context.run();
