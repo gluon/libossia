@@ -118,7 +118,6 @@ Every value a client sends to `/synth/gain` comes out of the left outlet of `oss
 | `@tags` | none | tags of the node |
 | `@invisible` | 0 | hides the node from remote clients |
 | `@recall_safe` | 0 | keeps the node's parameters out of preset recalls |
-| `@trim_address` | 1 | inherited from the ossia objects, not read by this object |
 
 The node attributes (`@priority` to `@recall_safe`) apply to the node of a named instance; an instance without a name has no node of its own and ignores them.
 
