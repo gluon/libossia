@@ -30,6 +30,10 @@
 #include <ossia/network/sockets/udp_socket.hpp>
 #include <ossia/network/sockets/websocket_server.hpp>
 #include <ossia/protocols/oscquery/oscquery_client_asio.hpp>
+
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 namespace ossia::oscquery_asio
 {
 
@@ -621,8 +625,129 @@ void oscquery_server_protocol_base::rename_node(
 void oscquery_server_protocol_base::process_raw_osc_data(
     const char* data, std::size_t sz, uintptr_t origin)
 {
+  if(origin)
+  {
+    lock_t lock(m_clientsMutex);
+    for(auto& client_p : m_clients)
+    {
+      if((uintptr_t)client_p->connection.lock().get() == origin)
+      {
+        client_p->packets++;
+        break;
+      }
+    }
+  }
   auto on_message = [this, origin](auto&& msg) { this->on_osc_message(msg, origin); };
   ossia::net::osc_packet_processor<decltype(on_message)>{on_message}(data, sz);
+}
+
+void oscquery_server_protocol_base::record_sender(const std::string& ip, uint16_t port)
+{
+  std::lock_guard lock{m_sendersMutex};
+  auto& st = m_senders[ip + ":" + std::to_string(port)];
+  st.ip = ip;
+  st.port = port;
+  st.packets++;
+  st.last = std::chrono::steady_clock::now();
+}
+
+bool oscquery_server_protocol_base::on_prism_name(
+    const connection_handler& hdl, const rapidjson::Document& doc)
+{
+  if(!doc.IsObject())
+    return false;
+  auto cmd = doc.FindMember("COMMAND");
+  if(cmd == doc.MemberEnd() || !cmd->value.IsString()
+     || std::string_view{cmd->value.GetString()} != "PRISM_NAME")
+    return false;
+  auto data = doc.FindMember("DATA");
+  if(data == doc.MemberEnd() || !data->value.IsString())
+    return true;
+  lock_t lock(m_clientsMutex);
+  for(auto& client_p : m_clients)
+  {
+    if(*client_p == hdl)
+    {
+      client_p->name = data->value.GetString();
+      break;
+    }
+  }
+  return true;
+}
+
+std::string oscquery_server_protocol_base::query_connections()
+{
+  rapidjson::StringBuffer buf;
+  rapidjson::Writer<rapidjson::StringBuffer> wr{buf};
+  wr.StartObject();
+  wr.Key("CLIENTS");
+  wr.StartArray();
+  {
+    lock_t lock(m_clientsMutex);
+    for(auto& client_p : m_clients)
+    {
+      auto& c = *client_p;
+      wr.StartObject();
+      wr.Key("IP");
+      wr.String(c.client_ip.c_str());
+      wr.Key("PORT");
+      wr.Int(c.client_port);
+      if(!c.name.empty())
+      {
+        wr.Key("NAME");
+        wr.String(c.name.c_str());
+      }
+      if(c.osc_port)
+      {
+        wr.Key("OSC_PORT");
+        wr.Int(c.osc_port);
+      }
+      if(c.remote_sender_port)
+      {
+        wr.Key("SENDER_PORT");
+        wr.Int(c.remote_sender_port);
+      }
+      wr.Key("LISTEN");
+      wr.StartArray();
+      {
+        std::lock_guard lck{c.listeningMutex};
+        std::vector<std::string> paths;
+        for(auto& [path, param] : c.listening)
+          paths.push_back(path);
+        std::sort(paths.begin(), paths.end());
+        for(auto& path : paths)
+          wr.String(path.c_str());
+      }
+      wr.EndArray();
+      wr.Key("PACKETS");
+      wr.Int64(c.packets.load());
+      wr.EndObject();
+    }
+  }
+  wr.EndArray();
+  wr.Key("SENDERS");
+  wr.StartArray();
+  {
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard lock{m_sendersMutex};
+    for(auto& [key, st] : m_senders)
+    {
+      wr.StartObject();
+      wr.Key("IP");
+      wr.String(st.ip.c_str());
+      wr.Key("PORT");
+      wr.Int(st.port);
+      wr.Key("PACKETS");
+      wr.Int64(st.packets);
+      wr.Key("LAST_MS");
+      wr.Int64(
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - st.last).count());
+      wr.EndObject();
+    }
+  }
+  wr.EndArray();
+  wr.EndObject();
+  return std::string(buf.GetString(), buf.GetSize());
 }
 
 void oscquery_server_protocol_base::record_sent(
@@ -731,6 +856,7 @@ try
 
     m_clients.emplace_back(std::make_unique<oscquery_client>(hdl));
     m_clients.back()->client_ip = std::move(ip);
+    m_clients.back()->client_port = sock.remote_endpoint().port();
     m_clientCount++;
   }
 
@@ -919,6 +1045,8 @@ ossia::net::server_reply oscquery_server_protocol_base::on_text_ws_message(
 
     if(!doc.HasParseError())
     {
+      if(on_prism_name(hdl, doc))
+        return {};
       auto s = ossia::oscquery::json_query_answerer{}(*this, hdl, doc);
       return std::string{};
     }
@@ -958,7 +1086,15 @@ void oscquery_server_protocol::set_device(ossia::net::device_base& dev)
   // ossia::oscquery::oscquery_server_protocol does
   m_oscServer->receive_from(
       [this](const char* data, std::size_t sz, const boost::asio::ip::udp::endpoint& from) {
-    process_raw_osc_data(data, sz, client_of_sender_port(from.port()));
+    const auto origin = client_of_sender_port(from.port());
+    if(!origin)
+    {
+      auto ip = from.address().to_string();
+      if(ip.substr(0, 7) == "::ffff:")
+        ip = ip.substr(7);
+      record_sender(ip, from.port());
+    }
+    process_raw_osc_data(data, sz, origin);
   });
 }
 

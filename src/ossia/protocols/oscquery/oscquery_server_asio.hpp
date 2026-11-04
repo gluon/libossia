@@ -120,6 +120,15 @@ public:
     return m_oscConf;
   }
 
+  //! The answer to ?PRISM_CONNECTIONS, a PRISM extension declared in the
+  //! EXTENSIONS of HOST_INFO: {"CLIENTS": [...], "SENDERS": [...]}. A client:
+  //! IP, PORT (TCP), NAME (given by the client, if any), OSC_PORT and
+  //! SENDER_PORT (its UDP ports, if it streams), LISTEN (the addresses it
+  //! asked for), PACKETS (the OSC packets it sent). A sender, a UDP source
+  //! that is none of the clients: IP, PORT, PACKETS, LAST_MS (since its last
+  //! packet).
+  std::string query_connections();
+
   Nano::Signal<void(const std::string&)> onClientConnected;
   Nano::Signal<void(const std::string&)> onClientDisconnected;
 
@@ -133,6 +142,11 @@ protected:
   // The client whose OSC sender has that UDP port (LOCAL_SENDER_PORT of its
   // START_OSC_STREAMING), 0 if none.
   uintptr_t client_of_sender_port(int port);
+  // A UDP packet of a source that is none of the clients
+  void record_sender(const std::string& ip, uint16_t port);
+  // PRISM_NAME, a text command a client sends on the WebSocket to give its
+  // name; true if the message was one
+  bool on_prism_name(const connection_handler& hdl, const rapidjson::Document& doc);
 
   // A value the server sent on its own (a local change, another client's
   // value it forwards), to every client but skipped
@@ -213,6 +227,17 @@ protected:
   std::mutex m_sentMutex;
   std::unordered_map<std::string, sent_value> m_sent;
   std::atomic<int64_t> m_crossingWindow{default_crossing_window.count()};
+
+  struct sender_stats
+  {
+    std::string ip;
+    uint16_t port{};
+    int64_t packets{};
+    std::chrono::steady_clock::time_point last;
+  };
+  // The UDP sources that are none of the clients, by "ip:port"
+  std::mutex m_sendersMutex;
+  std::unordered_map<std::string, sender_stats> m_senders;
 };
 
 class OSSIA_EXPORT oscquery_server_protocol : public oscquery_server_protocol_base

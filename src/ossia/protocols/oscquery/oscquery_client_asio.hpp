@@ -9,6 +9,8 @@
 #include <ossia/network/sockets/websocket_server.hpp>
 #include <ossia/protocols/oscquery/oscquery_server_asio.hpp>
 
+#include <atomic>
+
 namespace ossia::oscquery_asio
 {
 struct oscquery_client
@@ -18,8 +20,16 @@ struct oscquery_client
   string_map<ossia::net::parameter_base*> listening TS_GUARDED_BY(listeningMutex);
 
   std::string client_ip;
+  // Its TCP port: two clients of one machine differ by it
+  uint16_t client_port{};
+  // The name it gave with PRISM_NAME, empty without
+  std::string name;
   std::unique_ptr<ossia::net::udp_send_socket> osc_socket;
+  // The UDP port it receives the values on (START_OSC_STREAMING), 0 without
+  int osc_port{};
   int remote_sender_port{};
+  // The OSC packets it sent, datagrams or WebSocket frames
+  std::atomic<int64_t> packets{};
 
 public:
   oscquery_client() = delete;
@@ -60,6 +70,7 @@ public:
         ossia::net::outbound_socket_configuration{.host = client_ip, .port = port},
         proto.m_context->context);
     osc_socket->connect();
+    osc_port = port;
   }
 };
 

@@ -18,6 +18,7 @@
 #include <boost/asio/ip/udp.hpp>
 
 #include <oscpack/osc/OscReceivedElements.h>
+#include <rapidjson/document.h>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -186,6 +187,32 @@ void send_osc_float(const std::string& ip, uint16_t port, const std::string& add
   ::inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
   ::sendto(fd, m.data(), m.size(), 0, (sockaddr*)&addr, sizeof(addr));
   ::close(fd);
+}
+
+// The body of the reply to GET <resource> on 127.0.0.1:port, empty on failure
+std::string http_get(uint16_t port, const std::string& resource)
+{
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if(::connect(fd, (sockaddr*)&addr, sizeof(addr)) != 0)
+  {
+    ::close(fd);
+    return {};
+  }
+  timeval tv{2, 0};
+  ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  const std::string req = "GET " + resource + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+  ::send(fd, req.data(), req.size(), 0);
+  std::string reply;
+  char buf[4096];
+  for(ssize_t n; (n = ::recv(fd, buf, sizeof(buf), 0)) > 0;)
+    reply.append(buf, n);
+  ::close(fd);
+  auto body = reply.find("\r\n\r\n");
+  return body == std::string::npos ? std::string{} : reply.substr(body + 4);
 }
 
 // Whether a device of that name is announced over mDNS, browsing for ms
@@ -701,6 +728,98 @@ TEST_CASE("C API: a server on 127.0.0.1 only", "[network_c]")
 
   REQUIRE(announced("c_unbound_server", 2500));
   REQUIRE(!announced("c_bound_server", 2500));
+}
+
+// ?PRISM_CONNECTIONS, declared in the EXTENSIONS of HOST_INFO: the clients
+// of the server, with the name a libossia mirror gives it, the addresses each
+// one listens to and the packets it sent; and the UDP senders that are none
+// of its clients.
+TEST_CASE("C API: ?PRISM_CONNECTIONS lists the clients and the senders", "[network_c]")
+{
+  // On 127.0.0.1, not announced: no client of the machine that follows the
+  // devices announced comes in the list
+  server s{"c_conn_server", 0, "127.0.0.1"};
+  float_parameter(s.dev, "/level");
+  float_parameter(s.dev, "/other");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  const auto host_info = http_get(s.ws, "/?HOST_INFO");
+  INFO(host_info);
+  REQUIRE(host_info.find("\"PRISM_CONNECTIONS\":true") != std::string::npos);
+
+  mirror a{s.url(), "c_conn_a"};
+  auto pa = a.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  ossia_parameter_push_f(pa, 0.5f);
+
+  // A sender that is not a client, from a port of its own
+  int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+  sockaddr_in local{};
+  local.sin_family = AF_INET;
+  local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  REQUIRE(::bind(fd, (sockaddr*)&local, sizeof(local)) == 0);
+  socklen_t len = sizeof(local);
+  ::getsockname(fd, (sockaddr*)&local, &len);
+  const int sender_port = ntohs(local.sin_port);
+  {
+    std::string m = "/other";
+    m.append(4 - m.size() % 4, '\0');
+    m += ",f";
+    m.append(2, '\0');
+    float f = 0.25f;
+    uint32_t bits;
+    std::memcpy(&bits, &f, 4);
+    bits = htonl(bits);
+    m.append(reinterpret_cast<const char*>(&bits), 4);
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(s.osc);
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    for(int i = 0; i < 2; i++)
+      ::sendto(fd, m.data(), m.size(), 0, (sockaddr*)&to, sizeof(to));
+  }
+  ::close(fd);
+  REQUIRE(wait_for([&] { return value_of(find_parameter(s.dev, "/other")) == 0.25f; }, 2000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  const auto json = http_get(s.ws, "/?PRISM_CONNECTIONS");
+  INFO(json);
+  rapidjson::Document doc;
+  doc.Parse(json.c_str());
+  REQUIRE(!doc.HasParseError());
+  REQUIRE(doc.IsObject());
+  REQUIRE(doc.HasMember("CLIENTS"));
+  REQUIRE(doc.HasMember("SENDERS"));
+
+  // A missing member reads as "" or 0
+  auto str = [](const rapidjson::Value& v, const char* k) {
+    return v.HasMember(k) && v[k].IsString() ? std::string(v[k].GetString()) : std::string{};
+  };
+  auto num = [](const rapidjson::Value& v, const char* k) {
+    return v.HasMember(k) && v[k].IsInt64() ? v[k].GetInt64() : int64_t{0};
+  };
+  const auto& clients = doc["CLIENTS"];
+  REQUIRE(clients.IsArray());
+  REQUIRE(clients.Size() == 1);
+  const auto& c = clients[0];
+  CHECK(str(c, "IP") == "127.0.0.1");
+  CHECK(num(c, "PORT") > 0);
+  CHECK(str(c, "NAME") == "c_conn_a");
+  CHECK(num(c, "OSC_PORT") > 0);
+  CHECK(num(c, "SENDER_PORT") > 0);
+  REQUIRE(c.HasMember("LISTEN"));
+  REQUIRE(c["LISTEN"].IsArray());
+  REQUIRE(c["LISTEN"].Size() == 1);
+  CHECK(std::string(c["LISTEN"][0].GetString()) == "/level");
+  CHECK(num(c, "PACKETS") >= 1);
+
+  const auto& senders = doc["SENDERS"];
+  REQUIRE(senders.IsArray());
+  REQUIRE(senders.Size() == 1);
+  CHECK(str(senders[0], "IP") == "127.0.0.1");
+  CHECK(num(senders[0], "PORT") == sender_port);
+  CHECK(num(senders[0], "PACKETS") == 2);
+  CHECK(senders[0].HasMember("LAST_MS"));
 }
 
 // The server sets a value and a client writes another one to the same
