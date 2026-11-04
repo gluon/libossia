@@ -34,6 +34,16 @@ set(OSSIA_SOURCE_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}" CACHE INTERNAL "")
 set(OSSIA_3RDPARTY_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty" CACHE INTERNAL "")
 include(OssiaOptions)
 
+# No path of the build machine in the binaries: the __FILE__ of re2, abseil
+# and Servus, the names of the lambdas in boost::asio's signatures gave the
+# user's home folder to anyone who read the package. Before the dependencies,
+# which are built in-tree.
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-ffile-prefix-map=a=b" FILE_PREFIX_MAP_SUPPORTED)
+if(FILE_PREFIX_MAP_SUPPORTED AND NOT MSVC)
+  add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=" "-ffile-prefix-map=${CMAKE_BINARY_DIR}/=")
+endif()
+
 # Dependencies
 include(OssiaDeps)
 
