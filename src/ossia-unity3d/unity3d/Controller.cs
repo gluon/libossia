@@ -42,7 +42,7 @@ namespace Ossia
         Application.runInBackground = true;
       if (!set) {
         set = true;
-        live++;
+        Hold ();
 
         // Setup the log so that the errors in the C API are shown in the
         // Unity3D console.
@@ -162,11 +162,8 @@ namespace Ossia
     {
       Debug.Log ("OSSIA: Quitting");
       quitting = true;
+      leaving = true;
       Release ();
-      // Frees what remains in the library, devices made without a Controller
-      // included, once no Controller still holds its own
-      if (live == 0)
-        Network.ossia_device_reset_static ();
     }
 
     // Destroyed without leaving Play: the library keeps a device by its name
@@ -181,7 +178,6 @@ namespace Ossia
       if (!set)
         return;
       set = false;
-      live--;
       // No network event while the device goes away
       network_context.Stop ();
       Hash.Clear ();
@@ -197,6 +193,33 @@ namespace Ossia
       oscq_protocol = null;
       network_context = null;
       scene_node = null;
+      Let ();
+    }
+
+    // The devices of this package in the library: one per Controller until
+    // it is released, one per Client from Connect to Disconnect.
+    // ossia_device_reset_static deletes every device the library keeps,
+    // the mirror a Client frees in its OnDisable included, and leaving Play
+    // disables the objects after every OnApplicationQuit: the reset waits
+    // for the last of them to free its own.
+    internal static void Hold ()
+    {
+      live++;
+    }
+
+    internal static void Let ()
+    {
+      // Frees what remains in the library, devices made without a
+      // Controller included, once Play stops
+      if (--live == 0 && leaving)
+        Network.ossia_device_reset_static ();
+    }
+
+    // With the domain reload off, the statics stay from one Play to the next
+    [RuntimeInitializeOnLoadMethod (RuntimeInitializeLoadType.SubsystemRegistration)]
+    static void Entering ()
+    {
+      leaving = false;
     }
 
     public Ossia.Device GetDevice ()
@@ -248,8 +271,10 @@ namespace Ossia
 
 
     bool set = false;
-    // Controllers whose device is not freed yet
+    // Controllers and Clients whose device is not freed yet
     static int live = 0;
+    // Play stops: set by OnApplicationQuit
+    static bool leaving = false;
     volatile bool quitting = false;
     volatile string found_name = null;
     bool name_reported = false;
