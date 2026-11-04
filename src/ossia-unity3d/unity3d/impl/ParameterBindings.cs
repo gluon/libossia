@@ -98,6 +98,7 @@ namespace Ossia
         }
         // A value received does not leave again: SendUpdates sees no change
         previousValue = new_val;
+        parent.OnReceived (attribute, new_val);
       } catch (Exception e) {
         Debug.LogWarning (e.Message);
       }
@@ -167,6 +168,7 @@ namespace Ossia
             field.SetValue (parent.component, new_val, null);
           }
           previousValue = new_val;
+          parent.OnReceived (attribute, new_val);
         } catch (Exception e) {
           Debug.LogWarning (e.Message);
         }
@@ -195,14 +197,23 @@ namespace Ossia
   {
     public Component component;
     public Ossia.Node component_node;
+    // The object that exposes it, which raises Received
+    public ExposedObject owner;
 
     public List<OssiaEnabledField> fields = new List<OssiaEnabledField> ();
     public List<OssiaEnabledProperty> properties = new List<OssiaEnabledProperty> ();
 
-    public OssiaEnabledComponent (Component comp, Ossia.Node node)
+    public OssiaEnabledComponent (Component comp, Ossia.Node node, ExposedObject owner = null)
     {
       component = comp;
       component_node = node;
+      this.owner = owner;
+    }
+
+    internal void OnReceived (string name, object value)
+    {
+      if (owner != null)
+        owner.OnReceived (name, value);
     }
 
     //! Ossia -> C#

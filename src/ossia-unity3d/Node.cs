@@ -119,13 +119,8 @@ namespace Ossia {
         IntPtr p = Network.ossia_node_create_parameter (ossia_node, ossia_t);
         ossia_parameter = new Parameter (p);
 
-        if (t == typeof(UnityEngine.Vector2)) {
-          Network.ossia_parameter_set_unit (p, "position.cart2D");
-        } else if (t == typeof(UnityEngine.Vector3)) {
-          Network.ossia_parameter_set_unit (p, "position.cart3D");
-        } else if (t == typeof(UnityEngine.Vector4)) {
-          Network.ossia_parameter_set_unit (p, "position.cart4D");
-        } else if (t == typeof(UnityEngine.Quaternion)) {
+        // A vector is a size, a direction, a position: no unit of its own
+        if (t == typeof(UnityEngine.Quaternion)) {
           Network.ossia_parameter_set_unit (p, "orientation.quaternion");
         } else if (t == typeof(UnityEngine.Color)) {
           Network.ossia_parameter_set_unit (p, "color.rgba");

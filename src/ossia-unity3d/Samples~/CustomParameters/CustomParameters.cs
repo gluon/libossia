@@ -29,7 +29,13 @@ public class CustomParameters : MonoBehaviour
   [Ossia.Expose("size")]
   public Vector3 size = Vector3.one;
 
+  // Taking control: when a client writes the orientation of the shape
+  // (/Shape/transform/rotation), the spin pauses this long, so that the
+  // client's value is not turned away at the next frame. Not exposed.
+  public float holdAfterClient = 1f;
+
   Material material;
+  float pausedUntil;
 
   void Start()
   {
@@ -44,11 +50,17 @@ public class CustomParameters : MonoBehaviour
         r.sharedMaterial = new Material(lit);
     }
     material = r.material;
+
+    // Received: a value of a client applied, never what Unity publishes
+    GetComponent<Ossia.ExposeAttributes>().Received += (name, value) => {
+      if (name == "rotation")
+        pausedUntil = Time.time + holdAfterClient;
+    };
   }
 
   void Update()
   {
-    if (spin) {
+    if (spin && Time.time >= pausedUntil) {
       var a = axis == 0 ? Vector3.right : axis == 2 ? Vector3.forward : Vector3.up;
       transform.Rotate(a, speed * Time.deltaTime);
     }
