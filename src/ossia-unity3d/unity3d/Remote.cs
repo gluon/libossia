@@ -126,6 +126,10 @@ namespace Ossia
       published = null;
     }
 
+    //! A value of the device applied to the member, on the main thread; not
+    //! for what the member sends
+    public event Action<object> Received;
+
     //! The device -> the field
     internal void ReceiveUpdates ()
     {
@@ -144,6 +148,7 @@ namespace Ossia
           Write (new_val);
         // A value received is not sent back
         previousValue = new_val;
+        Received?.Invoke (new_val);
       } catch (Exception e) {
         Debug.LogWarning ("OSSIA remote " + address + ": " + e.Message);
       }
