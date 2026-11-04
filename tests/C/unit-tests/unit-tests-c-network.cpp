@@ -9,6 +9,8 @@
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 #include <ossia/network/sockets/websocket_client_beast.hpp>
 #include <ossia/protocols/oscquery/oscquery_mirror_asio.hpp>
+#include <ossia/protocols/oscquery/oscquery_server_asio.hpp>
+#include <ossia/network/base/node_functions.hpp>
 
 #include <ossia-c/ossia-c.h>
 
@@ -864,6 +866,67 @@ TEST_CASE("C API: crossed writes converge", "[network_c]")
   const double ms = std::chrono::duration<double, std::milli>(latest).count();
   WARN("crossed writes: " << divergences << " divergences in 20; the client's value reached the server "
        << ms << " ms after it sent its own, at most");
+  REQUIRE(divergences == 0);
+}
+
+// A server that does not answer crossings, as servers other than ours: the
+// client applied the server's value after it sent its own, the server
+// applied the client's last. The client reads the server's value again, a
+// moment after a value that crossed its own, and both end on it.
+TEST_CASE("C API: a mirror reads the value again after a crossing", "[network_c]")
+{
+  auto ctx = std::make_shared<ossia::net::network_context>();
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  auto proto = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, osc, ws);
+  proto->set_crossing_window(std::chrono::milliseconds{0});
+  ossia::net::generic_device dev{std::move(proto), "c_reread_server"};
+  auto& level = *ossia::net::create_node(dev.get_root_node(), "/level")
+                     .create_parameter(ossia::val_type::FLOAT);
+  struct poll_thread
+  {
+    ossia::net::network_context& ctx;
+    std::atomic_bool polling{true};
+    std::thread thread{[this] {
+      while(polling)
+      {
+        ctx.context.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    }};
+    ~poll_thread()
+    {
+      polling = false;
+      thread.join();
+    }
+  } poller{*ctx};
+
+  mirror m{"ws://127.0.0.1:" + std::to_string(ws), "c_reread_mirror"};
+  auto remote = m.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  int divergences = 0;
+  for(int i = 0; i < 20; i++)
+  {
+    std::atomic_bool go{false};
+    std::thread client([&] {
+      while(!go)
+      {
+      }
+      ossia_parameter_push_f(remote, 200.f + i);
+    });
+    go = true;
+    level.push_value(100.f + i);
+    client.join();
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    const float at_server = ossia::convert<float>(level.value()), at_client = value_of(remote);
+    if(at_server != at_client)
+    {
+      divergences++;
+      UNSCOPED_INFO("trial " << i << ": server " << at_server << ", client " << at_client);
+    }
+  }
+  WARN("crossed writes with a server that does not answer them: " << divergences
+       << " divergences in 20");
   REQUIRE(divergences == 0);
 }
 
