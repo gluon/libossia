@@ -488,6 +488,33 @@ TEST_CASE("C API: ossia_device_run_commands applies the nodes added later", "[ne
       2000));
 }
 
+// A parameter the server adds while a client follows it reaches the client
+// with its value, not 0: ossia.client showed 0 until the next change.
+TEST_CASE("C API: a parameter added later comes with its value", "[network_c]")
+{
+  server s{"c_added_value_server", 0, "127.0.0.1"};
+  float_parameter(s.dev, "/level");
+  mirror m{s.url(), "c_added_value_mirror"};
+
+  auto later = float_parameter(s.dev, "/later");
+  ossia_parameter_push_f(later, 0.7f);
+  ossia_parameter_t remote{};
+  REQUIRE(wait_for(
+      [&] {
+    ossia_device_run_commands(m.dev);
+    return (remote = find_parameter(m.dev, "/later")) != nullptr;
+      },
+      2000));
+  const bool got = wait_for(
+      [&] {
+    ossia_device_run_commands(m.dev);
+    return value_of(remote) == 0.7f;
+      },
+      2000);
+  INFO("value in the client: " << value_of(remote));
+  REQUIRE(got);
+}
+
 TEST_CASE("C API: ossia_device_push_bundle from a server", "[network_c]")
 {
   const int n = 40;
