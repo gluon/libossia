@@ -6,9 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Unity: `Ossia.Controller.Hold()` and `Ossia.Controller.Let(bool playStops = false)` are public: a script that builds its own device, as `CustomDevice.cs` does, counts it with the Controllers and the Clients, so that the reset of the library, when Play stops, waits for all of them.
+
 ### Fixed
 
 - Unity: leaving Play in the editor with an `Ossia.Client` connected no longer crashes Unity. In `2.1.0+prism.9`, the `OnApplicationQuit` of the Controller reset the library (`ossia_device_reset_static`), which deleted the Client's mirror with the Controller's device; the Client, disabled afterwards, freed that mirror again in `OnDisable`: a SIGSEGV, a bus error or an abort in `ossia_device_free`, at the first Stop or later. The Controllers and the Clients now count the devices they hold, and the library is reset once the last of them has freed its own. Edit Mode test `PlayCycleTests.StopWithAClientConnected`: a Controller, a Client that follows it and a Remote, Play then Stop twice. A player quits in the same order: not measured.
+- Unity: the example `CustomDevice.cs` no longer resets the library unconditionally in its `OnApplicationQuit`, which crashed Unity the same way when a Client was in the scene. It holds its device through the shared count (`Controller.Hold()` once `newDevice` is made, `Controller.Let(true)` in `OnApplicationQuit`), and the reset that frees `newDevice` and its ports waits for the Clients and the Controllers. Edit Mode test `PlayCycleTests.StopWithCustomDeviceAndAClient`: `CustomDevice` and a Client that follows it, with a Remote, Play then Stop twice, the ports free after each Stop.
 
 ## [2.1.0+prism.9] - 2026-11-03
 

@@ -196,19 +196,25 @@ namespace Ossia
       Let ();
     }
 
-    // The devices of this package in the library: one per Controller until
-    // it is released, one per Client from Connect to Disconnect.
-    // ossia_device_reset_static deletes every device the library keeps,
-    // the mirror a Client frees in its OnDisable included, and leaving Play
-    // disables the objects after every OnApplicationQuit: the reset waits
-    // for the last of them to free its own.
-    internal static void Hold ()
+    //! The devices in the library: one per Controller until it is
+    //! released, one per Client from Connect to Disconnect, one per script
+    //! that builds its own (CustomDevice). ossia_device_reset_static deletes
+    //! every device the library keeps, the mirror a Client frees in its
+    //! OnDisable included, and leaving Play disables the objects after every
+    //! OnApplicationQuit: the reset waits for the last of them to let its
+    //! device go. A script that holds a device calls Hold once it has it,
+    //! and Let once it no longer uses it.
+    public static void Hold ()
     {
       live++;
     }
 
-    internal static void Let ()
+    //! playStops: called from OnApplicationQuit, by a script that leaves
+    //! its device to the reset
+    public static void Let (bool playStops = false)
     {
+      if (playStops)
+        leaving = true;
       // Frees what remains in the library, devices made without a
       // Controller included, once Play stops
       if (--live == 0 && leaving)

@@ -76,6 +76,37 @@ namespace Ossia.Tests
       Assert.IsTrue(PortsFree(), "after the second Stop: ports 1234 and 5678 are free");
     }
 
+    // The example CustomDevice, a device of its own on 1234 and 5678 with no
+    // Controller, and a Client that follows it: when Play stops, the library
+    // is reset once the Client has freed its mirror, which frees the ports.
+    [UnityTest]
+    public IEnumerator StopWithCustomDeviceAndAClient()
+    {
+      Assert.IsTrue(PortsFree(), "ports 1234 and 5678 must be free before the test");
+      new GameObject("CustomDevice").AddComponent<CustomDevice>();
+      var client = new GameObject("OssiaClient").AddComponent<Client>();
+      client.server = "ws://127.0.0.1:" + WsPort;
+      var remote = new GameObject("OssiaRemote").AddComponent<Remote>();
+      remote.client = client;
+      remote.address = "/foo/blu";
+      remote.target = remote.transform;
+      remote.member = "position";
+
+      yield return new EnterPlayMode();
+      yield return WaitBound();
+      Assert.IsTrue(FindRemote().Bound, "first Play: the Client follows newDevice and the Remote is bound");
+
+      yield return new ExitPlayMode();
+      Assert.IsTrue(PortsFree(), "after Stop: newDevice is reset, ports 1234 and 5678 are free");
+
+      yield return new EnterPlayMode();
+      yield return WaitBound();
+      Assert.IsTrue(FindRemote().Bound, "second Play: the Client follows newDevice and the Remote is bound");
+
+      yield return new ExitPlayMode();
+      Assert.IsTrue(PortsFree(), "after the second Stop: ports 1234 and 5678 are free");
+    }
+
     static Remote FindRemote()
     {
       return UnityEngine.Object.FindAnyObjectByType<Remote>();
@@ -91,7 +122,7 @@ namespace Ossia.Tests
     [TearDown]
     public void RemoveController()
     {
-      foreach (var name in new[] { "OssiaController", "Cube", "OssiaClient", "OssiaRemote" }) {
+      foreach (var name in new[] { "OssiaController", "Cube", "CustomDevice", "OssiaClient", "OssiaRemote" }) {
         var go = GameObject.Find(name);
         if (go != null)
           UnityEngine.Object.DestroyImmediate(go);
