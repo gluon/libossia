@@ -129,6 +129,61 @@ namespace Ossia.Tests
       Assert.AreEqual(0f, Quaternion.Angle(Quaternion.Euler(20, turning.angle, 0), turning.transform.localRotation), 1e-2f, "rotation of the object");
     }
 
+    // A client writes back, alone, a value of the transform as it read it a
+    // few frames before: when it turns the object, the object takes back the
+    // orientation that was read. A parameter that holds only a part of the
+    // orientation (up, right) turns it to another one.
+    [UnityTest]
+    public IEnumerator TransformValueWrittenBackGivesTheOrientationRead()
+    {
+      yield return Setup();
+      yield return ClientSetsSpeed(45);
+
+      var t = turning.transform;
+      var names = typeof(Transform).GetProperties()
+        .Where(p => p.CanWrite && Node.FindNode(expose.child_node, "transform/" + p.Name) != null)
+        .Select(p => p.Name).ToList();
+      Assert.Contains("rotation", names);
+
+      var turned = new List<string>();
+      var wrong = new List<string>();
+      foreach (var name in names) {
+        for (int i = 0; i < 30; i++) {
+          Frame();
+          yield return null;
+        }
+        var read = t.localRotation;
+        var value = typeof(Transform).GetProperty(name).GetValue(t, null);
+        for (int i = 0; i < 30; i++) {
+          Frame();
+          yield return null;
+        }
+        // What the object published in the last frame: the client's value
+        // comes after, in a frame of its own
+        Call("Update");
+        var before = t.localRotation;
+        Assert.Greater(Quaternion.Angle(read, before), 5f, "the object turned since " + name + " was read");
+
+        if (value is Vector3 v3)
+          Send("transform/" + name, v3.x, v3.y, v3.z);
+        else if (value is Quaternion q)
+          Send("transform/" + name, q.x, q.y, q.z, q.w);
+        var parameter = Node.FindNode(expose.child_node, "transform/" + name).GetParameter();
+        float end = Time.realtimeSinceStartup + 2;
+        while (!parameter.GetValue().Get(value.GetType()).Equals(value) && Time.realtimeSinceStartup < end)
+          yield return null;
+        Call("Update");
+
+        if (Quaternion.Angle(before, t.localRotation) > 1e-2f) {
+          turned.Add(name);
+          if (Quaternion.Angle(read, t.localRotation) > 1e-2f)
+            wrong.Add(name + " " + t.localRotation.eulerAngles + " for " + read.eulerAngles);
+        }
+      }
+      Assert.Contains("rotation", turned);
+      Assert.IsEmpty(wrong, "orientation after a value written back");
+    }
+
     void Send(string path, params float[] values)
     {
       var b = new List<byte>();
