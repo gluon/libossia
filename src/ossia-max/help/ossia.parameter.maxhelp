@@ -3496,6 +3496,442 @@
 				}
 
 			}
+,
+{
+	"box": {
+		"id": "obj-prism",
+		"maxclass": "newobj",
+		"numinlets": 0,
+		"numoutlets": 0,
+		"patcher": {
+			"fileversion": 1,
+			"appversion": {
+				"major": 9,
+				"minor": 2,
+				"revision": 0,
+				"architecture": "x64",
+				"modernui": 1
+			},
+			"classnamespace": "box",
+			"rect": [
+				0.0,
+				26.0,
+				1015.0,
+				757.0
+			],
+			"showontab": 1,
+			"boxes": [
+				{
+					"box": {
+						"id": "obj-1",
+						"maxclass": "jsui",
+						"numinlets": 1,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"patching_rect": [
+							8.0,
+							7.0,
+							674.0,
+							142.0
+						],
+						"border": 0,
+						"filename": "helpdetails.js",
+						"ignoreclick": 1,
+						"jsarguments": [
+							"ossia.parameter"
+						],
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-2",
+						"maxclass": "comment",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"patching_rect": [
+							30,
+							165,
+							700,
+							21
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"text": "What ossia-prism adds to ossia.parameter. ossia-prism, PRISM (CNRS), https://www.prism.cnrs.fr",
+						"fontface": 1
+					}
+				},
+				{
+					"box": {
+						"id": "obj-3",
+						"maxclass": "comment",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"patching_rect": [
+							30,
+							200,
+							540,
+							64
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"text": "@hold <ms>: taking control. After a value comes in by the inlet (a control the user moves), the values of the network are held for that long, then the last one held comes out. 0, the default: never held. The example ossia.panel (Extras > ossia-prism examples) shows it with a slider and a web page.",
+						"linecount": 4
+					}
+				},
+				{
+					"box": {
+						"id": "obj-4",
+						"maxclass": "flonum",
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							"bang"
+						],
+						"patching_rect": [
+							600.0,
+							205.0,
+							60.0,
+							22.0
+						],
+						"format": 6,
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-5",
+						"maxclass": "newobj",
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							""
+						],
+						"patching_rect": [
+							600.0,
+							240.0,
+							330.0,
+							22.0
+						],
+						"text": "ossia.parameter prism_help/level @type float @hold 500"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-6",
+						"maxclass": "flonum",
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							"bang"
+						],
+						"patching_rect": [
+							600.0,
+							275.0,
+							60.0,
+							22.0
+						],
+						"format": 6,
+						"parameter_enable": 0
+					}
+				},
+				{
+					"box": {
+						"id": "obj-7",
+						"maxclass": "comment",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"patching_rect": [
+							30,
+							300,
+							540,
+							35
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"text": "dump: every attribute leaves by the right outlet, as its name and its value (see the Max console). It is no longer taken for a value.",
+						"linecount": 2
+					}
+				},
+				{
+					"box": {
+						"id": "obj-8",
+						"maxclass": "message",
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"patching_rect": [
+							600.0,
+							320.0,
+							40.0,
+							22.0
+						],
+						"text": "dump"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-9",
+						"maxclass": "newobj",
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							""
+						],
+						"patching_rect": [
+							600.0,
+							355.0,
+							330.0,
+							22.0
+						],
+						"text": "ossia.parameter prism_help/dumped @type float @range 0 1"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-10",
+						"maxclass": "newobj",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"patching_rect": [
+							780.0,
+							390.0,
+							150.0,
+							22.0
+						],
+						"text": "print prism_help_dump"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-11",
+						"maxclass": "comment",
+						"numinlets": 1,
+						"numoutlets": 0,
+						"patching_rect": [
+							30,
+							440,
+							540,
+							92
+						],
+						"fontname": "Lato Regular",
+						"fontsize": 12.0,
+						"text": "pattr: [pattr @bindto] cannot bind to an ossia.parameter, which has no getvalueof and setvalueof: what the pattr recalls or receives is lost. Connect the outlet of a [pattr] to the inlet of the ossia.parameter instead: a recall of a pattrstorage then passes through the inlet and leaves on the network, as a message, a number box or a live.dial does (measured with a WebSocket client: one value for each).",
+						"linecount": 6
+					}
+				},
+				{
+					"box": {
+						"id": "obj-12",
+						"maxclass": "message",
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"patching_rect": [
+							600.0,
+							445.0,
+							40.0,
+							22.0
+						],
+						"text": "0.25"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-13",
+						"maxclass": "message",
+						"numinlets": 2,
+						"numoutlets": 1,
+						"outlettype": [
+							""
+						],
+						"patching_rect": [
+							650.0,
+							445.0,
+							40.0,
+							22.0
+						],
+						"text": "0.75"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-14",
+						"maxclass": "newobj",
+						"numinlets": 1,
+						"numoutlets": 3,
+						"outlettype": [
+							"",
+							"",
+							"bang"
+						],
+						"patching_rect": [
+							600.0,
+							480.0,
+							130.0,
+							22.0
+						],
+						"text": "pattr prism_help_p"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-15",
+						"maxclass": "newobj",
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							""
+						],
+						"patching_rect": [
+							600.0,
+							515.0,
+							330.0,
+							22.0
+						],
+						"text": "ossia.parameter prism_help/stored @type float"
+					}
+				},
+				{
+					"box": {
+						"id": "obj-16",
+						"maxclass": "flonum",
+						"numinlets": 1,
+						"numoutlets": 2,
+						"outlettype": [
+							"",
+							"bang"
+						],
+						"patching_rect": [
+							600.0,
+							550.0,
+							60.0,
+							22.0
+						],
+						"format": 6,
+						"parameter_enable": 0
+					}
+				}
+			],
+			"lines": [
+				{
+					"patchline": {
+						"source": [
+							"obj-4",
+							0
+						],
+						"destination": [
+							"obj-5",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-5",
+							0
+						],
+						"destination": [
+							"obj-6",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-8",
+							0
+						],
+						"destination": [
+							"obj-9",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-9",
+							1
+						],
+						"destination": [
+							"obj-10",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-12",
+							0
+						],
+						"destination": [
+							"obj-14",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-13",
+							0
+						],
+						"destination": [
+							"obj-14",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-14",
+							0
+						],
+						"destination": [
+							"obj-15",
+							0
+						]
+					}
+				},
+				{
+					"patchline": {
+						"source": [
+							"obj-15",
+							0
+						],
+						"destination": [
+							"obj-16",
+							0
+						]
+					}
+				}
+			]
+		},
+		"patching_rect": [
+			400.0,
+			520.0,
+			58.0,
+			22.0
+		],
+		"text": "p PRISM"
+	}
+}
  ],
 		"lines" : [  ],
 		"originid" : "pat-217",
