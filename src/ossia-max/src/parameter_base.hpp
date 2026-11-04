@@ -109,6 +109,8 @@ public:
   {
     return m_hold > 0 && now - m_last_input < std::chrono::milliseconds(m_hold);
   }
+  // The clock that releases the values held, set for the time left
+  void arm_hold(std::chrono::steady_clock::time_point now);
   static void release_hold(parameter_base* x);
 
   static void set(parameter_base* x, t_symbol* s, int argc, t_atom* argv);

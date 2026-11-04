@@ -184,11 +184,7 @@ void matcher::output_value(ossia::value v)
     if(pbase->holding(now) && !pbase->m_inputting && !owner->m_local_mute)
     {
       m_held = std::move(v);
-      if(!pbase->m_hold_clock)
-        pbase->m_hold_clock = clock_new(pbase, (method)parameter_base::release_hold);
-      const auto left = std::chrono::duration<double, std::milli>(
-          pbase->m_last_input + std::chrono::milliseconds(pbase->m_hold) - now);
-      clock_fdelay(pbase->m_hold_clock, left.count());
+      pbase->arm_hold(now);
       return;
     }
   }

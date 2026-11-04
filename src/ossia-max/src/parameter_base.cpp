@@ -1118,11 +1118,26 @@ void parameter_base::in_symbol(parameter_base* x, t_symbol* f)
   parameter_base::push(x, nullptr, 1, &a);
 }
 
+void parameter_base::arm_hold(std::chrono::steady_clock::time_point now)
+{
+  if(!m_hold_clock)
+    m_hold_clock = clock_new(this, (method)parameter_base::release_hold);
+  const auto left = std::chrono::duration<double, std::milli>(
+      m_last_input + std::chrono::milliseconds(m_hold) - now);
+  clock_fdelay(m_hold_clock, std::max(left.count(), 1.));
+}
+
 void parameter_base::release_hold(parameter_base* x)
 {
-  // Held again by a later input: its own clock comes later
-  if(x->holding(std::chrono::steady_clock::now()))
+  // Held again by a later input, or the clock came early: a Max clock
+  // counts from the logical time of the tick that set it, a little behind
+  // the time the hold started from
+  const auto now = std::chrono::steady_clock::now();
+  if(x->holding(now))
+  {
+    x->arm_hold(now);
     return;
+  }
   for(auto* m : x->m_node_selection)
   {
     if(m->m_held && !m->is_zombie())
