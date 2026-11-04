@@ -85,6 +85,17 @@ public:
       }
       else
       {
+        // A PRISM extension, on any path as HOST_INFO
+        if constexpr(requires { proto.query_connections(); })
+        {
+          if(parameters.find("PRISM_CONNECTIONS") != parameters.end())
+          {
+            ossia::net::server_reply r{proto.query_connections()};
+            r.type = ossia::net::server_reply::data_type::json;
+            return r;
+          }
+        }
+
         auto host_it = parameters.find("HOST_INFO");
         if(host_it == parameters.end())
         {
@@ -188,7 +199,8 @@ public:
 
           return oscquery::json_writer::query_host_info(
               proto.get_device().get_name(), transports(), local_client_ip,
-              proto.get_ws_port(), proto.get_device().has_echo());
+              proto.get_ws_port(), requires { proto.query_connections(); },
+              proto.get_device().has_echo());
         }
       }
       return {};

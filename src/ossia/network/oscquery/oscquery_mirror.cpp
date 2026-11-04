@@ -913,6 +913,19 @@ bool oscquery_mirror_protocol::on_WSMessage(
             if(!m_host_info.osc_port)
               m_host_info.osc_port = std::stoi(m_queryPort);
           }
+          // Its name, to a server that lists its clients
+          if(m_host_info.extensions["PRISM_CONNECTIONS"] && m_device)
+          {
+            rapidjson::StringBuffer buf;
+            rapidjson::Writer<rapidjson::StringBuffer> wr{buf};
+            wr.StartObject();
+            wr.Key("COMMAND");
+            wr.String("PRISM_NAME");
+            wr.Key("DATA");
+            wr.String(m_device->get_name().c_str());
+            wr.EndObject();
+            ws_send_message(std::string(buf.GetString(), buf.GetSize()));
+          }
           if(m_host_info.osc_transport == host_info::UDP)
           {
             m_oscSender = std::make_unique<osc::sender<oscquery::osc_outbound_visitor>>(
