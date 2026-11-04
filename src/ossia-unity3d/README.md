@@ -105,7 +105,7 @@ The `Start` method only matters for a cube made by the sample's scene file; a cu
 
 ### What a client sees
 
-Play, then `curl -s http://localhost:5678/Shape/CustomParameters` (output of the sample, unchanged):
+Play, then `curl -s http://localhost:5678/Shape/CustomParameters` (output of the sample with `2.1.0+prism.9`; since `2.1.0+prism.10`, `spin` reads `"VALUE":true` and `size` has `"EXTENDED_TYPE":"vecf"`, see the table):
 
 ```
 {"FULL_PATH":"/Shape/CustomParameters","CONTENTS":{"speed":{"FULL_PATH":"/Shape/CustomParameters/speed","TYPE":"f","VALUE":45.0,"ACCESS":3,"CLIPMODE":"none"},"axis":{"FULL_PATH":"/Shape/CustomParameters/axis","TYPE":"i","VALUE":1,"ACCESS":3,"CLIPMODE":"none"},"spin":{"FULL_PATH":"/Shape/CustomParameters/spin","TYPE":"T","VALUE":null,"ACCESS":3,"CLIPMODE":"none"},"color":{"FULL_PATH":"/Shape/CustomParameters/color","TYPE":"ffff","VALUE":[1.0,0.5,0.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["color.rgb.r","color.rgb.g","color.rgb.b","color.rgb.a"]},"size":{"FULL_PATH":"/Shape/CustomParameters/size","TYPE":"fff","VALUE":[1.0,1.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["position.cartesian.x","position.cartesian.y","position.cartesian.z"]}}}
@@ -117,11 +117,11 @@ Pipe it into `python3 -m json.tool` to read it indented. In short:
 |---|---|---|---|
 | `/Shape/CustomParameters/speed` | `f` | `45.0` | |
 | `/Shape/CustomParameters/axis` | `i` | `1` | |
-| `/Shape/CustomParameters/spin` | `T` | `null` (see [Limits](#limits)) | |
+| `/Shape/CustomParameters/spin` | `T` | `true` (`null` up to `2.1.0+prism.9`) | |
 | `/Shape/CustomParameters/color` | `ffff` | `[1.0, 0.5, 0.0, 1.0]` | `color.rgb.r` ... `color.rgb.a` |
-| `/Shape/CustomParameters/size` | `fff` | `[1.0, 1.0, 1.0]` | `position.cartesian.x` ... `z` |
+| `/Shape/CustomParameters/size` | `fff` | `[1.0, 1.0, 1.0]` | `vecf` (`position.cartesian.x` ... `z` up to `2.1.0+prism.9`: a `Vector3` is no longer taken for a position) |
 
-`ACCESS` is 3 (read and write) for every parameter, `CLIPMODE` is `none`, and there is no `RANGE`. One value: `curl -s "http://localhost:5678/Shape/CustomParameters/speed?VALUE"` returns `{"VALUE":45.0}`.
+`ACCESS` is 3 (read and write) for every parameter, `CLIPMODE` is `none`, and there is no `RANGE`: the script gives none (see below for `Min`, `Max`, `Unit` and `Access`). One value: `curl -s "http://localhost:5678/Shape/CustomParameters/speed?VALUE"` returns `{"VALUE":45.0}`.
 
 ### Values in both directions
 
@@ -154,16 +154,14 @@ What `[Ossia.Expose]` accepts, with what a client sees (measured):
 
 A field of another type (`long`, `Texture2D`, an enum, a class) is skipped without a message: it does not appear in the tree.
 
-What is read: the public fields declared in the script's own class, and its public properties (inherited ones included). A property needs a `get` to be published and a `set` to receive values. Not read: private fields, and public fields declared in a parent class.
+What is read: the public fields declared in the script's own class, and its public properties (inherited ones included). A property needs a `get` to be published and a `set` to receive values. Not read: private fields. Public fields declared in a parent class are read since `2.1.0+prism.10`.
 
 ### Limits
 
 - The server cannot tell a write that crossed its value from a write the client made right after receiving it: a client that writes less than 100 ms after a change in Unity gets its own value back, once, unchanged. Writes further apart get nothing.
-- `[Ossia.Expose]` takes a name and nothing else: no bounds (`RANGE`), no unit of your choice, no access mode, no clip mode, no description. Every parameter is read-write, unbounded, with the unit its type gives it (table above). Clamp the received values in your script, as the sample does for `axis`. `ossia.parameter` in Max offers all of these; `[Ossia.Expose]` does not, in this version.
-- The name is required: `[Ossia.Expose]` without one creates a parameter with an empty name, at `/<GameObject>/<class>/`, that a client can hardly address.
+- `[Ossia.Expose]` takes a name, `Min`, `Max`, `Unit` and `Access` (`2.1.0+prism.10`), for instance `[Ossia.Expose ("speed", Min = 0, Max = 360, Unit = "angle.degree", Access = ossia_access_mode.GET)]`; without a name, the parameter takes the name of the field or property. No clip mode and no description: the bounds are published in `RANGE` and not enforced, so clamp the received values in your script, as the sample does for `axis`. A vector has the same bounds on each component.
 - The node of a script is its full class name: a class `Params` in the namespace `MyGame` gives `/<GameObject>/MyGame.Params/...`.
 - The GameObject's name is read once, when the scene starts: renaming it in Play does not move its parameters.
-- `bool` parameters read `"VALUE":null` over HTTP (`curl`, the tree at connection), while their OSC and WebSocket values are right.
 
 ### ExposeComponents
 
@@ -174,7 +172,7 @@ curl -s "http://localhost:5678/Lamp/Light/intensity?VALUE"
 {"VALUE":1.0}
 ```
 
-The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`, `/Lamp/Light/spotAngle`, `/Lamp/Light/enabled` and some forty other properties of `Light`. An OSC message `/Lamp/Light/intensity 3.5` sets the light's intensity to 3.5. The node of a component is its class name without namespace (`Light`), under Node Name (default `Object`). Its fields: `NodeName` (`Object`), `components` (empty), `sendUpdates` (on). It writes one `Prop: <name> => <type>` line in the console for each property it reads.
+The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`, `/Lamp/Light/spotAngle`, `/Lamp/Light/enabled` and some forty other properties of `Light`. An OSC message `/Lamp/Light/intensity 3.5` sets the light's intensity to 3.5. The node of a component is its class name without namespace (`Light`), under Node Name (default `Object`). Its fields: `NodeName` (`Object`), `components` (empty), `sendUpdates` (on).
 
 ### Low-level API: CustomDevice.cs
 
@@ -272,6 +270,7 @@ On the GameObject named `OssiaController`.
 | `deviceName` | `unity` | Name of the device, under which it is announced over mDNS (`_oscjson._tcp`) |
 | `oscPort` | `1234` | UDP port on which the device receives OSC |
 | `wsPort` | `5678` | TCP port of the OSCQuery server: HTTP (the tree) and WebSocket |
+| `listenAddress` | empty | The address both ports listen on: `127.0.0.1` for the clients of this machine only, the address of one interface for that network only; empty, every interface. On one address the device is not announced over mDNS: clients connect with `ws://<address>:<wsPort>` |
 | `runInBackground` | on | Keeps the scene following the values received when Unity loses focus (see [Troubleshooting](#troubleshooting)) |
 | `resolveAnnouncedName` | on | Reads the name the device is announced under over mDNS (see [mDNS](#mdns)) |
 | `bundles` | on | Sends what changes during a frame at its end, in OSC bundles; off, each value at once in its own message |
@@ -305,18 +304,20 @@ Connects in `OnEnable`, disconnects in `OnDisable`; `Connect()` and `Disconnect(
 | `member` | empty | The name of its public field or property |
 | `sendUpdates` | on | Sends the changes of the field to the device; off, the field only follows it |
 | `Bound` (property) | | True once the address was found on the device |
+| `Received` (event) | | Raised on the main thread with each value received from the device, after the field is set |
 
 ### Ossia.ExposeAttributes
 
 | Field | Default | Role |
 |---|---|---|
 | `sendUpdates` | on | Pushes to the clients, each frame, the fields and transform values changed in Unity, whatever changed them; never a value received from a client. A scene keeps the value it saved |
+| `Received` (event) | | Raised on the main thread with the name and the value of each parameter a client sets, after the field is set: a script can hold its own changes for a while, as the sample "Custom parameters" pauses its spin while a client sets the rotation |
 
 Publishes the transform (`position`, `rotation`, `localScale`) and the fields and properties marked `[Ossia.Expose]` of every component of its GameObject. The other properties of the transform (`localPosition`, `eulerAngles`, `localEulerAngles`, `localRotation`, `right`, `up`, `forward`, `lossyScale`) say again what these three say, and are not published: set back, they disagreed with them, `up` or `right` holding a part of the orientation only. Measured, an object a script turns at `Quaternion.Euler(20, angle, 0)`: `right` written back as read gave it `(0, 202.5, 0)` for `(20, 202.5, 0)` (`Tests/Runtime/TurningObjectTests.cs`).
 
 ### Ossia.Expose
 
-`[Ossia.Expose("<name>")]` on a public field or property: the name of the parameter under the script's node. See [Accepted types](#accepted-types) and [Limits](#limits).
+`[Ossia.Expose("<name>")]` on a public field or property: the name of the parameter under the script's node; without a name, the name of the field or property. Its options: `Min` and `Max` (published in `RANGE`, the same for each component of a vector, not enforced), `Unit` (an ossia unit, `angle.degree`, `gain.db`, `position.cart3D`; by default the unit the type gives) and `Access` (`ossia_access_mode.GET`, `SET` or `BI`, the default). See [Accepted types](#accepted-types) and [Limits](#limits).
 
 ### Ossia.ExposeComponents
 
