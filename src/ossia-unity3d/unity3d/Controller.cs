@@ -19,6 +19,10 @@ namespace Ossia
     public int oscPort = 1234;
     [Tooltip ("TCP port of the OSCQuery server: HTTP and WebSocket")]
     public int wsPort = 5678;
+    [Tooltip ("The address both ports listen on: 127.0.0.1 for the clients of this machine only, "
+            + "the address of one interface for that network only; empty, every interface. "
+            + "On one address the device is not announced over mDNS: clients connect with ws://<address>:<wsPort>.")]
+    public string listenAddress = "";
     [Tooltip ("Keep the player loop running when the application loses focus. "
             + "Off, Update stops and the values received are no longer applied until the window is focused again.")]
     public bool runInBackground = true;
@@ -63,13 +67,17 @@ namespace Ossia
         // The server of ossia-max, which sends bundles, on a network
         // context that a thread of its own runs
         network_context = new Ossia.NetworkContext ();
-        oscq_protocol = new Ossia.OSCQuery (network_context, oscPort, wsPort);
+        oscq_protocol = string.IsNullOrEmpty (listenAddress)
+          ? new Ossia.OSCQuery (network_context, oscPort, wsPort)
+          : new Ossia.OSCQuery (network_context, oscPort, wsPort, listenAddress);
         local_protocol.ExposeTo (oscq_protocol);
         local_device.SetEcho (forwardToClients);
         network_context.Start ();
 
-        // Once the server runs: its creation fails when a port is taken
-        if (resolveAnnouncedName && oscq_protocol.ossia_protocol != IntPtr.Zero)
+        // Once the server runs: its creation fails when a port is taken. On
+        // one address, it is not announced.
+        bool announced = string.IsNullOrEmpty (listenAddress) || listenAddress == "0.0.0.0";
+        if (resolveAnnouncedName && announced && oscq_protocol.ossia_protocol != IntPtr.Zero)
           LookUpAnnouncedName ();
       }
     }
