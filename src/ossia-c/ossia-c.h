@@ -1900,6 +1900,27 @@ OSSIA_EXPORT
 ossia_protocol_t ossia_protocol_oscquery_server_asio_create(
     ossia_network_context_t ctx, int osc_port, int ws_port);
 
+/**
+ * @brief The OSCQuery server of ossia_protocol_oscquery_server_asio_create,
+ * on one address of the machine only.
+ * @param ctx the network context that runs it
+ * @param osc_port UDP port on which it receives OSC
+ * @param ws_port TCP port of its HTTP and WebSocket server
+ * @param bind the address its two ports listen on: "127.0.0.1" for the
+ * clients of the machine only, the address of one of its interfaces for the
+ * clients of that network only; "0.0.0.0" or an empty string, every
+ * interface, as ossia_protocol_oscquery_server_asio_create
+ *
+ * A server on another address than every interface is not announced over
+ * mDNS: a client connects to it by its address, ws://<bind>:<ws_port>.
+ *
+ * @see ossia::oscquery_asio::oscquery_server_protocol
+ * @note Multithread guarantees: MT-safe
+ */
+OSSIA_EXPORT
+ossia_protocol_t ossia_protocol_oscquery_server_asio_create_bound(
+    ossia_network_context_t ctx, int osc_port, int ws_port, const char* bind);
+
 /** @}*/
 
 #if defined(__cplusplus)

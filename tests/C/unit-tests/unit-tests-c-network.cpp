@@ -20,13 +20,19 @@
 #include <oscpack/osc/OscReceivedElements.h>
 
 #include <arpa/inet.h>
+#include <fcntl.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <cerrno>
 #include <chrono>
 #include <functional>
 #include <mutex>
@@ -111,6 +117,92 @@ ossia_parameter_t find_parameter(ossia_device_t dev, const char* path)
   return node ? ossia_node_get_parameter(node) : nullptr;
 }
 
+// An IPv4 address of this machine on another interface than the loopback,
+// empty if it has none
+std::string other_ipv4()
+{
+  std::string found;
+  ifaddrs* addrs{};
+  if(::getifaddrs(&addrs) != 0)
+    return found;
+  for(auto a = addrs; a && found.empty(); a = a->ifa_next)
+  {
+    if(!a->ifa_addr || a->ifa_addr->sa_family != AF_INET || !(a->ifa_flags & IFF_UP))
+      continue;
+    auto in = reinterpret_cast<sockaddr_in*>(a->ifa_addr)->sin_addr;
+    if((ntohl(in.s_addr) >> 24) == 127)
+      continue;
+    char buf[INET_ADDRSTRLEN];
+    ::inet_ntop(AF_INET, &in, buf, sizeof(buf));
+    found = buf;
+  }
+  ::freeifaddrs(addrs);
+  return found;
+}
+
+// Whether a TCP connection to ip:port is accepted within 500 ms
+bool tcp_connects(const std::string& ip, uint16_t port)
+{
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  ::fcntl(fd, F_SETFL, O_NONBLOCK);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  ::inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
+  bool ok = ::connect(fd, (sockaddr*)&addr, sizeof(addr)) == 0;
+  if(!ok && errno == EINPROGRESS)
+  {
+    fd_set w;
+    FD_ZERO(&w);
+    FD_SET(fd, &w);
+    timeval tv{0, 500000};
+    if(::select(fd + 1, nullptr, &w, nullptr, &tv) == 1)
+    {
+      int err = 0;
+      socklen_t len = sizeof(err);
+      ::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len);
+      ok = err == 0;
+    }
+  }
+  ::close(fd);
+  return ok;
+}
+
+// Sends "<address> <f>" in one datagram to ip:port
+void send_osc_float(const std::string& ip, uint16_t port, const std::string& address, float f)
+{
+  std::string m = address;
+  m.append(4 - m.size() % 4, '\0');
+  m += ",f";
+  m.append(2, '\0');
+  uint32_t bits;
+  std::memcpy(&bits, &f, 4);
+  bits = htonl(bits);
+  m.append(reinterpret_cast<const char*>(&bits), 4);
+  int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  ::inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
+  ::sendto(fd, m.data(), m.size(), 0, (sockaddr*)&addr, sizeof(addr));
+  ::close(fd);
+}
+
+// Whether a device of that name is announced over mDNS, browsing for ms
+bool announced(const std::string& name, int ms)
+{
+  char** names{};
+  char** hosts{};
+  int* ports{};
+  size_t size{};
+  ossia_oscquery_list_devices(ms, &names, &hosts, &ports, &size);
+  bool found = false;
+  for(size_t i = 0; i < size; i++)
+    found = found || name == names[i];
+  ossia_oscquery_devices_free(names, hosts, ports, size);
+  return found;
+}
+
 // An OSCQuery server of the C API, under a multiplex protocol as a host
 // exposes its device, on a network context that a thread of the test polls.
 struct server
@@ -122,12 +214,13 @@ struct server
   std::atomic_bool polling{true};
   std::thread poller;
 
-  explicit server(const char* name, uint16_t osc_port = 0)
+  explicit server(const char* name, uint16_t osc_port = 0, const char* bind = nullptr)
       : osc{osc_port ? osc_port : free_port(false)}
   {
     auto multiplex = ossia_protocol_multiplex_create();
     dev = ossia_device_create(multiplex, name);
-    auto proto = ossia_protocol_oscquery_server_asio_create(ctx, osc, ws);
+    auto proto = bind ? ossia_protocol_oscquery_server_asio_create_bound(ctx, osc, ws, bind)
+                      : ossia_protocol_oscquery_server_asio_create(ctx, osc, ws);
     REQUIRE(proto);
     ossia_protocol_multiplex_expose_to(multiplex, proto);
     poller = std::thread([this] {
@@ -577,6 +670,37 @@ TEST_CASE("C API: ossia_device_set_echo spares an asio mirror", "[network_c]")
     INFO("the asio mirror received " << received.size() << " values");
     REQUIRE(received.empty());
   }
+}
+
+// A server on 127.0.0.1 only: the clients of the machine reach it, the
+// other interfaces refuse its WebSocket and do not deliver OSC to it, and it
+// is not announced over mDNS.
+TEST_CASE("C API: a server on 127.0.0.1 only", "[network_c]")
+{
+  const auto other = other_ipv4();
+  if(other.empty())
+  {
+    WARN("no interface other than the loopback: not tested");
+    return;
+  }
+  server announced_server{"c_unbound_server"};
+  server s{"c_bound_server", 0, "127.0.0.1"};
+  auto level = float_parameter(s.dev, "/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  mirror a{s.url(), "c_bound_a"};
+  REQUIRE(tcp_connects("127.0.0.1", s.ws));
+  INFO("other interface: " << other);
+  REQUIRE(!tcp_connects(other, s.ws));
+
+  send_osc_float(other, s.osc, "/level", 0.25f);
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  REQUIRE(value_of(level) != 0.25f);
+  send_osc_float("127.0.0.1", s.osc, "/level", 0.75f);
+  REQUIRE(wait_for([&] { return value_of(level) == 0.75f; }, 2000));
+
+  REQUIRE(announced("c_unbound_server", 2500));
+  REQUIRE(!announced("c_bound_server", 2500));
 }
 
 // The server sets a value and a client writes another one to the same

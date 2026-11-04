@@ -100,6 +100,25 @@ ossia_protocol_t ossia_protocol_oscquery_server_asio_create(
 #endif
 }
 
+ossia_protocol_t ossia_protocol_oscquery_server_asio_create_bound(
+    ossia_network_context_t ctx, int osc_port, int ws_port, const char* bind)
+{
+#if defined(OSSIA_PROTOCOL_OSCQUERY)
+  if(!ctx)
+  {
+    ossia_log_error("ossia_protocol_oscquery_server_asio_create_bound: ctx is null");
+    return nullptr;
+  }
+  return safe_function(__func__, [=] {
+    return new ossia_protocol{new ossia::oscquery_asio::oscquery_server_protocol(
+        *reinterpret_cast<ossia::net::network_context_ptr*>(ctx), osc_port, ws_port,
+        false, bind && *bind ? bind : "0.0.0.0")};
+  });
+#else
+  return nullptr;
+#endif
+}
+
 ossia_protocol_t ossia_protocol_oscquery_mirror_create(const char* host)
 {
 #if defined(OSSIA_PROTOCOL_OSCQUERY)
