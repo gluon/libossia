@@ -242,14 +242,6 @@
 			</description>
 		</attribute>
 
-		<attribute name="trim_address" get="1" set="1" type="boolean" size="1">
-			<digest>
-				Inherited from the ossia objects, unused here
-			</digest>
-			<description>
-				The <at>trim_address</at> attribute (default: 1) comes with the ossia objects, where it trims the address reported on the right outlet. <o>ossia.v8connector</o> does not read it: its right outlet reports the absolute address of its node, and its left outlet the addresses relative to that node.
-			</description>
-		</attribute>
 
 	</attributelist>
 

@@ -46,12 +46,8 @@ extern "C" void ossia_v8connector_setup()
   CLASS_ATTR_LABEL(
       c, "bundle", 0, "Send the values set during a tick together, in OSC bundles");
 
-  CLASS_ATTR_LONG(c, "trim_address", 0, object_base, m_trim_addr);
-  CLASS_ATTR_STYLE(c, "trim_address", 0, "onoff");
-  CLASS_ATTR_LABEL(
-      c, "trim_address", 0,
-      "Trim address reported by dumpout for convenience (default ON)");
-
+  // No @trim_address: the addresses this object outputs are always the ones
+  // declared or bound, and it never read the attribute it showed
   class_addmethod(c, (method)v8connector::add, "add", A_GIMME, 0);
   class_addmethod(c, (method)v8connector::remove, "remove", A_GIMME, 0);
   class_addmethod(c, (method)v8connector::clear, "clear", A_NOTHING, 0);
