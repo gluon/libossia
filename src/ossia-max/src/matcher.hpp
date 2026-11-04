@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 
 #include <ossia/network/base/node.hpp>
 #include <ossia/network/base/value_callback.hpp>
@@ -24,6 +25,8 @@ public:
   matcher& operator=(matcher&& other) = delete;
 
   void output_value(ossia::value v);
+  // The last value of the network held by @hold, out when it ends
+  std::optional<ossia::value> m_held;
   void remove_callback();
 
   ossia::net::node_base* get_node() const { return node; }

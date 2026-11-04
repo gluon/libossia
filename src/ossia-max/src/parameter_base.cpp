@@ -219,27 +219,28 @@ void parameter_base::set_minmax()
       auto min = _min;
       auto max = _max;
 
+      // One number per component, or one for all, which the core gives to
+      // each component. Padded with empty values, a vec3f was bounded on its
+      // first component only.
+      std::size_t n = 0;
       switch(param->get_value_type())
       {
         case ossia::val_type::BOOL:
         case ossia::val_type::INT:
         case ossia::val_type::FLOAT:
-          min.resize(1);
-          max.resize(1);
+          n = 1;
           break;
         case ossia::val_type::VEC2F:
-          min.resize(2);
-          max.resize(2);
+          n = 2;
           break;
         case ossia::val_type::VEC3F:
-          min.resize(3);
-          max.resize(3);
+          n = 3;
           break;
         case ossia::val_type::VEC4F:
-          min.resize(4);
-          max.resize(4);
+          n = 4;
           break;
         case ossia::val_type::LIST:
+          // As before: a list domain, whatever the number of bounds
           min.resize(OSSIA_MAX_MAX_ATTR_SIZE);
           max.resize(OSSIA_MAX_MAX_ATTR_SIZE);
           break;
@@ -248,8 +249,25 @@ void parameter_base::set_minmax()
         default:
           continue;
       }
+      auto fit = [n](std::vector<ossia::value>& v) {
+        // A number: one bound, empty when not given, as before
+        if(n == 1 || v.size() > n)
+          v.resize(n);
+        else if(v.size() > 1 && v.size() < n)
+          v.resize(n, v.back());
+      };
+      if(n > 0)
+      {
+        fit(min);
+        fit(max);
+        // A single bound on one side, one per component on the other
+        if(min.size() == 1 && max.size() > 1)
+          min.resize(max.size(), min.front());
+        if(max.size() == 1 && min.size() > 1)
+          max.resize(min.size(), max.front());
+      }
 
-      auto domain = make_domain_from_minmax({min}, max, param->get_value_type());
+      auto domain = make_domain_from_minmax(min, max, param->get_value_type());
       param->set_domain(domain);
     }
   }
@@ -891,6 +909,15 @@ void parameter_base::push(parameter_base* x, t_symbol* s, int argc, t_atom* argv
   if(x->m_mute)
     return;
 
+  // The inlet takes the control, for @hold ms
+  x->m_last_input = std::chrono::steady_clock::now();
+  x->m_inputting = true;
+  struct inputting
+  {
+    bool& b;
+    ~inputting() { b = false; }
+  } guard{x->m_inputting};
+
   if(s && s == _sym_set)
     x->m_set_flag = true;
 
@@ -1091,6 +1118,41 @@ void parameter_base::in_symbol(parameter_base* x, t_symbol* f)
   parameter_base::push(x, nullptr, 1, &a);
 }
 
+void parameter_base::release_hold(parameter_base* x)
+{
+  // Held again by a later input: its own clock comes later
+  if(x->holding(std::chrono::steady_clock::now()))
+    return;
+  for(auto* m : x->m_node_selection)
+  {
+    if(m->m_held && !m->is_zombie())
+    {
+      auto v = std::move(*m->m_held);
+      m->m_held.reset();
+      m->output_value(std::move(v));
+    }
+  }
+}
+
+void parameter_base::dump(parameter_base* x)
+{
+  long count = 0;
+  t_symbol** names = nullptr;
+  if(object_attr_getnames(x, &count, &names) != MAX_ERR_NONE || !names)
+    return;
+  for(long i = 0; i < count; i++)
+  {
+    long ac = 0;
+    t_atom* av = nullptr;
+    if(object_attr_getvalueof(x, names[i], &ac, &av) == MAX_ERR_NONE)
+    {
+      outlet_anything(x->m_dumpout, names[i], static_cast<short>(ac), av);
+      sysmem_freeptr(av);
+    }
+  }
+  sysmem_freeptr(names);
+}
+
 void parameter_base::class_setup(t_class* c)
 {
   object_base ::class_setup(c);
@@ -1105,6 +1167,13 @@ void parameter_base::class_setup(t_class* c)
   class_addmethod(c, (method)parameter_base::in_symbol, "symbol", A_SYM, 0);
   class_addmethod(c, (method)parameter_base::push, "list", A_GIMME, 0);
   class_addmethod(c, (method)parameter_base::push_default_value, "reset", A_NOTHING, 0);
+  class_addmethod(c, (method)parameter_base::dump, "dump", A_NOTHING, 0);
+
+  CLASS_ATTR_LONG(c, "hold", 0, parameter_base, m_hold);
+  CLASS_ATTR_LABEL(
+      c, "hold", 0,
+      "Hold the values of the network this many ms after a value entered by the inlet, then output the last one");
+  CLASS_ATTR_FILTER_MIN(c, "hold", 0);
 
   CLASS_ATTR_SYM(c, "unit", 0, parameter_base, m_unit);
   CLASS_ATTR_ENUM(
