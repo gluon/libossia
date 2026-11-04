@@ -1,0 +1,63 @@
+# prism_map.py: who follows whom
+
+Reads, once, the OSCQuery devices of a network and draws which client follows which server. The network is often static: run it when you need the picture, there is no monitoring loop.
+
+```bash
+python3 prism_map.py --html map.html
+```
+
+Python 3.8 or later, standard library only.
+
+## What it reads
+
+1. The devices announced over mDNS (`_oscjson._tcp`), found with `dns-sd` for `--browse-ms` milliseconds (2000 by default). `dns-sd` ships with macOS; elsewhere, or for a device that is not announced (a server on `127.0.0.1` only), give it with `--host HOST:PORT`, repeatable, and `--no-browse` to skip the browsing.
+2. The `HOST_INFO` of each device.
+3. `?PRISM_CONNECTIONS` of each device that declares it in the `EXTENSIONS` of its `HOST_INFO`. The servers of ossia-prism `2.1.0+prism.10` declare it (Max `ossia.device`, Unity `Controller`). A device that does not is listed, with its connections unknown.
+
+`?PRISM_CONNECTIONS` is a PRISM extension of OSCQuery. It answers on any path, as `HOST_INFO`:
+
+```json
+{
+  "CLIENTS": [
+    {"IP": "127.0.0.1", "PORT": 56451, "NAME": "max_patch", "OSC_PORT": 10203,
+     "SENDER_PORT": 61680, "LISTEN": ["/level"], "PACKETS": 12}
+  ],
+  "SENDERS": [
+    {"IP": "127.0.0.1", "PORT": 57654, "PACKETS": 2, "LAST_MS": 211}
+  ]
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `CLIENTS` | the WebSocket clients of the server |
+| `IP`, `PORT` | where the client connects from |
+| `NAME` | the name the client gave with the text command `{"COMMAND": "PRISM_NAME", "DATA": "<name>"}`; absent otherwise. `ossia.client` and `Ossia.Client` give their device name to a server that declares `PRISM_CONNECTIONS` |
+| `OSC_PORT`, `SENDER_PORT` | the UDP ports the client receives on and sends from, when it streams OSC over UDP |
+| `LISTEN` | the addresses the client asked for with `LISTEN` |
+| `PACKETS` | the OSC packets the server received from that client, datagrams or WebSocket frames |
+| `SENDERS` | the UDP sources that are none of the clients: `IP`, `PORT`, `PACKETS`, `LAST_MS` since their last packet |
+
+## Outputs
+
+- No option: a text summary.
+- `--json FILE`: the devices and the edges. An edge `follows` goes from a client to a server, with its `listen` and `packets`; an edge `sends` from a UDP source to a server. A client is named by its `NAME`, else by `IP:PORT`.
+- `--dot FILE`: the graph for Graphviz (`dot -Tsvg`).
+- `--html FILE`: one page with the graph drawn in SVG and the table of the devices, no script.
+
+`-` writes to the standard output.
+
+## Limits
+
+- A client that gives no name is known by its address only; several devices on one machine share it.
+- `LISTEN` is what a client asked for. The libossia server still sends every value to every client: `LISTEN` does not filter yet.
+- A source that writes over UDP without a WebSocket is a sender, whatever it is.
+- The browsing needs `dns-sd`; without it, use `--host`.
+
+## Test
+
+```bash
+python3 test_prism_map.py
+```
+
+Two fake servers on `127.0.0.1`, one that answers `?PRISM_CONNECTIONS` and one that does not.
