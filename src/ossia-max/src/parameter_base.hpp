@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <ossia-max/src/object_base.hpp>
 
 namespace ossia
@@ -92,6 +93,23 @@ public:
    */
   static void bang(parameter_base* x);
   static void push_default_value(parameter_base* x);
+  // dump: every attribute to the right outlet, as its name and its value;
+  // without it, dump was taken for a value and written
+  static void dump(parameter_base* x);
+
+  // @hold <ms>: taking control. After a value comes in by the inlet (a
+  // control the user moves), the values of the network are held for that
+  // long, then the last one held comes out. 0, the default: never held.
+  long m_hold{};
+  std::chrono::steady_clock::time_point m_last_input{};
+  void* m_hold_clock{};
+  // During a push from the inlet: its own value is not held
+  bool m_inputting{};
+  bool holding(std::chrono::steady_clock::time_point now) const
+  {
+    return m_hold > 0 && now - m_last_input < std::chrono::milliseconds(m_hold);
+  }
+  static void release_hold(parameter_base* x);
 
   static void set(parameter_base* x, t_symbol* s, int argc, t_atom* argv);
   static void in_float(parameter_base* x, double f);
