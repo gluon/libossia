@@ -4,6 +4,12 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [Unreleased]
+
+### Fixed
+
+- Unity: leaving Play in the editor with an `Ossia.Client` connected no longer crashes Unity. In `2.1.0+prism.9`, the `OnApplicationQuit` of the Controller reset the library (`ossia_device_reset_static`), which deleted the Client's mirror with the Controller's device; the Client, disabled afterwards, freed that mirror again in `OnDisable`: a SIGSEGV, a bus error or an abort in `ossia_device_free`, at the first Stop or later. The Controllers and the Clients now count the devices they hold, and the library is reset once the last of them has freed its own. Edit Mode test `PlayCycleTests.StopWithAClientConnected`: a Controller, a Client that follows it and a Remote, Play then Stop twice. A player quits in the same order: not measured.
+
 ## [2.1.0+prism.9] - 2026-11-03
 
 Unity package: Send Updates on by default, no echo of a received value, a Controller that frees its ports when it is destroyed, the server of ossia-max with the changes of a frame in OSC bundles, and a client, `Ossia.Client` and `Ossia.Remote`, that follows a remote device. C API: five functions for a client and for a server that sends bundles. Max package: a PRISM tab in two helps; its objects are those of `2.1.0+prism.8`, but an `ossia.device` exposed over OSCQuery behaves differently through the core it is built on: it no longer sends a client's value back to it, and it answers a crossed write. The core: the OSCQuery server of ossia-max knows which client a value comes from, and answers the writes that cross one of its values.

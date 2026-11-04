@@ -41,12 +41,61 @@ namespace Ossia.Tests
       Assert.IsTrue(PortsFree(), "after the second Stop: ports 1234 and 5678 are free");
     }
 
+    // The scene of the demo: a Controller that serves a cube, a Client that
+    // follows that same server and a Remote bound to one of its addresses.
+    // Leaving Play disables the Client after the Controller's
+    // OnApplicationQuit: the Client still frees its own mirror then.
+    [UnityTest]
+    public IEnumerator StopWithAClientConnected()
+    {
+      Assert.IsTrue(PortsFree(), "ports 1234 and 5678 must be free before the test");
+      new GameObject("OssiaController").AddComponent<Controller>().resolveAnnouncedName = false;
+      var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+      cube.name = "Cube";
+      cube.AddComponent<ExposeAttributes>();
+      var client = new GameObject("OssiaClient").AddComponent<Client>();
+      client.server = "ws://127.0.0.1:" + WsPort;
+      var remote = new GameObject("OssiaRemote").AddComponent<Remote>();
+      remote.client = client;
+      remote.address = "/Cube/transform/position";
+      remote.target = cube.transform;
+      remote.member = "position";
+
+      yield return new EnterPlayMode();
+      yield return WaitBound();
+      Assert.IsTrue(FindRemote().Bound, "first Play: the Client is connected and the Remote bound");
+
+      yield return new ExitPlayMode();
+      Assert.IsTrue(PortsFree(), "after Stop: ports 1234 and 5678 are free");
+
+      yield return new EnterPlayMode();
+      yield return WaitBound();
+      Assert.IsTrue(FindRemote().Bound, "second Play: the Client is connected and the Remote bound");
+
+      yield return new ExitPlayMode();
+      Assert.IsTrue(PortsFree(), "after the second Stop: ports 1234 and 5678 are free");
+    }
+
+    static Remote FindRemote()
+    {
+      return UnityEngine.Object.FindAnyObjectByType<Remote>();
+    }
+
+    static IEnumerator WaitBound()
+    {
+      float end = Time.realtimeSinceStartup + 10;
+      while (!FindRemote().Bound && Time.realtimeSinceStartup < end)
+        yield return null;
+    }
+
     [TearDown]
     public void RemoveController()
     {
-      var go = GameObject.Find("OssiaController");
-      if (go != null)
-        UnityEngine.Object.DestroyImmediate(go);
+      foreach (var name in new[] { "OssiaController", "Cube", "OssiaClient", "OssiaRemote" }) {
+        var go = GameObject.Find(name);
+        if (go != null)
+          UnityEngine.Object.DestroyImmediate(go);
+      }
     }
 
     // The body of GET / on the port, null if nothing answers.

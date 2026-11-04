@@ -290,7 +290,7 @@ The device starts in `Awake` and is freed when the Controller is destroyed or Pl
 | `Status` (property) | | `Disconnected`, `Connecting`, `Connected` or `Lost` |
 | `Url`, `LastError`, `Device` (properties) | | The address while connected, why the last attempt failed, the mirror of the device |
 
-Connects in `OnEnable`, disconnects in `OnDisable`; `Connect()` and `Disconnect()` do the same from a script.
+Connects in `OnEnable`, disconnects in `OnDisable`; `Connect()` and `Disconnect()` do the same from a script. Leaving Play disables the Client after the `OnApplicationQuit` of the Controllers: the Client frees its mirror then, and the library is reset (`ossia_device_reset_static`) once the last Controller or Client has freed its device. Measured in the editor, a Controller, a Client that follows it and a Remote bound to the Controller's tree, Play then Stop twice: no crash (`Tests/Editor/PlayCycleTests.cs`); with the package `2.1.0+prism.9`, Unity crashed at the first Stop.
 
 ### Ossia.Remote
 
