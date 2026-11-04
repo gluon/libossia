@@ -181,6 +181,8 @@ The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`
 
 **Do not put it in a scene that has an `OssiaController` with the default ports.** Nothing is reported: both servers start, and a client reaching port 5678 gets the tree of `CustomDevice` (`/foo/blu`, `/my_string`, ...) instead of the scene's. Change the ports in `CustomDevice.cs` (copy it into `Assets` under another class name) or on the Controller.
 
+It leaves `newDevice` to the reset of the library (`ossia_device_reset_static`), which frees its ports when Play stops, through the count the Controllers and the Clients share: `Ossia.Controller.Hold()` once its device is made, `Ossia.Controller.Let(true)` in its `OnApplicationQuit`. The reset waits for the last of them, so that a Client of the same scene frees its mirror first. A script of your own that builds a device does the same, or frees its device itself. Measured in the editor, `CustomDevice` and a Client that follows it, Play then Stop twice: no crash, the ports free after each Stop (`Tests/Editor/PlayCycleTests.cs`); with an unconditional reset, Unity crashed at the first Stop.
+
 ## Driving from Max
 
 With the package `ossia-prism` in Max, the sample's `CustomParameters.maxpat`:
