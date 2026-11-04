@@ -26,7 +26,7 @@ Prerequisites: Unity 6.3 LTS on macOS (the library is universal, arm64 and x86_6
 |---|---|
 | Custom parameters | The scene `CustomParameters`: an `OssiaController` and a cube named `Shape` with the script `CustomParameters.cs`, whose five fields (`float`, `int`, `bool`, `Color`, `Vector3`) are exposed under `/Shape/CustomParameters`; `ExposeAttributes` with Send Updates checked. The Max patch `CustomParameters.maxpat` drives each field and shows what Unity sends back. |
 | Follow a device | The scene `FollowADevice`: an `OssiaClient` that follows the device `follow_me` by its name, and a cube whose four `Ossia.Remote` bind the fields of `FollowADevice.cs` to `/cube/size`, `/cube/color`, `/cube/spin` and `/cube/angle`. The Max patch `FollowADevice.maxpat` exposes `follow_me` as it opens: Max sets the size, the color and the spin, Unity sends the angle back. See [Following a device](#following-a-device). |
-| Exposed cube | The scene `ExposedCube`: an `OssiaController` and a cube whose transform is exposed (`/Cube/transform/position`, `rotation`, `localScale`, ...), with no script of its own. Its `ExposeAttributes` keeps Send Updates unchecked, as the scene saved it: the cube follows the clients and sends nothing back. |
+| Exposed cube | The scene `ExposedCube`: an `OssiaController` and a cube whose transform is exposed (`/Cube/transform/position`, `rotation`, `localScale`), with no script of its own. Its `ExposeAttributes` keeps Send Updates unchecked, as the scene saved it: the cube follows the clients and sends nothing back. |
 
 "Custom parameters" and "Exposed cube" run on ports 1234 (OSC) and 5678 (HTTP and WebSocket), under the device name `unity`; "Follow a device" has no server, and its patch exposes `follow_me` on 9234 and 9678.
 
@@ -36,7 +36,7 @@ Three things in the scene:
 
 1. A GameObject named exactly `OssiaController`, with the component `Ossia.Controller` (Add Component > search "Controller"). One per scene; the exposed objects find it by that name.
 2. Your script, on any GameObject, with the fields to expose marked `[Ossia.Expose("<name>")]`.
-3. The component `Ossia.ExposeAttributes` on that same GameObject. It reads the marked fields when the scene starts and publishes each one under `/<GameObject name>/<script class>/<name>`. It also always publishes the GameObject's transform, under `/<GameObject name>/transform/...`.
+3. The component `Ossia.ExposeAttributes` on that same GameObject. It reads the marked fields when the scene starts and publishes each one under `/<GameObject name>/<script class>/<name>`. It also always publishes the GameObject's transform, under `/<GameObject name>/transform/`: `position`, `rotation` and `localScale`.
 
 The script of the sample, `CustomParameters.cs`, copied as is into `Assets` (the file name must be the class name), on a cube named `Shape`:
 
@@ -312,7 +312,7 @@ Connects in `OnEnable`, disconnects in `OnDisable`; `Connect()` and `Disconnect(
 |---|---|---|
 | `sendUpdates` | on | Pushes to the clients, each frame, the fields and transform values changed in Unity, whatever changed them; never a value received from a client. A scene keeps the value it saved |
 
-Publishes the transform (`position`, `localPosition`, `eulerAngles`, `localEulerAngles`, `right`, `up`, `forward`, `rotation`, `localRotation`, `localScale`, `lossyScale`) and the fields and properties marked `[Ossia.Expose]` of every component of its GameObject.
+Publishes the transform (`position`, `rotation`, `localScale`) and the fields and properties marked `[Ossia.Expose]` of every component of its GameObject. The other properties of the transform (`localPosition`, `eulerAngles`, `localEulerAngles`, `localRotation`, `right`, `up`, `forward`, `lossyScale`) say again what these three say, and are not published: set back, they disagreed with them, `up` or `right` holding a part of the orientation only. Measured, an object a script turns at `Quaternion.Euler(20, angle, 0)`: `right` written back as read gave it `(0, 202.5, 0)` for `(20, 202.5, 0)` (`Tests/Runtime/TurningObjectTests.cs`).
 
 ### Ossia.Expose
 

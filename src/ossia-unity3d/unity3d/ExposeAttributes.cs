@@ -61,25 +61,27 @@ namespace Ossia
       }
     }
 
+    // The transform once: localPosition, eulerAngles, localEulerAngles,
+    // localRotation, right, up, forward and lossyScale say again what these
+    // say, and set back they disagree with them: up or right holds a part of
+    // the orientation only, and the object takes another one.
+    static readonly string[] transformProperties = { "position", "rotation", "localScale" };
+
     void RegisterTransform()
     {
       var component = this.transform;
       var ossia_c = new OssiaEnabledComponent(component, child_node.AddChild("transform"));
       ossia_components.Add (ossia_c);
 
-      foreach (PropertyInfo prop in component.GetType().GetProperties ()) 
+      foreach (var name in transformProperties)
       {
-        if(validTransformType (prop.PropertyType)) 
-        {
-          // Get the type of the property;
-          ossia_type t;
-          try { t = Ossia.Value.GetOssiaType (prop.PropertyType); } catch { continue; }
+        var prop = typeof(Transform).GetProperty (name);
+        var t = Ossia.Value.GetOssiaType (prop.PropertyType);
 
-          // Create an attribute to bind the property.
-          var oep = new OssiaEnabledProperty(prop, prop.Name, ossia_c, t);
-          ossia_c.properties.Add (oep);
-          controller.Register (oep);
-        }
+        // Create an attribute to bind the property.
+        var oep = new OssiaEnabledProperty(prop, prop.Name, ossia_c, t);
+        ossia_c.properties.Add (oep);
+        controller.Register (oep);
       }
     }
 
@@ -111,13 +113,6 @@ namespace Ossia
       RegisterTransform ();
     }
 
-
-    bool validTransformType(Type t) { 
-      return t == typeof(Vector2) 
-        || t == typeof(Vector3) 
-        || t == typeof(Vector4) 
-        || t == typeof(Quaternion);
-    }
 
     OssiaEnabledComponent makeComponent(Component c)
     {
