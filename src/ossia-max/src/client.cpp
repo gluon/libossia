@@ -176,7 +176,10 @@ void* client::create(t_symbol* name, long argc, t_atom* argv)
           if(autoconnect)
             connect_mess_cb(x, nullptr, 1, argv);
         }
-        else
+        // [ossia.client <name>] names the client's device: nothing to connect
+        // to, and a connect without argument printed the protocols and tried
+        // again every second
+        else if(attrstart > 1)
           connect_mess_cb(x, nullptr, attrstart - 1, argv);
       }
     }
@@ -455,12 +458,17 @@ void client::connect_impl(client* x)
   }
   else
   {
+    // Nothing to connect to: nothing to try again
     client::print_protocol_help();
+    return;
   }
 
   if(x->m_device)
   {
-    finish_connect(x, count, connection_status, true);
+    // By name, the listener's mirror holds the tree already: read again, it
+    // removed and created every node, and the values in between came out
+    // as osc messages
+    finish_connect(x, count, connection_status, !x->m_zeroconf);
   }
   else
   {
@@ -468,7 +476,9 @@ void client::connect_impl(client* x)
 
     outlet_anything(x->m_dumpout, gensym("connect"), count, connection_status);
 
-    clock_delay(x->m_clock, 1000); // hardcoded reconnection delay
+    // @reconnect 0: a first connection that fails is not tried again either
+    if(x->m_reconnect > 0)
+      clock_delay(x->m_clock, 1000); // hardcoded reconnection delay
   }
 }
 
@@ -525,7 +535,8 @@ void client::attempt_check_impl(client* x)
     object_error((t_object*)x, "%s", attempt->error().c_str());
     A_SETFLOAT(status.data(), 0);
     outlet_anything(x->m_dumpout, gensym("connect"), static_cast<short>(status.size()), status.data());
-    clock_delay(x->m_clock, 1000); // hardcoded reconnection delay
+    if(x->m_reconnect > 0)
+      clock_delay(x->m_clock, 1000); // hardcoded reconnection delay
   }
   // After a loss, the link tries again by itself.
   if(!x->m_abandoned.empty())
