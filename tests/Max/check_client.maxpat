@@ -161,7 +161,101 @@
       260,
       22
      ],
-     "text": "ossia.client prism10_rec @reconnect 0"
+     "text": "p rec",
+     "patcher": {
+      "fileversion": 1,
+      "appversion": {
+       "major": 9,
+       "minor": 2,
+       "revision": 0,
+       "architecture": "x64",
+       "modernui": 1
+      },
+      "classnamespace": "box",
+      "rect": [
+       100,
+       100,
+       340,
+       160
+      ],
+      "boxes": [
+       {
+        "box": {
+         "id": "in",
+         "maxclass": "inlet",
+         "numinlets": 0,
+         "numoutlets": 1,
+         "outlettype": [
+          ""
+         ],
+         "patching_rect": [
+          20,
+          15,
+          30,
+          30
+         ]
+        }
+       },
+       {
+        "box": {
+         "id": "obj",
+         "maxclass": "newobj",
+         "numinlets": 1,
+         "numoutlets": 1,
+         "outlettype": [
+          ""
+         ],
+         "patching_rect": [
+          20,
+          50,
+          280,
+          22
+         ],
+         "text": "ossia.client prism10_rec @reconnect 0"
+        }
+       },
+       {
+        "box": {
+         "id": "out",
+         "maxclass": "outlet",
+         "numinlets": 1,
+         "numoutlets": 0,
+         "patching_rect": [
+          20,
+          90,
+          30,
+          30
+         ]
+        }
+       }
+      ],
+      "lines": [
+       {
+        "patchline": {
+         "source": [
+          "in",
+          0
+         ],
+         "destination": [
+          "obj",
+          0
+         ]
+        }
+       },
+       {
+        "patchline": {
+         "source": [
+          "obj",
+          0
+         ],
+         "destination": [
+          "out",
+          0
+         ]
+        }
+       }
+      ]
+     }
     }
    },
    {
@@ -237,7 +331,101 @@
       260,
       22
      ],
-     "text": "ossia.client prism10_byname"
+     "text": "p byname",
+     "patcher": {
+      "fileversion": 1,
+      "appversion": {
+       "major": 9,
+       "minor": 2,
+       "revision": 0,
+       "architecture": "x64",
+       "modernui": 1
+      },
+      "classnamespace": "box",
+      "rect": [
+       100,
+       100,
+       340,
+       160
+      ],
+      "boxes": [
+       {
+        "box": {
+         "id": "in",
+         "maxclass": "inlet",
+         "numinlets": 0,
+         "numoutlets": 1,
+         "outlettype": [
+          ""
+         ],
+         "patching_rect": [
+          20,
+          15,
+          30,
+          30
+         ]
+        }
+       },
+       {
+        "box": {
+         "id": "obj",
+         "maxclass": "newobj",
+         "numinlets": 1,
+         "numoutlets": 1,
+         "outlettype": [
+          ""
+         ],
+         "patching_rect": [
+          20,
+          50,
+          280,
+          22
+         ],
+         "text": "ossia.client prism10_byname"
+        }
+       },
+       {
+        "box": {
+         "id": "out",
+         "maxclass": "outlet",
+         "numinlets": 1,
+         "numoutlets": 0,
+         "patching_rect": [
+          20,
+          90,
+          30,
+          30
+         ]
+        }
+       }
+      ],
+      "lines": [
+       {
+        "patchline": {
+         "source": [
+          "in",
+          0
+         ],
+         "destination": [
+          "obj",
+          0
+         ]
+        }
+       },
+       {
+        "patchline": {
+         "source": [
+          "obj",
+          0
+         ],
+         "destination": [
+          "out",
+          0
+         ]
+        }
+       }
+      ]
+     }
     }
    },
    {
