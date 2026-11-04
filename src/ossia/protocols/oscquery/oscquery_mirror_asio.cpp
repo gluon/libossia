@@ -540,8 +540,13 @@ bool oscquery_mirror_asio_protocol::on_text_ws_message(
                     .host = server_host, .port = server_port},
                 this->m_ctx->context);
             m_oscSender->connect();
+            // Bound now, not at its first datagram: the server knows this
+            // client by the port its values leave from, and does not send
+            // them back to it
+            m_oscSender->m_socket.bind(
+                boost::asio::ip::udp::endpoint{boost::asio::ip::udp::v4(), 0});
             uint16_t local_server_port = m_oscServer->m_socket.local_endpoint().port();
-            uint16_t local_sender_port = rand();
+            uint16_t local_sender_port = m_oscSender->m_socket.local_endpoint().port();
 
             // Send to the server the local receiver port
             if(m_host_info.extensions["OSC_STREAMING"])

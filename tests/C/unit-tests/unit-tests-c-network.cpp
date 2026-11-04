@@ -4,8 +4,11 @@
 // server on a network context, mirrors that follow it, bundles, echo.
 #include <ossia/detail/config.hpp>
 
+#include <ossia/network/context.hpp>
+#include <ossia/network/generic/generic_device.hpp>
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 #include <ossia/network/sockets/websocket_client.hpp>
+#include <ossia/protocols/oscquery/oscquery_mirror_asio.hpp>
 
 #include <ossia-c/ossia-c.h>
 
@@ -511,6 +514,69 @@ TEST_CASE("C API: ossia_device_set_echo spares the sender over the WebSocket", "
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   INFO("a received " << a.values().size() << " values");
   REQUIRE(a.values().empty());
+}
+
+// The asio mirror of the core writes over UDP too, and declares in
+// START_OSC_STREAMING the port its values leave from: the server, which
+// forwards a client's values to the others, does not send them back to it.
+TEST_CASE("C API: ossia_device_set_echo spares an asio mirror", "[network_c]")
+{
+  server s{"c_echo_asio_server"};
+  float_parameter(s.dev, "/level");
+  ossia_device_set_echo(s.dev, 1);
+  mirror b{s.url(), "c_echo_asio_b"};
+  b.listen("/level");
+
+  auto ctx = std::make_shared<ossia::net::network_context>();
+  auto proto = std::make_unique<ossia::oscquery_asio::oscquery_mirror_asio_protocol>(
+      ctx, s.url());
+  auto& a_proto = *proto;
+  ossia::net::generic_device a{std::move(proto), "c_echo_asio_a"};
+  REQUIRE(a_proto.update(a.get_root_node()));
+
+  // Polls the mirror's context until the end of the test, failed or not
+  struct poll_thread
+  {
+    ossia::net::network_context& ctx;
+    std::atomic_bool polling{true};
+    std::thread thread{[this] {
+      while(polling)
+      {
+        ctx.context.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    }};
+    ~poll_thread()
+    {
+      polling = false;
+      thread.join();
+    }
+  } poller{*ctx};
+  REQUIRE(wait_for([&] { return a_proto.ws_connected() && a_proto.osc_connected(); }, 2000));
+
+  auto node = ossia::net::find_node(a.get_root_node(), "/level");
+  REQUIRE(node);
+  auto param = node->get_parameter();
+  REQUIRE(param);
+  std::mutex mutex;
+  std::vector<float> received;
+  param->add_callback([&](const ossia::value& v) {
+    // The callback also runs for the mirror's own push, on this thread
+    if(std::this_thread::get_id() != poller.thread.get_id())
+      return;
+    std::lock_guard lock{mutex};
+    received.push_back(ossia::convert<float>(v));
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  param->push_value(0.5f);
+  REQUIRE(wait_for([&] { return b.has(0.5f); }, 2000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  {
+    std::lock_guard lock{mutex};
+    INFO("the asio mirror received " << received.size() << " values");
+    REQUIRE(received.empty());
+  }
 }
 
 // The server sets a value and a client writes another one to the same
