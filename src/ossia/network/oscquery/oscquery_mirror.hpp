@@ -158,6 +158,15 @@ private:
   template <typename Parameters>
   bool push_bundle_impl(const Parameters& parameters, bool bounded = false);
 
+  // A server that does not answer crossings leaves the client with its own
+  // value after the server's crossed it: a value received less than
+  // crossing_window after a write of ours, and different from it, is read
+  // again from the server settle_delay later.
+  struct crossing_state;
+  std::shared_ptr<crossing_state> m_crossing;
+  void record_sent(const std::string& address, const ossia::value& v);
+  void check_crossing(std::string_view address);
+
   std::unique_ptr<osc::sender<oscquery::osc_outbound_visitor>> m_oscSender;
   std::unique_ptr<osc::receiver> m_oscServer;
   std::unique_ptr<ossia::net::websocket_client> m_websocketClient;
