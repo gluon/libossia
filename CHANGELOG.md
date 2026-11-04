@@ -8,14 +8,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- C API: `ossia_protocol_oscquery_server_asio_create_bound(context, osc_port, ws_port, address)`, the server of `ossia_protocol_oscquery_server_asio_create` listening on one address: `127.0.0.1` for the clients of the machine, the address of one interface for that network. Such a server is not announced over mDNS. Test `C API: a server on 127.0.0.1 only`: reached on 127.0.0.1, refused through another interface, not announced.
+- OSCQuery server: `?PRISM_CONNECTIONS`, declared in the `EXTENSIONS` of `HOST_INFO`, lists the clients connected (address, port, the name an ossia-prism client sends with `PRISM_NAME`, OSC port, sender port, addresses listened to, packets) and the other senders of OSC (address, port, packets, last packet). The clients of the core send their device name when the server declares the extension. Test `C API: ?PRISM_CONNECTIONS lists the clients and the senders`.
+- Tools: `tools/prism-map/prism_map.py` draws the map of the OSCQuery devices of a network from `?PRISM_CONNECTIONS` (text, JSON, Graphviz or HTML), browsing mDNS or given hosts; tested against fake servers (`test_prism_map.py`).
+- Max: `@hold <ms>` on `ossia.parameter` and `ossia.remote`, taking control: after a value comes in by the inlet, the values of the network are held for that long, then the last one held comes out. Checked in Max by `tests/Max/check_max.py`.
+- Max: `expose oscquery <OSC port> <WebSocket port> <address>` on `ossia.device` listens on that address only, and is not announced over mDNS; the outlet adds the address to `expose 1 oscquery <ports>`. Checked by `tests/Max/check_max.py`.
+- Max: `extras/ossia.panel.html`, a page that builds a control for each parameter of an OSCQuery device from its tree, follows it over the WebSocket and holds a control for 500 ms after the user releases it; `examples/ossia.panel.maxpat` opens it in a `jweb` next to an `ossia.parameter @hold 500`. Logic tested outside a browser (`tests/Network/OssiaPanelTest.js`).
+- Max: a PRISM tab in the help of `ossia.parameter`: `@hold`, `dump`, and `[pattr]` patched into the inlet.
+- Unity: `[Ossia.Expose]` takes `Min`, `Max`, `Unit` and `Access` (`Tests/Runtime/ExposeOptionsTests.cs`).
+- Unity: `Controller.listenAddress`, the address both ports listen on; on one address the device is not announced (`Tests/Runtime/ListenAddressTests.cs`).
+- Unity: the events `ExposedObject.Received (name, value)` and `Remote.Received (value)`, raised for each value received from the network; the sample "Custom parameters" pauses its spin while a client sets the rotation (`ClientTests.RemoteRaisesReceivedForTheValuesOfTheDevice`).
+- Tests: `tests/Max/check_max.py`, the fixes of Max checked in a running Max, with no click and without quitting it; `tests/binary_paths.py`, no path of the build machine in the binaries of a package.
 - Unity: `Ossia.Controller.Hold()` and `Ossia.Controller.Let(bool playStops = false)` are public: a script that builds its own device, as `CustomDevice.cs` does, counts it with the Controllers and the Clients, so that the reset of the library, when Play stops, waits for all of them.
+
+### Changed
+
+- Max: `[ossia.client <name>]`, created with a name only, takes that name and connects nothing; it sent itself a `connect` with no argument every second. `connect` with no argument prints the help of the protocols once.
+- Max: `ossia.client` connected by name takes the tree of the listener's mirror instead of reading it again: no node removed and created again, no `ossia.remote` registered again.
+- Unity: `[Ossia.Expose]` without a name takes the name of the field or property; the public fields a script inherits are exposed; a `Vector2`, `Vector3` or `Vector4` has no unit of its own (the transform's `position` keeps `position.cart3D`); `ExposeComponents` no longer prints a line per property.
 
 ### Removed
 
+- Max: `@trim_address` of `ossia.v8connector`, which nothing read.
 - Unity: `ExposeAttributes` publishes the transform as `position`, `rotation` and `localScale` only. `localPosition`, `eulerAngles`, `localEulerAngles`, `localRotation`, `right`, `up`, `forward` and `lossyScale` are no longer in the tree: they said again what the three say, and, applied back, they disagreed with them (see Fixed). A client that wrote one of these addresses writes `position`, `rotation` or `localScale` instead.
 
 ### Fixed
 
+- OSCQuery server: a boolean is served as `true` or `false`; it was `null` (`value_to_json.hpp`). Test `C API: a bool is served as true or false`.
+- OSCQuery client: when a value received crosses one the client sent on the same address less than 500 ms before, the client asks the server for the value 100 ms later. Against a server that does not answer crossed writes, 20 divergences in 20 crossings before, 0 in 100 after. Test `C API: a mirror reads the value again after a crossing`.
+- OSCQuery client of asio (`oscquery_mirror_asio.cpp`): it declares the port its values leave from; it declared a random one, and a server with echo sent the client's values back to it. Test `C API: ossia_device_set_echo spares an asio mirror`.
+- Max: `@reconnect 0` on `ossia.client` also stops the attempts of a first connection that fails.
+- Max: `[ossia]` groups what its objects push during a tick in OSC bundles (`@bundle`); the attribute did nothing.
+- Max: `dump` on `ossia.parameter` and `ossia.remote` sends every attribute by the right outlet; it was written as a value.
+- Max: a list parameter bounded by `@min` and `@max` carries the range on every component; it was on the first only.
+- Builds: the binaries no longer hold the paths of the machine that built them (`-ffile-prefix-map`); 70 such strings in the Max package before, 0 after.
 - Unity: with Send Updates, the `Controller` no longer sets back a value an exposed object published itself when the object publishes before the `Controller` reads its message queue in the frame (the same execution order, 0, for both). The guard of `2.1.0+prism.9` kept the last publication only: the value of the frame before, sent at the end of that frame, came back after the object had published the one of this frame, and was applied. Measured in the demo, a field `rotation` went back 394 times in 4.1 s, to its own value, with no value from the network; in the test, the angle went back in 60 frames of 120 and the object turned at half its speed. A binding now keeps the values it pushed until each comes back. Play Mode test `TurningObjectTests.AngleNeverGoesBack`: a script turns an exposed object while a client sets its speed over OSC, the object publishing first.
 - Unity: `ExposeAttributes` published every `Vector3` and `Quaternion` property of the transform (`rotation`, `eulerAngles`, `up`, `right`, `forward`...). Applied back, they disagreed: `up` and `right` hold a part of the orientation only, and the object took another one; with the values set back each frame, the cube of the demo alternated between two fixed angles. Play Mode test `TurningObjectTests.TransformValueWrittenBackGivesTheOrientationRead`: while a script turns the object and a client sets its speed, a client writes back, one at a time, each transform value as it read it; `right` gave `(0, 202.5, 0)` for `(20, 202.5, 0)`, `up` another orientation.
 - Unity: leaving Play in the editor with an `Ossia.Client` connected no longer crashes Unity. In `2.1.0+prism.9`, the `OnApplicationQuit` of the Controller reset the library (`ossia_device_reset_static`), which deleted the Client's mirror with the Controller's device; the Client, disabled afterwards, freed that mirror again in `OnDisable`: a SIGSEGV, a bus error or an abort in `ossia_device_free`, at the first Stop or later. The Controllers and the Clients now count the devices they hold, and the library is reset once the last of them has freed its own. Edit Mode test `PlayCycleTests.StopWithAClientConnected`: a Controller, a Client that follows it and a Remote, Play then Stop twice. A player quits in the same order: not measured.
