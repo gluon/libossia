@@ -6,7 +6,8 @@ SPDX-FileContributor: Julien Bayle, PRISM <https://www.prism.cnrs.fr/>
 ossia panel: connects to an OSCQuery device and builds the controls of its
 parameters from what the device serves (TYPE, RANGE, VALS, ACCESS, UNIT), in
 both directions, without echo. Opens in a jweb of Max or in any browser, from
-this file: ?server=<host>:<port> after the file name, or the field at the top.
+this file: ?server=<host>:<port> after the file name, the field at the top, or
+executejavascript "ossiaPanelConnect('<host>:<port>')" sent to the jweb.
 
 Read: the tree over HTTP (the server answers with Access-Control-Allow-Origin:
 *), then LISTEN on the WebSocket for each parameter it can read; values come
@@ -441,6 +442,9 @@ setInterval(() => {
 ui.connect.addEventListener("click", connect);
 ui.server.addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
 ui.filter.addEventListener("input", applyFilter);
+// For a jweb that loads the file with readfile, which takes no query:
+// executejavascript "ossiaPanelConnect('127.0.0.1:7416')"
+window.ossiaPanelConnect = (server) => { ui.server.value = server; connect(); };
 const params = new URLSearchParams(location.search);
 if (params.get("server")) { ui.server.value = params.get("server"); connect(); }
 </script>
