@@ -11,6 +11,38 @@ namespace Ossia
     void ReceiveUpdates (Ossia.Value value);
   }
 
+  //! The values a binding pushed, in order, until each one comes back
+  //! through the Controller's message queue
+  internal class Published
+  {
+    // A value comes back at the latest a frame after it left: more than
+    // that is a value whose message was lost, kept no longer
+    const int Kept = 16;
+    readonly List<object> values = new List<object> ();
+
+    public void Add (object v)
+    {
+      values.Add (v);
+      if (values.Count > Kept)
+        values.RemoveAt (0);
+    }
+
+    public void Clear ()
+    {
+      values.Clear ();
+    }
+
+    //! v is a value pushed here: it and the ones pushed before it are back
+    public bool CameBack (object v)
+    {
+      int i = values.FindIndex (p => v.Equals (p));
+      if (i < 0)
+        return false;
+      values.RemoveRange (0, i + 1);
+      return true;
+    }
+  }
+
   //! Used to register C# fields to Ossia
   internal class OssiaEnabledField : OssiaEnabledElement
   {
@@ -23,8 +55,8 @@ namespace Ossia
     public Ossia.Parameter ossia_parameter;
 
     object previousValue;
-    // The last value SendUpdates pushed, until a value from elsewhere replaces it
-    object published;
+    // The values SendUpdates pushed that have not come back yet
+    readonly Published published = new Published ();
 
     public OssiaEnabledField (FieldInfo f, string attr, OssiaEnabledComponent par, ossia_type t)
     {
@@ -37,7 +69,7 @@ namespace Ossia
       SendUpdates (null);
       // Pushed before the Controller registers the parameter: no message
       // comes back for it.
-      published = null;
+      published.Clear ();
     }
 
     //! Ossia -> C#
@@ -53,12 +85,12 @@ namespace Ossia
       try {
         var new_val = value.Get (field.FieldType);
 
-        // The message queue also receives the values pushed here: while
-        // the parameter holds the value SendUpdates published, applying it
-        // would undo what the script changed since.
-        if (new_val.Equals (published))
+        // The message queue also receives the values pushed here: applying
+        // one would undo what the script changed since. When the object
+        // publishes before the Controller reads its queue, the value of the
+        // frame before comes back after the one of this frame is published.
+        if (published.CameBack (new_val))
           return;
-        published = null;
 
         var cur_val = field.GetValue (parent.component);
         if (!new_val.Equals (cur_val)) {
@@ -77,7 +109,7 @@ namespace Ossia
       var val = field.GetValue (parent.component);
       if (!val.Equals (previousValue)) {
         previousValue = val;
-        published = val;
+        published.Add (val);
         if (controller != null)
           controller.Publish (ossia_parameter, new Value (val));
         else
@@ -98,8 +130,8 @@ namespace Ossia
     public Ossia.Parameter ossia_parameter;
 
     object previousValue;
-    // The last value SendUpdates pushed, until a value from elsewhere replaces it
-    object published;
+    // The values SendUpdates pushed that have not come back yet
+    readonly Published published = new Published ();
 
     public OssiaEnabledProperty (PropertyInfo f, string attr, OssiaEnabledComponent par, ossia_type t)
     {
@@ -110,7 +142,7 @@ namespace Ossia
       ossia_node = parent.component_node.AddChild (attr);
       ossia_parameter = ossia_node.CreateParameter (f.PropertyType, t);
       SendUpdates (null);
-      published = null;
+      published.Clear ();
     }
 
     //! Ossia -> C#
@@ -127,9 +159,8 @@ namespace Ossia
 
           // As for a field: a published transform set back would hold the
           // object a frame behind the script that moves it.
-          if (new_val.Equals (published))
+          if (published.CameBack (new_val))
             return;
-          published = null;
 
           var cur_val = field.GetValue (parent.component, null);
           if (!new_val.Equals (cur_val)) {
@@ -149,7 +180,7 @@ namespace Ossia
         var val = field.GetValue (parent.component, null);
         if (!val.Equals (previousValue)) {
           previousValue = val;
-          published = val;
+          published.Add (val);
           if (controller != null)
             controller.Publish (ossia_parameter, new Value (val));
           else
