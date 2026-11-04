@@ -1,0 +1,448 @@
+<!doctype html>
+<!--
+SPDX-FileCopyrightText: 2026 CNRS
+SPDX-FileContributor: Julien Bayle, PRISM <https://www.prism.cnrs.fr/>
+
+ossia panel: connects to an OSCQuery device and builds the controls of its
+parameters from what the device serves (TYPE, RANGE, VALS, ACCESS, UNIT), in
+both directions, without echo. Opens in a jweb of Max or in any browser, from
+this file: ?server=<host>:<port> after the file name, or the field at the top.
+
+Read: the tree over HTTP (the server answers with Access-Control-Allow-Origin:
+*), then LISTEN on the WebSocket for each parameter it can read; values come
+back as binary OSC. Write: binary OSC on the same WebSocket: no UDP port, and
+the server knows the page by its connection, so it does not send its own
+values back to it. A control the user holds ignores the values of the network
+until 500 ms after it is released, then takes the last one it held back.
+Nothing else is loaded.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ossia panel</title>
+<style>
+  :root { --bg: #1e1e1e; --fg: #ddd; --dim: #999; --line: #333; --accent: #7ab8ef; --ok: #6c6; --bad: #e77; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #fafafa; --fg: #222; --dim: #666; --line: #ddd; --accent: #2662a8; --ok: #2a7d2a; --bad: #b33; }
+  }
+  body { margin: 0; padding: 12px 16px; background: var(--bg); color: var(--fg); font: 13px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  input, select, button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 2px 6px; }
+  #server { width: 16em; }
+  #status { color: var(--dim); }
+  #status.live { color: var(--ok); }
+  #status.error { color: var(--bad); }
+  .row { display: grid; grid-template-columns: minmax(10em, 1fr) minmax(12em, 2fr) 6em; gap: 8px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--line); }
+  .path { font-family: Menlo, Monaco, monospace; color: var(--accent); overflow-wrap: anywhere; }
+  .unit { color: var(--dim); font-size: 11px; }
+  .widget { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .widget input[type=range] { flex: 1 1 8em; min-width: 6em; }
+  .widget .num { width: 5.5em; }
+  .held .path::after { content: " (held)"; color: var(--dim); }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <input id="server" placeholder="host:port" aria-label="server">
+  <button id="connect">Connect</button>
+  <input id="filter" placeholder="filter" aria-label="filter">
+  <span id="status">not connected</span>
+</header>
+<main id="rows"></main>
+
+<script id="logic">
+"use strict";
+// The logic of the page, without the DOM: tests/Network/OssiaPanelTest.js
+// runs this script alone.
+
+// What a node of the tree becomes: null for a node without a parameter
+function widgetFor(node) {
+  if (!node || typeof node.TYPE !== "string") return null;
+  const t = node.TYPE;
+  const access = typeof node.ACCESS === "number" ? node.ACCESS : 3;
+  const read = (access & 1) === 1, write = (access & 2) === 2;
+  const unit = [].concat(node.UNIT || [], node.EXTENDED_TYPE || []).join(" ");
+  const ranges = Array.isArray(node.RANGE) ? node.RANGE : [];
+  const vals = ranges[0] && Array.isArray(ranges[0].VALS) ? ranges[0].VALS : null;
+  if (t === "r" || (/^f{3,4}$/.test(t) && /color/.test(unit)))
+    return { kind: "color", size: t === "r" ? 1 : t.length, read, write };
+  if (t === "T" || t === "F") return { kind: "toggle", read, write };
+  if (t === "I" || t === "N") return { kind: "button", read, write };
+  if (t === "s" || t === "c") return vals ? { kind: "menu", values: vals, read, write } : { kind: "text", read, write };
+  if (/^[fidh]+$/.test(t)) {
+    const size = t.length;
+    if (vals && size === 1) return { kind: "menu", values: vals, read, write };
+    const rs = ranges.length === 1 && size > 1 ? Array(size).fill(ranges[0]) : ranges;
+    const min = [], max = [];
+    let bounded = rs.length === size;
+    for (let i = 0; i < size && bounded; i++) {
+      const r = rs[i];
+      if (!r || typeof r.MIN !== "number" || typeof r.MAX !== "number") bounded = false;
+      else { min.push(r.MIN); max.push(r.MAX); }
+    }
+    const step = /^[ih]+$/.test(t) ? 1 : "any";
+    return bounded ? { kind: "slider", size, min, max, step, read, write } : { kind: "number", size, step, read, write };
+  }
+  return { kind: "list", read, write };
+}
+
+const pad4 = (n) => (n + 3) & ~3;
+
+function oscString(s) {
+  const bytes = new TextEncoder().encode(s);
+  const out = new Uint8Array(pad4(bytes.length + 1));
+  out.set(bytes);
+  return out;
+}
+
+// One OSC message, as an ArrayBuffer. T, F, I and N carry no data; r is
+// [r, g, b, a] from 0 to 255.
+function encodeMessage(address, tags, values) {
+  const parts = [oscString(address), oscString("," + tags)];
+  for (let i = 0; i < tags.length; i++) {
+    const v = values[i];
+    const b = new DataView(new ArrayBuffer(8));
+    switch (tags[i]) {
+      case "f": b.setFloat32(0, Number(v)); parts.push(new Uint8Array(b.buffer, 0, 4)); break;
+      case "i": b.setInt32(0, Number(v) | 0); parts.push(new Uint8Array(b.buffer, 0, 4)); break;
+      case "d": b.setFloat64(0, Number(v)); parts.push(new Uint8Array(b.buffer, 0, 8)); break;
+      case "h": b.setBigInt64(0, BigInt(Math.trunc(Number(v)))); parts.push(new Uint8Array(b.buffer, 0, 8)); break;
+      case "c": b.setInt32(0, String(v).charCodeAt(0) || 0); parts.push(new Uint8Array(b.buffer, 0, 4)); break;
+      case "r": for (let k = 0; k < 4; k++) b.setUint8(k, (v && v[k]) | 0); parts.push(new Uint8Array(b.buffer, 0, 4)); break;
+      case "s": parts.push(oscString(String(v))); break;
+      default: break;
+    }
+  }
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out.buffer;
+}
+
+// The messages of a packet, bundles opened: [{address, values}]
+function decodePacket(buffer, offset, length) {
+  const bytes = new Uint8Array(buffer, offset || 0, length === undefined ? buffer.byteLength - (offset || 0) : length);
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const readString = (at) => {
+    let end = at;
+    while (end < bytes.length && bytes[end] !== 0) end++;
+    return [new TextDecoder().decode(bytes.subarray(at, end)), pad4(end + 1)];
+  };
+  const [first, next] = readString(0);
+  if (first === "#bundle") {
+    const msgs = [];
+    let at = 16;
+    while (at + 4 <= bytes.length) {
+      const size = dv.getInt32(at);
+      at += 4;
+      msgs.push(...decodePacket(bytes.buffer, bytes.byteOffset + at, size));
+      at += size;
+    }
+    return msgs;
+  }
+  const [tagString, start] = readString(next);
+  const values = [];
+  let at = start;
+  for (const t of tagString.slice(1)) {
+    switch (t) {
+      case "f": values.push(dv.getFloat32(at)); at += 4; break;
+      case "i": values.push(dv.getInt32(at)); at += 4; break;
+      case "d": values.push(dv.getFloat64(at)); at += 8; break;
+      case "h": values.push(Number(dv.getBigInt64(at))); at += 8; break;
+      case "c": values.push(String.fromCharCode(dv.getInt32(at))); at += 4; break;
+      case "r": values.push([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]); at += 4; break;
+      case "s": case "S": { const [s, n] = readString(at); values.push(s); at = n; break; }
+      case "b": { const n = dv.getInt32(at); at = pad4(at + 4 + n); break; }
+      case "T": values.push(true); break;
+      case "F": values.push(false); break;
+      default: break;
+    }
+  }
+  return [{ address: first, values }];
+}
+
+// A control the user holds ignores the values of the network until ms after
+// it is released; then the last value it held back applies.
+class Hold {
+  constructor(ms) {
+    this.ms = ms;
+    this.pressed = new Set();
+    this.until = new Map();
+    this.held = new Map();
+  }
+  press(path) { this.pressed.add(path); this.until.delete(path); }
+  release(path, now) { this.pressed.delete(path); this.until.set(path, now + this.ms); }
+  // A change made without pressing (keyboard, menu): held as well, for ms
+  local(path, now) { if (!this.pressed.has(path)) this.until.set(path, now + this.ms); }
+  incoming(path, values, now) {
+    if (this.pressed.has(path) || (this.until.has(path) && now < this.until.get(path))) {
+      this.held.set(path, values);
+      return false;
+    }
+    return true;
+  }
+  expired(now) {
+    const out = [];
+    for (const [path, t] of this.until) {
+      if (now < t) continue;
+      this.until.delete(path);
+      if (this.held.has(path)) { out.push([path, this.held.get(path)]); this.held.delete(path); }
+    }
+    return out;
+  }
+}
+
+exports.widgetFor = widgetFor;
+exports.encodeMessage = encodeMessage;
+exports.decodePacket = decodePacket;
+exports.Hold = Hold;
+</script>
+
+<script>
+"use strict";
+const HOLD_MS = 500;
+const ui = { server: document.getElementById("server"), connect: document.getElementById("connect"),
+             filter: document.getElementById("filter"), status: document.getElementById("status"),
+             rows: document.getElementById("rows") };
+const hold = new Hold(HOLD_MS);
+// path -> { node, spec, row, set(values) }
+let controls = new Map();
+let ws = null, target = null, retry = null;
+
+function setStatus(text, cls) { ui.status.textContent = text; ui.status.className = cls || ""; }
+
+function parseServer(text) {
+  const m = String(text).trim().replace(/^(ws|http)s?:\/\//, "").replace(/\/.*$/, "").match(/^(.*):(\d+)$/);
+  return m ? { host: m[1].replace(/^\[|\]$/g, ""), port: Number(m[2]) } : null;
+}
+
+function tagsFor(node, spec, values) {
+  if (spec.kind === "toggle") return values[0] ? "T" : "F";
+  if (spec.kind === "button") return node.TYPE === "N" ? "N" : "I";
+  if (spec.kind === "list") return values.map((v) => (typeof v === "number" ? "f" : "s")).join("");
+  return node.TYPE;
+}
+
+function send(path, values) {
+  const c = controls.get(path);
+  if (!c || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(encodeMessage(path, tagsFor(c.node, c.spec, values), values));
+}
+
+const hex = (v) => Math.round(Math.min(255, Math.max(0, v))).toString(16).padStart(2, "0");
+
+function makeControl(path, node, spec) {
+  const row = document.createElement("div");
+  row.className = "row";
+  row.dataset.path = path;
+  const label = document.createElement("div");
+  label.className = "path";
+  label.textContent = path;
+  label.title = node.DESCRIPTION || "";
+  const box = document.createElement("div");
+  box.className = "widget";
+  const unit = document.createElement("div");
+  unit.className = "unit";
+  unit.textContent = [].concat(node.UNIT || []).join(" ");
+  row.append(label, box, unit);
+
+  let set = () => {};
+  const changed = (values) => { hold.local(path, performance.now()); send(path, values); };
+  box.addEventListener("pointerdown", () => { hold.press(path); row.classList.add("held"); });
+  const release = () => {
+    if (!hold.pressed.has(path)) return;
+    hold.release(path, performance.now());
+    row.classList.remove("held");
+  };
+  window.addEventListener("pointerup", release);
+  window.addEventListener("pointercancel", release);
+
+  if (spec.kind === "slider" || spec.kind === "number") {
+    const inputs = [];
+    for (let i = 0; i < spec.size; i++) {
+      const num = document.createElement("input");
+      num.type = "number";
+      num.className = "num";
+      num.step = spec.step;
+      let range = null;
+      if (spec.kind === "slider") {
+        range = document.createElement("input");
+        range.type = "range";
+        range.min = spec.min[i];
+        range.max = spec.max[i];
+        range.step = spec.step === 1 ? 1 : (spec.max[i] - spec.min[i]) / 1000;
+        box.append(range);
+      }
+      box.append(num);
+      inputs.push({ range, num });
+    }
+    const read = () => inputs.map((x) => Number(x.num.value));
+    inputs.forEach(({ range, num }) => {
+      if (range) range.addEventListener("input", () => { num.value = range.value; changed(read()); });
+      num.addEventListener("change", () => { if (range) range.value = num.value; changed(read()); });
+    });
+    // A float shown with 6 significant digits, not the float32 it travels as
+    const shown = (v) => (spec.step === 1 ? Number(v) : Number(Number(v).toPrecision(6)));
+    set = (values) => values.forEach((v, i) => {
+      if (!inputs[i]) return;
+      inputs[i].num.value = shown(v);
+      if (inputs[i].range) inputs[i].range.value = Number(v);
+    });
+  } else if (spec.kind === "toggle") {
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    box.append(cb);
+    cb.addEventListener("change", () => changed([cb.checked]));
+    set = (values) => { cb.checked = !!values[0]; };
+  } else if (spec.kind === "button") {
+    const b = document.createElement("button");
+    b.textContent = "bang";
+    box.append(b);
+    b.addEventListener("click", () => changed([]));
+  } else if (spec.kind === "menu") {
+    const sel = document.createElement("select");
+    for (const v of spec.values) {
+      const o = document.createElement("option");
+      o.value = JSON.stringify(v);
+      o.textContent = String(v);
+      sel.append(o);
+    }
+    box.append(sel);
+    sel.addEventListener("change", () => changed([JSON.parse(sel.value)]));
+    set = (values) => { sel.value = JSON.stringify(values[0]); };
+  } else if (spec.kind === "color") {
+    const col = document.createElement("input");
+    col.type = "color";
+    box.append(col);
+    const bytes = () => [1, 3, 5].map((k) => parseInt(col.value.substr(k, 2), 16));
+    col.addEventListener("input", () => {
+      const [r, g, b] = bytes();
+      if (node.TYPE === "r") changed([[r, g, b, 255]]);
+      else changed([r / 255, g / 255, b / 255, 1].slice(0, spec.size));
+    });
+    set = (values) => {
+      const c = node.TYPE === "r" ? values[0] : values.map((v) => v * 255);
+      if (Array.isArray(c) && c.length >= 3) col.value = "#" + hex(c[0]) + hex(c[1]) + hex(c[2]);
+    };
+  } else if (spec.kind === "text") {
+    const text = document.createElement("input");
+    text.type = "text";
+    box.append(text);
+    text.addEventListener("change", () => changed([text.value]));
+    set = (values) => { text.value = String(values[0]); };
+  } else {
+    // A list: values separated by spaces, numbers or words
+    const text = document.createElement("input");
+    text.type = "text";
+    box.append(text);
+    text.addEventListener("change", () => changed(text.value.trim().split(/\s+/).filter(Boolean)
+      .map((w) => (isFinite(Number(w)) ? Number(w) : w))));
+    set = (values) => { text.value = values.join(" "); };
+  }
+  if (!spec.write) box.querySelectorAll("input, select, button").forEach((e) => { e.disabled = true; });
+  return { node, spec, row, set };
+}
+
+// The VALUE of the tree as the values of a message
+function initialValues(node) {
+  if (!("VALUE" in node)) return null;
+  const v = node.VALUE;
+  if (node.TYPE === "T" || node.TYPE === "F") return [typeof v === "boolean" ? v : node.TYPE === "T"];
+  if (node.TYPE === "r" && Array.isArray(v) && typeof v[0] === "string") {
+    const h = v[0].replace("#", "");
+    return [[0, 2, 4, 6].map((k) => parseInt(h.substr(k, 2), 16) || 0)];
+  }
+  return Array.isArray(v) ? v : [v];
+}
+
+function build(tree) {
+  controls = new Map();
+  ui.rows.textContent = "";
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return;
+    const spec = widgetFor(node);
+    if (spec && node.FULL_PATH) {
+      const c = makeControl(node.FULL_PATH, node, spec);
+      controls.set(node.FULL_PATH, c);
+      ui.rows.append(c.row);
+      const init = initialValues(node);
+      if (init && spec.read) c.set(init);
+    }
+    if (node.CONTENTS) for (const k of Object.keys(node.CONTENTS).sort()) visit(node.CONTENTS[k]);
+  };
+  visit(tree);
+  applyFilter();
+}
+
+function applyFilter() {
+  const f = ui.filter.value.trim().toLowerCase();
+  for (const [path, c] of controls) c.row.style.display = !f || path.toLowerCase().includes(f) ? "" : "none";
+}
+
+function listenAll() {
+  for (const [path, c] of controls)
+    if (c.spec.read) ws.send(JSON.stringify({ COMMAND: "LISTEN", DATA: path }));
+}
+
+async function readTree() {
+  const r = await fetch(`http://${target.host}:${target.port}/`);
+  build(await r.json());
+}
+
+async function connect() {
+  const t = parseServer(ui.server.value);
+  if (!t) { setStatus("host:port expected", "error"); return; }
+  target = t;
+  clearTimeout(retry);
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  setStatus("connecting to " + t.host + ":" + t.port);
+  let name = t.host + ":" + t.port, wsPort = t.port;
+  try {
+    const info = await (await fetch(`http://${t.host}:${t.port}/?HOST_INFO`)).json();
+    name = info.NAME || name;
+    wsPort = info.WS_PORT || wsPort;
+    await readTree();
+  } catch (e) {
+    setStatus("no answer from " + t.host + ":" + t.port + ", trying again", "error");
+    retry = setTimeout(connect, 2000);
+    return;
+  }
+  ws = new WebSocket(`ws://${t.host}:${wsPort}`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => { listenAll(); setStatus(name + ": " + controls.size + " parameters", "live"); };
+  ws.onmessage = async (ev) => {
+    if (typeof ev.data === "string") {
+      // PATH_ADDED, PATH_REMOVED, PATH_RENAMED, PATH_CHANGED: the tree again
+      try {
+        const cmd = JSON.parse(ev.data).COMMAND;
+        if (cmd && cmd.startsWith("PATH_")) { await readTree(); listenAll(); }
+      } catch (e) { }
+      return;
+    }
+    const now = performance.now();
+    for (const m of decodePacket(ev.data)) {
+      const c = controls.get(m.address);
+      if (c && c.spec.read && hold.incoming(m.address, m.values, now)) c.set(m.values);
+    }
+  };
+  ws.onclose = () => { setStatus("connection lost, trying again", "error"); retry = setTimeout(connect, 2000); };
+  history.replaceState(null, "", "?server=" + encodeURIComponent(t.host + ":" + t.port));
+}
+
+setInterval(() => {
+  for (const [path, values] of hold.expired(performance.now())) {
+    const c = controls.get(path);
+    if (c) c.set(values);
+  }
+}, 100);
+
+ui.connect.addEventListener("click", connect);
+ui.server.addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
+ui.filter.addEventListener("input", applyFilter);
+const params = new URLSearchParams(location.search);
+if (params.get("server")) { ui.server.value = params.get("server"); connect(); }
+</script>
+</body>
+</html>
