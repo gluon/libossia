@@ -64,6 +64,7 @@
 			<description>
 				Sending the <m>expose</m> message without any argument will print in Max Console various protocol and configuration options available
 				Sending the <m>expose</m> message followed by a protocol name will expose the device to the network using the optional configuration option (ie. network ports)
+				<m>expose</m> oscquery &lt;OSC port&gt; &lt;WebSocket port&gt; &lt;address&gt;: the address both ports listen on, 127.0.0.1 for the clients of this machine only, or the address of one network interface for that network only; without it, every interface. A device on one address is not announced over mDNS: its clients connect with <m>connect</m> oscquery ws://&lt;address&gt;:&lt;WebSocket port&gt;. Since ossia-prism 2.1.0+prism.10.
 				With <m>expose</m> oscquery, the device is announced over mDNS (_oscjson._tcp) under its name, so that an <o>ossia.client</o> finds it with <m>connect</m> &lt;name&gt;, on this machine or another one of the same network. About a second later, once the announcement is seen on the network, the outlet sends <m>announced</m> and the name the device is announced under. If another device of the network already has that name, the system announces this one as "name (2)": <m>announced</m> gives that name, and the console warns that the name is taken.
 			</description>
 		</method>

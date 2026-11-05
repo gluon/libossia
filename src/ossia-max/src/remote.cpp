@@ -118,6 +118,12 @@ void remote::destroy(remote* x)
   x->m_dead = true;
   x->unregister();
 
+  if(x->m_hold_clock)
+  {
+    clock_unset(x->m_hold_clock);
+    clock_free((t_object*)x->m_hold_clock);
+    x->m_hold_clock = nullptr;
+  }
   ossia_max::instance().remotes.remove_all(x);
   outlet_delete(x->m_dumpout);
   outlet_delete(x->m_set_out);

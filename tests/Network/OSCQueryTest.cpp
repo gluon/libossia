@@ -249,14 +249,17 @@ TEST_CASE("test_json_bool", "test_json_bool")
       REQUIRE(doc["TYPE"].IsString());
       REQUIRE(doc["TYPE"].GetString() == "F"s);
 
+      // A JSON boolean, as the OSCQuery proposal asks
       if(doc["VALUE"].IsArray())
       {
         REQUIRE(doc["VALUE"].GetArray().Size() == 1);
-        REQUIRE(doc["VALUE"][0].IsNull());
+        REQUIRE(doc["VALUE"][0].IsBool());
+        REQUIRE(doc["VALUE"][0].GetBool() == false);
       }
       else
       {
-        REQUIRE(doc["VALUE"].IsNull());
+        REQUIRE(doc["VALUE"].IsBool());
+        REQUIRE(doc["VALUE"].GetBool() == false);
       }
     }
   }
@@ -273,14 +276,17 @@ TEST_CASE("test_json_bool", "test_json_bool")
       REQUIRE(doc["TYPE"].IsString());
       REQUIRE(doc["TYPE"].GetString() == "T"s);
 
+      // A JSON boolean, as the OSCQuery proposal asks
       if(doc["VALUE"].IsArray())
       {
         REQUIRE(doc["VALUE"].GetArray().Size() == 1);
-        REQUIRE(doc["VALUE"][0].IsNull());
+        REQUIRE(doc["VALUE"][0].IsBool());
+        REQUIRE(doc["VALUE"][0].GetBool() == true);
       }
       else
       {
-        REQUIRE(doc["VALUE"].IsNull());
+        REQUIRE(doc["VALUE"].IsBool());
+        REQUIRE(doc["VALUE"].GetBool() == true);
       }
     }
   }
@@ -1188,3 +1194,28 @@ TEST_CASE("test_oscquery_osc_to_ws", "test_oscquery_osc_to_ws")
 // #include <ossia/protocols/oscquery/oscquery_mirror_asio.hpp>
 
 #endif
+
+// One bound for a vector, as ossia.parameter @type vec3f @min 0 @max 1: each
+// component gets it, and RANGE has one entry per component.
+TEST_CASE("test_oscquery_one_bound_for_each_component", "test_oscquery_one_bound_for_each_component")
+{
+  using namespace std::literals;
+  generic_device serv{"foo"};
+  auto& node = ossia::net::create_node(serv.get_root_node(), "/pos");
+  auto p = node.create_parameter(ossia::val_type::VEC3F);
+  p->set_domain(ossia::make_domain_from_minmax({0.f}, {1.f}, ossia::val_type::VEC3F));
+
+  auto json = oscquery::json_writer{}.query_namespace(node);
+  rapidjson::Document doc;
+  doc.Parse(json.GetString());
+  INFO(json.GetString());
+  REQUIRE(doc.HasMember("RANGE"));
+  REQUIRE(doc["RANGE"].IsArray());
+  REQUIRE(doc["RANGE"].Size() == 3);
+  for(int i = 0; i < 3; i++)
+  {
+    REQUIRE(doc["RANGE"][i].IsObject());
+    REQUIRE(doc["RANGE"][i]["MIN"].GetDouble() == 0.);
+    REQUIRE(doc["RANGE"][i]["MAX"].GetDouble() == 1.);
+  }
+}

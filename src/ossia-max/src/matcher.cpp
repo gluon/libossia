@@ -179,6 +179,14 @@ void matcher::output_value(ossia::value v)
     auto pbase = static_cast<parameter_base*>(owner);
     if(pbase->m_set_flag)
       return;
+    // @hold: a value that comes while the inlet has the control waits
+    const auto now = std::chrono::steady_clock::now();
+    if(pbase->holding(now) && !pbase->m_inputting && !owner->m_local_mute)
+    {
+      m_held = std::move(v);
+      pbase->arm_hold(now);
+      return;
+    }
   }
 
   if(!owner->m_local_mute)

@@ -189,6 +189,29 @@ namespace Ossia.Tests
       Assert.AreEqual (new[] { 0.42f }, received, "the server receives the change once, and not its own values");
     }
 
+    // Received: a value of the device applied to the field, not what the
+    // field sends
+    [UnityTest]
+    public IEnumerator RemoteRaisesReceivedForTheValuesOfTheDevice ()
+    {
+      yield return Connect (null);
+      var remote = shape.GetComponent<Remote> ();
+      yield return Until (() => fields.level == 0.3f, 2);
+      var received = new List<object> ();
+      remote.Received += v => received.Add (v);
+
+      for (int i = 0; i < 5; i++) {
+        fields.level = 0.5f + i / 10f;
+        yield return null;
+      }
+      yield return new WaitForSecondsRealtime (0.3f);
+      Assert.IsEmpty (received, "after changes made in Unity");
+
+      server.Level.PushValue (0.25f);
+      yield return Until (() => received.Count > 0, 2);
+      Assert.AreEqual (new object[] { 0.25f }, received.ToArray ());
+    }
+
     [UnityTest]
     public IEnumerator InspectorAndAnimationAreSent ()
     {

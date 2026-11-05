@@ -1031,6 +1031,14 @@ void json_parser::parse_value(net::parameter_base& addr, const rapidjson::Value&
   addr.set_value(std::move(val));
 }
 
+bool json_parser::value_differs(
+    const net::parameter_base& addr, const rapidjson::Value& obj)
+{
+  auto val = addr.value();
+  val.apply(detail::json_to_value_unchecked{obj});
+  return !(val == addr.value());
+}
+
 void json_parser::parse_parameter_value(
     net::node_base& root, const rapidjson::Value& obj, ossia::net::device_base& dev)
 {

@@ -52,6 +52,8 @@ void* ossia_object::create(t_symbol* name, long argc, t_atom* argv)
   }
 
   x->connect_slots();
+  // @bundle, as for ossia.device: shown, and never applied before
+  x->start_bundles();
 
   // expose builds its servers on this context, as for ossia.device; without
   // it, expose oscquery dereferenced a null context.
@@ -73,6 +75,12 @@ void ossia_object::destroy(ossia_object* x)
   // their ports freed, while their network context still exists.
   stop_exposing(*x->m_device, x->m_exposed);
   x->m_exposed.clear();
+  x->stop_bundles();
+  if(x->m_bundle_clock)
+  {
+    clock_free((t_object*)x->m_bundle_clock);
+    x->m_bundle_clock = nullptr;
+  }
 
   if(x->network_poll_clock)
   {

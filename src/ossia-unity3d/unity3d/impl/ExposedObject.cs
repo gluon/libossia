@@ -14,6 +14,14 @@ namespace Ossia
     internal List<OssiaEnabledComponent> ossia_components = new List<OssiaEnabledComponent>();
     protected Ossia.Controller controller = null;
 
+    //! A value from a client applied to a field or a property, on the main
+    //! thread: its exposed name and the value. Not for what Unity publishes.
+    public event Action<string, object> Received;
+    internal void OnReceived (string name, object value)
+    {
+      Received?.Invoke (name, value);
+    }
+
     public abstract void Start();
     public void ReceiveUpdates()
     {

@@ -60,10 +60,12 @@ public:
       ossia::net::network_context_ptr ctx, uint16_t, uint16_t)
       = delete;
 
+  //! bind: the address the WebSocket server listens on, every interface by
+  //! default; on another one, the server is not announced over mDNS
   oscquery_server_protocol_base(
       ossia::net::network_context_ptr ctx,
       const std::vector<ossia::net::osc_server_configuration>& conf, uint16_t ws_port,
-      bool forceWS);
+      bool forceWS, std::string bind = "0.0.0.0");
   ~oscquery_server_protocol_base() override;
 
   bool pull(net::parameter_base&) override;
@@ -87,6 +89,12 @@ public:
   ossia::net::device_base& get_device() const noexcept { return *m_device; }
 
   int get_ws_port() const noexcept { return m_wsPort; }
+  //! The address the server listens on, "0.0.0.0" for every interface
+  const std::string& get_bind() const noexcept { return m_bind; }
+  bool bound_to_every_interface() const noexcept
+  {
+    return m_bind.empty() || m_bind == "0.0.0.0";
+  }
 
   bool force_ws() const noexcept { return m_forceWS.load(std::memory_order_relaxed); }
   void set_force_ws(bool forceWS) noexcept;
@@ -112,6 +120,15 @@ public:
     return m_oscConf;
   }
 
+  //! The answer to ?PRISM_CONNECTIONS, a PRISM extension declared in the
+  //! EXTENSIONS of HOST_INFO: {"CLIENTS": [...], "SENDERS": [...]}. A client:
+  //! IP, PORT (TCP), NAME (given by the client, if any), OSC_PORT and
+  //! SENDER_PORT (its UDP ports, if it streams), LISTEN (the addresses it
+  //! asked for), PACKETS (the OSC packets it sent). A sender, a UDP source
+  //! that is none of the clients, the last 256 to send: IP, PORT, PACKETS,
+  //! LAST_MS (since its last packet).
+  std::string query_connections();
+
   Nano::Signal<void(const std::string&)> onClientConnected;
   Nano::Signal<void(const std::string&)> onClientDisconnected;
 
@@ -125,6 +142,11 @@ protected:
   // The client whose OSC sender has that UDP port (LOCAL_SENDER_PORT of its
   // START_OSC_STREAMING), 0 if none.
   uintptr_t client_of_sender_port(int port);
+  // A UDP packet of a source that is none of the clients
+  void record_sender(const std::string& ip, uint16_t port);
+  // PRISM_NAME, a text command a client sends on the WebSocket to give its
+  // name; true if the message was one
+  bool on_prism_name(const connection_handler& hdl, const rapidjson::Document& doc);
 
   // A value the server sent on its own (a local change, another client's
   // value it forwards), to every client but skipped
@@ -190,6 +212,7 @@ protected:
 
   // The local ports
   uint16_t m_wsPort{};
+  std::string m_bind;
 
   // Will only send changes through WS
   std::atomic_bool m_forceWS{};
@@ -204,15 +227,29 @@ protected:
   std::mutex m_sentMutex;
   std::unordered_map<std::string, sent_value> m_sent;
   std::atomic<int64_t> m_crossingWindow{default_crossing_window.count()};
+
+  struct sender_stats
+  {
+    std::string ip;
+    uint16_t port{};
+    int64_t packets{};
+    std::chrono::steady_clock::time_point last;
+  };
+  // The UDP sources that are none of the clients, by "ip:port": past
+  // max_senders, the one silent for the longest goes
+  static constexpr std::size_t max_senders = 256;
+  std::mutex m_sendersMutex;
+  std::unordered_map<std::string, sender_stats> m_senders;
 };
 
 class OSSIA_EXPORT oscquery_server_protocol : public oscquery_server_protocol_base
 {
 public:
   struct osc_receiver_impl;
+  //! bind: the address both ports listen on, every interface by default
   explicit oscquery_server_protocol(
       ossia::net::network_context_ptr ctx, uint16_t osc_port = 1234,
-      uint16_t ws_port = 5678, bool forceWS = false);
+      uint16_t ws_port = 5678, bool forceWS = false, std::string bind = "0.0.0.0");
   ~oscquery_server_protocol();
 
   void update_zeroconf();

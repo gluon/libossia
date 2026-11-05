@@ -26,7 +26,7 @@ Prerequisites: Unity 6.3 LTS on macOS (the library is universal, arm64 and x86_6
 |---|---|
 | Custom parameters | The scene `CustomParameters`: an `OssiaController` and a cube named `Shape` with the script `CustomParameters.cs`, whose five fields (`float`, `int`, `bool`, `Color`, `Vector3`) are exposed under `/Shape/CustomParameters`; `ExposeAttributes` with Send Updates checked. The Max patch `CustomParameters.maxpat` drives each field and shows what Unity sends back. |
 | Follow a device | The scene `FollowADevice`: an `OssiaClient` that follows the device `follow_me` by its name, and a cube whose four `Ossia.Remote` bind the fields of `FollowADevice.cs` to `/cube/size`, `/cube/color`, `/cube/spin` and `/cube/angle`. The Max patch `FollowADevice.maxpat` exposes `follow_me` as it opens: Max sets the size, the color and the spin, Unity sends the angle back. See [Following a device](#following-a-device). |
-| Exposed cube | The scene `ExposedCube`: an `OssiaController` and a cube whose transform is exposed (`/Cube/transform/position`, `rotation`, `localScale`, ...), with no script of its own. Its `ExposeAttributes` keeps Send Updates unchecked, as the scene saved it: the cube follows the clients and sends nothing back. |
+| Exposed cube | The scene `ExposedCube`: an `OssiaController` and a cube whose transform is exposed (`/Cube/transform/position`, `rotation`, `localScale`), with no script of its own. Its `ExposeAttributes` keeps Send Updates unchecked, as the scene saved it: the cube follows the clients and sends nothing back. |
 
 "Custom parameters" and "Exposed cube" run on ports 1234 (OSC) and 5678 (HTTP and WebSocket), under the device name `unity`; "Follow a device" has no server, and its patch exposes `follow_me` on 9234 and 9678.
 
@@ -36,9 +36,9 @@ Three things in the scene:
 
 1. A GameObject named exactly `OssiaController`, with the component `Ossia.Controller` (Add Component > search "Controller"). One per scene; the exposed objects find it by that name.
 2. Your script, on any GameObject, with the fields to expose marked `[Ossia.Expose("<name>")]`.
-3. The component `Ossia.ExposeAttributes` on that same GameObject. It reads the marked fields when the scene starts and publishes each one under `/<GameObject name>/<script class>/<name>`. It also always publishes the GameObject's transform, under `/<GameObject name>/transform/...`.
+3. The component `Ossia.ExposeAttributes` on that same GameObject. It reads the marked fields when the scene starts and publishes each one under `/<GameObject name>/<script class>/<name>`. It also always publishes the GameObject's transform, under `/<GameObject name>/transform/`: `position`, `rotation` and `localScale`.
 
-The script of the sample, `CustomParameters.cs`, copied as is into `Assets` (the file name must be the class name), on a cube named `Shape`:
+The script of the sample, `CustomParameters.cs`, copied as is into `Assets` (the file name must be the class name), on a cube named `Shape`. Do this in a project without the imported sample, or rename the class and the file: two classes `CustomParameters` stop the project compiling (`error CS0101`).
 
 ```csharp
 using UnityEngine;
@@ -72,7 +72,13 @@ public class CustomParameters : MonoBehaviour
   [Ossia.Expose("size")]
   public Vector3 size = Vector3.one;
 
+  // Taking control: when a client writes the orientation of the shape
+  // (/Shape/transform/rotation), the spin pauses this long, so that the
+  // client's value is not turned away at the next frame. Not exposed.
+  public float holdAfterClient = 1f;
+
   Material material;
+  float pausedUntil;
 
   void Start()
   {
@@ -87,11 +93,17 @@ public class CustomParameters : MonoBehaviour
         r.sharedMaterial = new Material(lit);
     }
     material = r.material;
+
+    // Received: a value of a client applied, never what Unity publishes
+    GetComponent<Ossia.ExposeAttributes>().Received += (name, value) => {
+      if (name == "rotation")
+        pausedUntil = Time.time + holdAfterClient;
+    };
   }
 
   void Update()
   {
-    if (spin) {
+    if (spin && Time.time >= pausedUntil) {
       var a = axis == 0 ? Vector3.right : axis == 2 ? Vector3.forward : Vector3.up;
       transform.Rotate(a, speed * Time.deltaTime);
     }
@@ -101,14 +113,14 @@ public class CustomParameters : MonoBehaviour
 }
 ```
 
-The `Start` method only matters for a cube made by the sample's scene file; a cube created in your own project with GameObject > 3D Object > Cube already has the material of its render pipeline, and `material = GetComponent<Renderer>().material;` is enough.
+The `Start` method: the render pipeline part only matters for a cube made by the sample's scene file; a cube created in your own project with GameObject > 3D Object > Cube already has the material of its render pipeline, and `material = GetComponent<Renderer>().material;` is enough. `Received` and `holdAfterClient` are taking control: leave them out if the spin may go on while a client writes the rotation.
 
 ### What a client sees
 
-Play, then `curl -s http://localhost:5678/Shape/CustomParameters` (output of the sample, unchanged):
+Play, then `curl -s http://localhost:5678/Shape/CustomParameters` (output of the sample with `2.1.0+prism.10`):
 
 ```
-{"FULL_PATH":"/Shape/CustomParameters","CONTENTS":{"speed":{"FULL_PATH":"/Shape/CustomParameters/speed","TYPE":"f","VALUE":45.0,"ACCESS":3,"CLIPMODE":"none"},"axis":{"FULL_PATH":"/Shape/CustomParameters/axis","TYPE":"i","VALUE":1,"ACCESS":3,"CLIPMODE":"none"},"spin":{"FULL_PATH":"/Shape/CustomParameters/spin","TYPE":"T","VALUE":null,"ACCESS":3,"CLIPMODE":"none"},"color":{"FULL_PATH":"/Shape/CustomParameters/color","TYPE":"ffff","VALUE":[1.0,0.5,0.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["color.rgb.r","color.rgb.g","color.rgb.b","color.rgb.a"]},"size":{"FULL_PATH":"/Shape/CustomParameters/size","TYPE":"fff","VALUE":[1.0,1.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["position.cartesian.x","position.cartesian.y","position.cartesian.z"]}}}
+{"FULL_PATH":"/Shape/CustomParameters","CONTENTS":{"speed":{"FULL_PATH":"/Shape/CustomParameters/speed","TYPE":"f","VALUE":45.0,"ACCESS":3,"CLIPMODE":"none"},"axis":{"FULL_PATH":"/Shape/CustomParameters/axis","TYPE":"i","VALUE":1,"ACCESS":3,"CLIPMODE":"none"},"spin":{"FULL_PATH":"/Shape/CustomParameters/spin","TYPE":"T","VALUE":true,"ACCESS":3,"CLIPMODE":"none"},"color":{"FULL_PATH":"/Shape/CustomParameters/color","TYPE":"ffff","VALUE":[1.0,0.5,0.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["color.rgb.r","color.rgb.g","color.rgb.b","color.rgb.a"]},"size":{"FULL_PATH":"/Shape/CustomParameters/size","TYPE":"fff","VALUE":[1.0,1.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":"vecf"}}}
 ```
 
 Pipe it into `python3 -m json.tool` to read it indented. In short:
@@ -117,11 +129,11 @@ Pipe it into `python3 -m json.tool` to read it indented. In short:
 |---|---|---|---|
 | `/Shape/CustomParameters/speed` | `f` | `45.0` | |
 | `/Shape/CustomParameters/axis` | `i` | `1` | |
-| `/Shape/CustomParameters/spin` | `T` | `null` (see [Limits](#limits)) | |
+| `/Shape/CustomParameters/spin` | `T` | `true` | |
 | `/Shape/CustomParameters/color` | `ffff` | `[1.0, 0.5, 0.0, 1.0]` | `color.rgb.r` ... `color.rgb.a` |
-| `/Shape/CustomParameters/size` | `fff` | `[1.0, 1.0, 1.0]` | `position.cartesian.x` ... `z` |
+| `/Shape/CustomParameters/size` | `fff` | `[1.0, 1.0, 1.0]` | `vecf` |
 
-`ACCESS` is 3 (read and write) for every parameter, `CLIPMODE` is `none`, and there is no `RANGE`. One value: `curl -s "http://localhost:5678/Shape/CustomParameters/speed?VALUE"` returns `{"VALUE":45.0}`.
+`ACCESS` is 3 (read and write) for every parameter, `CLIPMODE` is `none`, and there is no `RANGE`: the script gives none (see below for `Min`, `Max`, `Unit` and `Access`). One value: `curl -s "http://localhost:5678/Shape/CustomParameters/speed?VALUE"` returns `{"VALUE":45.0}`.
 
 ### Values in both directions
 
@@ -129,6 +141,7 @@ Pipe it into `python3 -m json.tool` to read it indented. In short:
 - **Unity to client, with Send Updates** on `ExposeAttributes` (field `sendUpdates`, on by default; a scene keeps the value it saved, unchecked in the sample "Exposed cube"). Each frame, a field whose value changed, whatever changed it (the Inspector, a script, an animation), is pushed to the clients that listen to it (an `ossia.remote` shows it on its outlet). Measured on the sample: after setting in Unity `speed=12.5 axis=2 color=(0, 0, 1, 1) size=(0.5, 0.5, 0.5)`, `?VALUE` returns `12.5`, `2`, `[0.0,0.0,1.0,1.0]` and `[0.5,0.5,0.5]`. With Send Updates unchecked, `speed` set to 7 in Unity stays `12.5` for the client.
 
 - **The changes of a frame leave together.** What the exposed objects change during a frame leaves at its end, after every `Update`, in OSC bundles (`bundles` on the Controller, on by default): measured, eight fields changed in one frame reach a client in one datagram of eight messages; with `bundles` off, in eight datagrams (`Tests/Runtime/ServerBundleTests.cs`). A bundle is split when it would exceed a datagram (1400 bytes).
+- **Its own values are not applied again.** What an exposed object publishes comes back through the Controller's message queue, and is not applied: when the object publishes before the Controller reads its queue in the frame, the value of the frame before comes back after the one of this frame left, and both are recognised. Measured, a script that turns an object while a client sets its speed, the object publishing first: in `2.1.0+prism.9`, the Controller set the angle back in 60 frames of 120, and the object turned at half its speed; now in none (`Tests/Runtime/TurningObjectTests.cs`).
 - **No echo.** A value received from a client and applied to the field does not leave again from Unity. Measured with a libossia OSCQuery client (the core of `ossia.remote`) writing 20 values, 150 ms apart, away from any change in Unity: the field took the last, and none came back to the client (`Tests/Runtime/ConcurrentWriteTests.cs`).
 - **Crossed writes.** When Unity and a client write the same address in the same instant, each value crosses the other: Unity's leaves before the client's arrives, and the client applies Unity's after sending its own. The server then answers the client with its final value, the client's, and both end on it. Measured, a script and a libossia client, 20 crossings: 0 divergence (`Tests/Runtime/ForwardTests.cs`, `CrossedWritesConverge`); without the answer, every crossing diverged. A write is taken for a crossing when it comes less than 100 ms after the server sent the client a different value on that address; the answer goes to that client only, and opens no window. When a script and a client write in turns every frame for 5 s (297 and 296 writes), every write of the client follows one of Unity's within that window: each is answered with its own value (296 answers), both end on the last value written, and nothing moves once both stop.
 - **Clients see each other.** The server forwards a value one client sends to the other clients, never back to its sender, as `ossia.device` does in Max (`forwardToClients` on the Controller, on by default). Measured with two libossia clients A and B: A writes 0.25, Unity applies it, B receives it once, A receives nothing; B writes 0.5 and Unity then sets 0.75, A receives 0.5 then 0.75, B only 0.75. With `forwardToClients` off, B receives nothing of what A writes (`Tests/Runtime/ForwardTests.cs`).
@@ -143,9 +156,9 @@ What `[Ossia.Expose]` accepts, with what a client sees (measured):
 |---|---|---|---|
 | `float`, `double` | `f` | | `double` is sent as a 32-bit float |
 | `int` | `i` | | |
-| `bool` | `T` | | `VALUE` reads `null` over HTTP |
+| `bool` | `T` | | `VALUE` reads `true` or `false` over HTTP |
 | `string` | `s` | | |
-| `Vector2`, `Vector3`, `Vector4` | `ff`, `fff`, `ffff` | `position.cartesian.*` | the unit is a position, whatever the field means |
+| `Vector2`, `Vector3`, `Vector4` | `ff`, `fff`, `ffff` | `vecf` | no unit of its own; give one with `Unit` |
 | `Quaternion` | `ffff` | `orientation.quaternion` | x, y, z, w |
 | `Color` | `ffff` | `color.rgb.r` ... `color.rgb.a` | r, g, b, a from 0 to 1 |
 | `Color32` | `r` | | sent as an OSC color, `#RRGGBBAA` over HTTP |
@@ -153,16 +166,14 @@ What `[Ossia.Expose]` accepts, with what a client sees (measured):
 
 A field of another type (`long`, `Texture2D`, an enum, a class) is skipped without a message: it does not appear in the tree.
 
-What is read: the public fields declared in the script's own class, and its public properties (inherited ones included). A property needs a `get` to be published and a `set` to receive values. Not read: private fields, and public fields declared in a parent class.
+What is read: the public fields declared in the script's own class, and its public properties (inherited ones included). A property needs a `get` to be published and a `set` to receive values. Not read: private fields. Public fields declared in a parent class are read since `2.1.0+prism.10`.
 
 ### Limits
 
 - The server cannot tell a write that crossed its value from a write the client made right after receiving it: a client that writes less than 100 ms after a change in Unity gets its own value back, once, unchanged. Writes further apart get nothing.
-- `[Ossia.Expose]` takes a name and nothing else: no bounds (`RANGE`), no unit of your choice, no access mode, no clip mode, no description. Every parameter is read-write, unbounded, with the unit its type gives it (table above). Clamp the received values in your script, as the sample does for `axis`. `ossia.parameter` in Max offers all of these; `[Ossia.Expose]` does not, in this version.
-- The name is required: `[Ossia.Expose]` without one creates a parameter with an empty name, at `/<GameObject>/<class>/`, that a client can hardly address.
+- `[Ossia.Expose]` takes a name, `Min`, `Max`, `Unit` and `Access` (`2.1.0+prism.10`), for instance `[Ossia.Expose ("speed", Min = 0, Max = 360, Unit = "angle.degree", Access = Ossia.ossia_access_mode.GET)]`; without a name, the parameter takes the name of the field or property. No clip mode and no description: the bounds are published in `RANGE` and not enforced, so clamp the received values in your script, as the sample does for `axis`. A vector has the same bounds on each component.
 - The node of a script is its full class name: a class `Params` in the namespace `MyGame` gives `/<GameObject>/MyGame.Params/...`.
 - The GameObject's name is read once, when the scene starts: renaming it in Play does not move its parameters.
-- `bool` parameters read `"VALUE":null` over HTTP (`curl`, the tree at connection), while their OSC and WebSocket values are right.
 
 ### ExposeComponents
 
@@ -173,7 +184,7 @@ curl -s "http://localhost:5678/Lamp/Light/intensity?VALUE"
 {"VALUE":1.0}
 ```
 
-The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`, `/Lamp/Light/spotAngle`, `/Lamp/Light/enabled` and some forty other properties of `Light`. An OSC message `/Lamp/Light/intensity 3.5` sets the light's intensity to 3.5. The node of a component is its class name without namespace (`Light`), under Node Name (default `Object`). Its fields: `NodeName` (`Object`), `components` (empty), `sendUpdates` (on). It writes one `Prop: <name> => <type>` line in the console for each property it reads.
+The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`, `/Lamp/Light/spotAngle`, `/Lamp/Light/enabled` and some forty other properties of `Light`. An OSC message `/Lamp/Light/intensity 3.5` sets the light's intensity to 3.5. The node of a component is its class name without namespace (`Light`), under Node Name (default `Object`). Its fields: `NodeName` (`Object`), `components` (empty), `sendUpdates` (on).
 
 ### Low-level API: CustomDevice.cs
 
@@ -181,11 +192,13 @@ The tree holds `/Lamp/Light/color`, `/Lamp/Light/intensity`, `/Lamp/Light/range`
 
 **Do not put it in a scene that has an `OssiaController` with the default ports.** Nothing is reported: both servers start, and a client reaching port 5678 gets the tree of `CustomDevice` (`/foo/blu`, `/my_string`, ...) instead of the scene's. Change the ports in `CustomDevice.cs` (copy it into `Assets` under another class name) or on the Controller.
 
+It leaves `newDevice` to the reset of the library (`ossia_device_reset_static`), which frees its ports when Play stops, through the count the Controllers and the Clients share: `Ossia.Controller.Hold()` once its device is made, `Ossia.Controller.Let(true)` in its `OnApplicationQuit`. The reset waits for the last of them, so that a Client of the same scene frees its mirror first. A script of your own that builds a device does the same, or frees its device itself. Measured in the editor, `CustomDevice` and a Client that follows it, Play then Stop twice: no crash, the ports free after each Stop (`Tests/Editor/PlayCycleTests.cs`); with an unconditional reset, Unity crashed at the first Stop.
+
 ## Driving from Max
 
 With the package `ossia-prism` in Max, the sample's `CustomParameters.maxpat`:
 
-- `[ossia.client]`, without argument, message `connect unity`: connects by name (mDNS); the console shows `client: connect 1 unity` once the device is found, `client: connect 0 unity` every second until then. Created with a name, `[ossia.client <name>]` would print the help of its protocols every second from the opening of the patch (see the README of ossia-prism, Discovery by name). Or `connect oscquery ws://127.0.0.1:5678`, by address.
+- `[ossia.client]`, without argument, message `connect unity`: connects by name (mDNS); the console shows `client: connect 1 unity` once the device is found, `client: connect 0 unity` every second until then. Created with a name, `[ossia.client <name>]` takes that name and connects nothing (see the README of ossia-prism, Discovery by name). Or `connect oscquery ws://127.0.0.1:5678`, by address.
 - one `[ossia.remote /Shape/CustomParameters/<name>]` per field: a number box for `speed`, a number box from 0 to 2 for `axis`, a toggle for `spin`, four number boxes into `[pak 1. 0.5 0. 1.]` for `color`, three into `[pak 1. 1. 1.]` for `size`;
 - right of each remote, a message box shows what Unity sends back (Send Updates is checked in the sample's scene).
 
@@ -202,7 +215,7 @@ For your own script: one `[ossia.remote /<GameObject>/<class>/<name>]` per field
 3. In Unity, open the scene `FollowADevice` and press Play. The console shows `OSSIA client: connected to ws://<machine>.local:9678 (follow_me)`; the Inspector of `OssiaClient` reads `Connected to ws://...`.
 4. In Max, change size, color and spin: the cube follows. The number under angle follows the cube as it turns.
 
-Measured with Max 9 and ossia-prism `2.1.0+prism.9`, in a new project, these steps followed with no click (`tests/Unity/cross/doc_follow.py`, see [Tests](#tests)): the console line `OSSIA client: connected to ws://<machine>.local:9678 (follow_me)`, the Inspector `Connected to ws://<machine>.local:9678`; after `size 2.` and `spin 180.` in Max, the cube's scale reads `(2.00, 2.00, 2.00)` and its spin 180; the angle Max receives moves.
+Measured with Max 9 and ossia-prism `2.1.0+prism.10`, in a new project, these steps followed with no click (`tests/Unity/cross/doc_follow.py`, see [Tests](#tests)): the console line `OSSIA client: connected to ws://<machine>.local:9678 (follow_me)`, the Inspector `Connected to ws://<machine>.local:9678`; after `size 2.` and `spin 180.` in Max, the cube's scale reads `(2.00, 2.00, 2.00)` and its spin 180; the angle Max receives moves.
 
 ### Your own script
 
@@ -248,11 +261,11 @@ The Remote binds at the next frame, once the device's tree holds the address.
 - **Tree changes.** Nodes the device adds after the connection are applied each frame; a Remote whose address did not exist binds when it appears, and takes its value. Measured: `/later`, created on the server half a second after the connection, bound and applied to the field.
 - **Loss and reconnection.** When the server stops, the Client reads `Lost`, the console warns `OSSIA client: lost ws://...`, the Remotes unbind, and with `reconnect` on (the default) it tries again every second until the server is back, then binds the Remotes again and applies the device's values. Measured: lost within 3 s of the stop, connected again within a few seconds of the return, and the field takes the value of the new server.
 
-All of this is measured by `Tests/Runtime/ClientTests.cs`, against a libossia server built in the test as `ossia.device` builds its device, and by the cross bench against Max (`ossia.device`) and TouchDesigner (`prism_oscquery_server` 0.3.2), by address and by name: values both ways, nothing back for 20 values written on either side, 0 divergence in 20 crossed writes (see [Tests](#tests)).
+All of this is measured by `Tests/Runtime/ClientTests.cs`, against a libossia server built in the test as `ossia.device` builds its device, and by the cross bench against Max (`ossia.device`) and TouchDesigner (`prism_oscquery_server` 0.3.3), by address and by name: values both ways, nothing back for 20 values written on either side, 0 divergence in 20 crossed writes (see [Tests](#tests)).
 
 ### Limits
 
-- A server that does not answer crossed writes (ossia-max `2.1.0+prism.8` and earlier, ossia 2.1.0, a WebSocket++ server of the C API): when the scene and the server write the same address in the same instant, each keeps the other's value. Measured with a libossia client and such a server, 20 crossings: 20 divergences. The Client does not read the value again after a crossing, in this version. The servers of ossia-prism `2.1.0+prism.9` (ossia-max, the Unity Controller) and of TouchDesigner (`prism_oscquery_server` 0.3.2) answer them.
+- A server that does not answer crossed writes (ossia-max `2.1.0+prism.8` and earlier, ossia 2.1.0, a WebSocket++ server of the C API): when the scene and the server write the same address in the same instant, each keeps the other's value. Measured with a libossia client and such a server, 20 crossings: 20 divergences. Since `2.1.0+prism.10`, the client of the core reads the value again 100 ms after a crossing, and both end on the server's value (`C API: a mirror reads the value again after a crossing`); not measured from a scene. The servers of ossia-prism since `2.1.0+prism.9` (ossia-max, the Unity Controller) and of TouchDesigner (`prism_oscquery_server` since 0.3.2) answer them.
 - One address per Remote, and one field or property per Remote: a script with five followed fields needs five Remotes.
 - The types are those of [Accepted types](#accepted-types); a value whose type the field cannot take (a `float` for a `Vector3` field) is ignored without a message, and the field keeps its value.
 - A node the device removes stays in the Client's tree, marked as removed (the default of the libossia mirror; ossia-max removes it): a Remote bound to it stays bound and receives nothing more. Not tested.
@@ -269,6 +282,7 @@ On the GameObject named `OssiaController`.
 | `deviceName` | `unity` | Name of the device, under which it is announced over mDNS (`_oscjson._tcp`) |
 | `oscPort` | `1234` | UDP port on which the device receives OSC |
 | `wsPort` | `5678` | TCP port of the OSCQuery server: HTTP (the tree) and WebSocket |
+| `listenAddress` | empty | The address both ports listen on: `127.0.0.1` for the clients of this machine only, the address of one interface for that network only; empty, every interface. On one address the device is not announced over mDNS: clients connect with `ws://<address>:<wsPort>` |
 | `runInBackground` | on | Keeps the scene following the values received when Unity loses focus (see [Troubleshooting](#troubleshooting)) |
 | `resolveAnnouncedName` | on | Reads the name the device is announced under over mDNS (see [mDNS](#mdns)) |
 | `bundles` | on | Sends what changes during a frame at its end, in OSC bundles; off, each value at once in its own message |
@@ -290,7 +304,7 @@ The device starts in `Awake` and is freed when the Controller is destroyed or Pl
 | `Status` (property) | | `Disconnected`, `Connecting`, `Connected` or `Lost` |
 | `Url`, `LastError`, `Device` (properties) | | The address while connected, why the last attempt failed, the mirror of the device |
 
-Connects in `OnEnable`, disconnects in `OnDisable`; `Connect()` and `Disconnect()` do the same from a script.
+Connects in `OnEnable`, disconnects in `OnDisable`; `Connect()` and `Disconnect()` do the same from a script. Leaving Play disables the Client after the `OnApplicationQuit` of the Controllers: the Client frees its mirror then, and the library is reset (`ossia_device_reset_static`) once the last Controller or Client has freed its device. Measured in the editor, a Controller, a Client that follows it and a Remote bound to the Controller's tree, Play then Stop twice: no crash (`Tests/Editor/PlayCycleTests.cs`); with the package `2.1.0+prism.9`, Unity crashed at the first Stop.
 
 ### Ossia.Remote
 
@@ -302,18 +316,20 @@ Connects in `OnEnable`, disconnects in `OnDisable`; `Connect()` and `Disconnect(
 | `member` | empty | The name of its public field or property |
 | `sendUpdates` | on | Sends the changes of the field to the device; off, the field only follows it |
 | `Bound` (property) | | True once the address was found on the device |
+| `Received` (event) | | Raised on the main thread with each value received from the device, after the field is set |
 
 ### Ossia.ExposeAttributes
 
 | Field | Default | Role |
 |---|---|---|
 | `sendUpdates` | on | Pushes to the clients, each frame, the fields and transform values changed in Unity, whatever changed them; never a value received from a client. A scene keeps the value it saved |
+| `Received` (event) | | Raised on the main thread with the name and the value of each parameter a client sets, after the field is set: a script can hold its own changes for a while, as the sample "Custom parameters" pauses its spin while a client sets the rotation |
 
-Publishes the transform (`position`, `localPosition`, `eulerAngles`, `localEulerAngles`, `right`, `up`, `forward`, `rotation`, `localRotation`, `localScale`, `lossyScale`) and the fields and properties marked `[Ossia.Expose]` of every component of its GameObject.
+Publishes the transform (`position`, `rotation`, `localScale`) and the fields and properties marked `[Ossia.Expose]` of every component of its GameObject. The other properties of the transform (`localPosition`, `eulerAngles`, `localEulerAngles`, `localRotation`, `right`, `up`, `forward`, `lossyScale`) say again what these three say, and are not published: set back, they disagreed with them, `up` or `right` holding a part of the orientation only. Measured, an object a script turns at `Quaternion.Euler(20, angle, 0)`: `right` written back as read gave it `(0, 202.5, 0)` for `(20, 202.5, 0)` (`Tests/Runtime/TurningObjectTests.cs`).
 
 ### Ossia.Expose
 
-`[Ossia.Expose("<name>")]` on a public field or property: the name of the parameter under the script's node. See [Accepted types](#accepted-types) and [Limits](#limits).
+`[Ossia.Expose("<name>")]` on a public field or property: the name of the parameter under the script's node; without a name, the name of the field or property. Its options: `Min` and `Max` (published in `RANGE`, the same for each component of a vector, not enforced), `Unit` (an ossia unit, `angle.degree`, `gain.db`, `position.cart3D`; by default the unit the type gives) and `Access` (`ossia_access_mode.GET`, `SET` or `BI`, the default). See [Accepted types](#accepted-types) and [Limits](#limits).
 
 ### Ossia.ExposeComponents
 
@@ -349,7 +365,7 @@ In the editor, a Play started less than two seconds after the previous one waits
 | A value sent from Max does not move anything | The address is wrong (check with `curl`), or the script overwrites the field every frame. | Copy the `FULL_PATH` from `curl`; set the visible property from the field, not the other way round. |
 | Max does not show what changes in Unity | Send Updates is unchecked on `ExposeAttributes` (on by default; a scene keeps the value it saved, as "Exposed cube" does). | Check it. |
 | `OSSIA client: "mydevice" is not announced over mDNS` | No device of that name on the network, or mDNS does not pass (see [mDNS](#mdns)). | `dns-sd -B _oscjson._tcp` lists the names; set Server to that name, or to `ws://host:port`. |
-| `OSSIA client: ws://...: no OSCQuery server answers at ws://...` | The server is not started, or another port. | Start it (`expose oscquery <osc> <ws>` in Max), check the port with `curl -s http://host:port`. |
+| `OSSIA client: ws://...: the tree of ws://... could not be read` (or `no OSCQuery server answers at ws://...`) | The server is not started, or another port. | Start it (`expose oscquery <osc> <ws>` in Max), check the port with `curl -s http://host:port`. |
 | `OSSIA remote /x: Y has no public field or property "z"` | Member misspelt, or the field is private. | Make the field public, copy its exact name. |
 | A Remote stays unbound, nothing moves | The address is not in the device's tree. | `curl -s http://host:port` shows the tree; copy the `FULL_PATH`. |
 | The cube of a sample is pink | The Exposed cube scene uses Unity's built-in default material, which the Universal and HD render pipelines cannot draw. | Cosmetic: the values still pass. Give the cube a material of your pipeline. |
@@ -377,9 +393,30 @@ The run folder is outside the repository: a Unity project with the package, the 
 
 Pairs: Unity serves `unity_cross` (9870, 9871), followed by Max (`ossia.client`), TouchDesigner (`prism_oscquery`) and a second Unity (`Ossia.Client`); Unity follows Max (`ossia.device max_cross`, 9880, 9881) and TouchDesigner (`prism_oscquery_server td_cross`, 9890, 9891); each by address, then by name. In each pair: a value written on each side reaches the other; 20 values written on one side, 50 ms apart, away from any change of the other, all applied and none back, on each side; 20 crossed writes, both sides writing a different value in the same instant, both ending on the same value. Then the scene of "Follow a device" follows `follow_me` of `FollowADevice.maxpat`, by name and by address, Max writing `cube/size` as another client and reading `cube/angle`. The report merges the logs of the runner, Max, TouchDesigner and the players in time order and ends with `RESULT: PASS` or `RESULT: FAIL`; it is written to `<run folder>/cross_run/report.txt`.
 
-On 2026-11-03, Max 9.2, ossia-prism `2.1.0+prism.9`, TouchDesigner 2025.33230 with `prism_oscquery` 0.3.2, Unity 6000.3.27f2: `RESULT: PASS`, 73 checks, none failed. Nothing came back in any of the 20-value bursts; 0 divergence in the 100 crossed writes of the five pairs. With the library of ossia-prism `2.1.0+prism.8` still loaded in Max, `ossia.device` sent back each of the 20 values Unity wrote. The crossed writes of the pair "Max server x Unity client" did not diverge with it either: on one machine, the value of Max seldom reaches Unity between the frame where Unity changes the field and the end of that frame, when Unity sends it; the answer of the server to a crossing is proven by the tests of the C API and the Play Mode test `CrossedWritesConverge`, red without it.
+On 2026-11-05, Max 9.2, the sources of ossia-prism `2.1.0+prism.10`, TouchDesigner 2025.33230 with `prism_oscquery` 0.3.3, Unity 6000.3.27f2: `RESULT: PASS`, 73 checks, none failed. On 2026-11-03, with `2.1.0+prism.9` and 0.3.2, the same. Nothing came back in any of the 20-value bursts; 0 divergence in the 100 crossed writes of the five pairs. With the library of ossia-prism `2.1.0+prism.8` still loaded in Max, `ossia.device` sent back each of the 20 values Unity wrote. The crossed writes of the pair "Max server x Unity client" did not diverge with it either: on one machine, the value of Max seldom reaches Unity between the frame where Unity changes the field and the end of that frame, when Unity sends it; the answer of the server to a crossing is proven by the tests of the C API and the Play Mode test `CrossedWritesConverge`, red without it.
 
 The "doc only" test of "Follow a device": `python3 tests/Unity/cross/doc_follow.py <folder> --package <tgz>` creates a new project, adds the package and imports the sample as the Package Manager does (by their effect on the files), opens `FollowADevice.maxpat` in Max, and plays the scene in batch mode: `RESULT: PASS` on 2026-11-03 (see [The sample](#the-sample)).
+
+## Functional audit
+
+What the package does for each requirement of the PRISM platform, and what proves it, for `2.1.0+prism.10`. The requirements: values travel in OSC bundles, and only those that change (12); both directions, without echo (13): a value received is applied (a), every local change leaves whatever its source (b), a value received and applied does not leave again, and two sides writing at once agree (c).
+
+| Requirement | Server (`Controller`, `ExposeAttributes`) | Client (`Client`, `Remote`) | Proven by |
+|---|---|---|---|
+| 12, bundles | what changes during a frame leaves at its end, in bundles of at most 1400 bytes | the same (`bundles` on the Client) | `Tests/Runtime/ServerBundleTests.cs`, `ClientTests.cs` |
+| 12, only what changes | a field leaves when its value changed | the same | `Tests/Runtime/SendUpdatesTests.cs`, `ClientTests.cs` |
+| 13a, received values applied | at the next frame, on the main thread | the same | `Tests/Runtime/SendUpdatesTests.cs`, `ClientTests.cs`; `tests/Unity/cross/cross_run.py` |
+| 13b, every source leaves | read each frame: a script, the Inspector, an animation | the same | `Tests/Runtime/SendUpdatesTests.cs`, `ClientTests.cs`; `cross_run.py`; the bench of the TouchDesigner component (`bidir_run.py`), Unity (a) and (b) |
+| 13c, no echo | a value applied does not leave again; its own values are not applied again | the same | `Tests/Runtime/ConcurrentWriteTests.cs`, `TurningObjectTests.cs`; `cross_run.py` (0 of 20 back on each side); `bidir_run.py` (0 of 50) |
+| 13c, two writers agree | a write that crosses a value sent less than 100 ms before is answered with the final value | reads the value again 100 ms after a crossing | `Tests/Runtime/ForwardTests.cs`, `CrossedWritesConverge`; `cross_run.py` (0 divergence out of 100 crossings) |
+| Discovery by name | announces `_oscjson._tcp`; `AnnouncedName` says the name it got | `server` takes a name | `Tests/Editor/MdnsTests.cs`, `Tests/Runtime/AnnouncedNameTests.cs`; `cross_run.py` (by name) |
+| Reconnection | a client that comes back is served; Stop then Play serves again | tries again every second with `reconnect` | `Tests/Runtime/ClientTests.cs`, `Tests/Runtime/ControllerLifetimeTests.cs` |
+| Leaving Play | frees its ports, with or without a Client in the scene | the same | `Tests/Editor/PlayCycleTests.cs` |
+| Taking control | the event `ExposedObject.Received`: a script holds its own changes for a while | the event `Remote.Received` | `Tests/Runtime/ExposeOptionsTests.cs`, `ClientTests.cs`; the sample "Custom parameters" |
+| Where it listens | `Controller.listenAddress`; on one address, not announced | no choice of interface | `Tests/Runtime/ListenAddressTests.cs` |
+| Who follows (map) | `?PRISM_CONNECTIONS`, the last 256 UDP senders | sends `PRISM_NAME` and what it listens to | `C API` tests of `tests/C/unit-tests/unit-tests-c-network.cpp` |
+
+What it does not do, also in the limits: a field does not hold network values during a gesture by itself: a script does it with `Received`; a client does not choose the interface it follows from; a node the device removes stays in the Client's tree, marked as removed; `ossia.client` and `ossia.remote` features not offered (patterns, unit conversion, `@clip`, `@mode`).
 
 ## Not tested
 

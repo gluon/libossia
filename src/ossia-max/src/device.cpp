@@ -344,24 +344,33 @@ void device::expose_impl(device* x, t_symbol*, long argc, t_atom* argv)
       argc--;
       argv++;
 
-      if(argc == 2 && argv[0].a_type == A_LONG && argv[1].a_type == A_LONG)
+      // expose oscquery <osc port> <ws port> [<address>]: the address both
+      // ports listen on, 127.0.0.1 for the clients of this machine only, the
+      // address of one interface for that network only; every interface
+      // without it. On one address the device is not announced over mDNS.
+      std::string bind = "0.0.0.0";
+      if((argc == 2 || argc == 3) && argv[0].a_type == A_LONG && argv[1].a_type == A_LONG
+         && (argc == 2 || argv[2].a_type == A_SYM))
       {
         settings.oscport = atom_getlong(argv++);
         settings.wsport = atom_getlong(argv++);
+        if(argc == 3)
+          bind = atom_getsym(argv++)->s_name;
       }
 
       bool connected = true;
 
-      t_atom a[4];
+      t_atom a[5];
       A_SETSYM(a + 1, gensym("oscquery"));
       A_SETLONG(a + 2, settings.oscport);
       A_SETLONG(a + 3, settings.wsport);
+      A_SETSYM(a + 4, gensym(bind.c_str()));
 
       try
       {
         auto oscq_proto
             = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
-                x->network_context, settings.oscport, settings.wsport, false);
+                x->network_context, settings.oscport, settings.wsport, false, bind);
         x->m_device->set_echo(true);
 
         A_SETSYM(a + 1, gensym("oscquery"));
@@ -378,7 +387,8 @@ void device::expose_impl(device* x, t_symbol*, long argc, t_atom* argv)
       }
 
       A_SETLONG(a, connected ? 1 : 0);
-      outlet_anything(x->m_dumpout, gensym("expose"), 4, a);
+      // the address only when one was given: expose 1 oscquery 7411 7412 as before
+      outlet_anything(x->m_dumpout, gensym("expose"), bind == "0.0.0.0" ? 4 : 5, a);
     }
     else if(protocol == "oscquery_tcp")
     {

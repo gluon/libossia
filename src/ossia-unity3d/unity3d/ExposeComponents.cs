@@ -24,7 +24,7 @@ namespace Ossia
         return;
       
       // Create a node for the component
-      var ossia_c = new OssiaEnabledComponent (component, node);
+      var ossia_c = new OssiaEnabledComponent (component, node, this);
 
       ossia_components.Add (ossia_c);
 
@@ -48,7 +48,6 @@ namespace Ossia
       // Create nodes for all the fields that were exposed
       foreach (PropertyInfo prop in properties) {
         var prop_t = prop.PropertyType;
-        Debug.Log ("Prop: " + prop.Name + " => " + prop.PropertyType.ToString());
         if (prop_t == typeof(UnityEngine.Transform)) { 
           // TODO
         } else if (prop_t == typeof(UnityEngine.Component)) { 

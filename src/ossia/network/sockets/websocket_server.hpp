@@ -221,6 +221,17 @@ public:
     start_accept(ec);
   }
 
+  //! On one address only, e.g. 127.0.0.1: the other interfaces of the
+  //! machine refuse the connections
+  void listen(const std::string& address, uint16_t port)
+  {
+    m_server->listen(
+        boost::asio::ip::tcp::endpoint{boost::asio::ip::make_address(address), port});
+
+    boost::system::error_code ec;
+    start_accept(ec);
+  }
+
   void start_accept(boost::system::error_code& ec)
   {
     ec = boost::system::error_code();

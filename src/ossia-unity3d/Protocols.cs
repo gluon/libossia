@@ -47,6 +47,15 @@ namespace Ossia
 		base(Network.ossia_protocol_oscquery_server_asio_create(ctx.ossia_network_context, osc_port, ws_port))
 		{
 		}
+
+		//! The same on one address of the machine only: "127.0.0.1" for its
+		//! own clients, the address of one interface for that network; empty
+		//! or "0.0.0.0", every interface. On one address, the server is not
+		//! announced over mDNS: its clients connect by its address.
+		public OSCQuery(NetworkContext ctx, int osc_port, int ws_port, string bind) :
+		base(Network.ossia_protocol_oscquery_server_asio_create_bound(ctx.ossia_network_context, osc_port, ws_port, bind))
+		{
+		}
 	}
 
 	public class OSCQueryMirror : Protocol

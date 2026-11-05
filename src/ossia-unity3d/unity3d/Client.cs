@@ -50,6 +50,10 @@ namespace Ossia
     {
       Disconnect ();
       wanted = true;
+      // The Controller leaves the library as it is while this one may hold
+      // a mirror
+      held = true;
+      Controller.Hold ();
       SetStatus (ClientStatus.Connecting, "Connecting to " + server);
       StartAttempt ();
     }
@@ -66,6 +70,10 @@ namespace Ossia
       Detach ();
       if (Status != ClientStatus.Disconnected)
         SetStatus (ClientStatus.Disconnected, "Disconnected");
+      if (held) {
+        held = false;
+        Controller.Let ();
+      }
     }
 
     void StartAttempt ()
@@ -319,6 +327,7 @@ namespace Ossia
     const float retrySeconds = 1;
 
     bool wanted;
+    bool held;
     int attempts;
     float retryAt = -1;
     string lostUrl;

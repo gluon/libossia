@@ -11,10 +11,17 @@ public class CustomDevice : MonoBehaviour
   // Use this for initialization
   Ossia.Device local;
   float val = 0;
+  bool held;
 
+  // newDevice is left to the reset of the library, which frees its ports:
+  // the reset waits for the Controllers and the Clients of the scene to
+  // free their own devices.
   void OnApplicationQuit()
   {
-    Ossia.Network.ossia_device_reset_static ();
+    if (!held)
+      return;
+    held = false;
+    Ossia.Controller.Let (true);
   }
 
   public delegate void debug_log_delegate(string str);
@@ -34,6 +41,8 @@ public class CustomDevice : MonoBehaviour
     Ossia.Network.ossia_set_debug_logger (intptr_delegate);
 
     local = new Ossia.Device (new Ossia.OSCQuery (1234, 5678), "newDevice");
+    held = true;
+    Ossia.Controller.Hold ();
 
     var root = local.GetRootNode ();
     Assert.AreEqual (root.ChildSize (), 0);

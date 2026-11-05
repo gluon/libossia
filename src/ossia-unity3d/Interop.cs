@@ -62,6 +62,13 @@ namespace Ossia
       int ws_port);
 
     [DllImport ("ossia")]
+    public static extern IntPtr ossia_protocol_oscquery_server_asio_create_bound(
+      IntPtr ctx,
+      int osc_port,
+      int ws_port,
+      string bind);
+
+    [DllImport ("ossia")]
     public static extern IntPtr ossia_protocol_oscquery_mirror_create(
       string host);
 

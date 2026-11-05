@@ -264,6 +264,14 @@
 			</description>
 		</attribute>
 		
+		<attribute name="hold" get="1" set="1" type="int" size="1">
+			<digest>
+				Taking control: hold the values of the network after a value entered by the inlet
+			</digest>
+			<description>
+				<at>hold</at> (milliseconds, default 0: never held). After a value comes in by the inlet, from a control the user moves for instance, the values that arrive from the network for that long do not come out; the last one comes out when it ends, and each new value by the inlet starts it again. The value entered by the inlet is never held. Put it on the object a slider or a dial drives, not on one an animation drives: an animation that writes every frame would never hear the network. Since ossia-prism 2.1.0+prism.10.
+			</description>
+		</attribute>
 		<attribute name="mute" get="1" set="1" type="boolean" size="1">
 			<digest>
 				Mute parameter (off by default)

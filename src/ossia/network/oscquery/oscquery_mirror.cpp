@@ -1,5 +1,6 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check
 // it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
+#include <unordered_map>
 #include "oscquery_mirror.hpp"
 
 #include <ossia/detail/thread.hpp>
@@ -52,6 +53,24 @@ struct http_client_context
   boost::asio::io_context context;
   std::shared_ptr<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>> worker;
 };
+
+struct oscquery_mirror_protocol::crossing_state
+{
+  static constexpr std::chrono::milliseconds crossing_window{500};
+  static constexpr std::chrono::milliseconds settle_delay{100};
+
+  std::mutex mutex;
+  bool alive{true};
+  struct sent_value
+  {
+    std::chrono::steady_clock::time_point time;
+    ossia::value value;
+  };
+  // By address, the last value this client wrote
+  std::unordered_map<std::string, sent_value> sent;
+  // By address, the reading to come
+  std::unordered_map<std::string, std::unique_ptr<boost::asio::steady_timer>> rereads;
+};
 /*
 auto wait_for(std::future<void>& fut, std::chrono::milliseconds dur)
 {
@@ -83,6 +102,7 @@ oscquery_mirror_protocol::oscquery_mirror_protocol(
     , m_http{std::make_unique<http_client_context>()}
     , m_id{*this, {}}
 {
+  m_crossing = std::make_shared<crossing_state>();
   auto port_idx = m_queryHost.find_last_of(':');
   if(port_idx != std::string::npos)
     m_queryPort = m_queryHost.substr(port_idx + 1);
@@ -142,6 +162,15 @@ void oscquery_mirror_protocol::cleanup_connections()
     {
       logger().error("Error when stopping WS thread");
     }
+  }
+
+  {
+    // No reading after the connections are gone
+    std::lock_guard lock{m_crossing->mutex};
+    m_crossing->alive = false;
+    for(auto& [address, timer] : m_crossing->rereads)
+      timer->cancel();
+    m_crossing->rereads.clear();
   }
 
   try
@@ -271,6 +300,8 @@ bool oscquery_mirror_protocol::push(
     // Push to server
     auto critical = addr.get_critical();
     const auto& osc_addr = addr.get_node().osc_address();
+    // Before it leaves: the server's value may come back before this returns
+    record_sent(osc_addr, val);
     if((!critical || !m_hasWS) && m_oscSender)
     {
       if(m_logger.outbound_logger)
@@ -471,6 +502,12 @@ bool oscquery_mirror_protocol::push_bundle_impl(const Parameters& parameters, bo
       udp.push_back(osc_writer::to_message(param, val));
     else if(m_hasWS)
       ws.push_back(osc_writer::to_message(param, val));
+    else
+      continue;
+    if constexpr(requires { param.get_node(); })
+      record_sent(param.get_node().osc_address(), val);
+    else
+      record_sent(param.address, val);
   }
 
   if(!udp.empty())
@@ -774,6 +811,60 @@ void oscquery_mirror_protocol::request_add_node(
   http_send_message(std::move(req));
 }
 
+void oscquery_mirror_protocol::record_sent(
+    const std::string& address, const ossia::value& v)
+{
+  std::lock_guard lock{m_crossing->mutex};
+  m_crossing->sent.insert_or_assign(
+      address, crossing_state::sent_value{std::chrono::steady_clock::now(), v});
+}
+
+void oscquery_mirror_protocol::check_crossing(std::string_view address)
+{
+  const auto now = std::chrono::steady_clock::now();
+  std::lock_guard lock{m_crossing->mutex};
+  if(!m_crossing->alive || !m_device)
+    return;
+  auto it = m_crossing->sent.find(std::string(address));
+  if(it == m_crossing->sent.end() || now - it->second.time > crossing_state::crossing_window)
+    return;
+  auto node = ossia::net::find_node(m_device->get_root_node(), address);
+  auto param = node ? node->get_parameter() : nullptr;
+  if(!param || param->value() == it->second.value)
+    return;
+
+  // The server's value crossed ours: what it holds now is read again once
+  // the values that cross have arrived
+  auto& timer = m_crossing->rereads[std::string(address)];
+  if(!timer)
+    timer = std::make_unique<boost::asio::steady_timer>(m_http->context);
+  timer->expires_after(crossing_state::settle_delay);
+  timer->async_wait([this, weak = std::weak_ptr<crossing_state>{m_crossing},
+                     path = std::string(address),
+                     asked = now](const boost::system::error_code& ec) {
+    if(ec)
+      return;
+    auto st = weak.lock();
+    if(!st)
+      return;
+    std::lock_guard lock{st->mutex};
+    if(!st->alive || !m_device)
+      return;
+    // A write of ours since: the server takes it after
+    auto sent = st->sent.find(path);
+    if(sent != st->sent.end() && sent->second.time > asked)
+      return;
+    auto node = ossia::net::find_node(m_device->get_root_node(), path);
+    if(auto param = node ? node->get_parameter() : nullptr)
+    {
+      auto text = param->get_node().osc_address();
+      m_getWSPromises.enqueue(get_ws_promise{std::promise<void>{}, text, true});
+      text += detail::query_value();
+      http_send_message(text);
+    }
+  });
+}
+
 void oscquery_mirror_protocol::on_OSCMessage(
     const oscpack::ReceivedMessage& m, const oscpack::IpEndpointName& ip)
 {
@@ -784,6 +875,7 @@ void oscquery_mirror_protocol::on_OSCMessage(
   ossia::net::on_input_message<true>(
       m.AddressPattern(), ossia::net::osc_message_applier{m_id, m}, m_listening,
       *m_device, m_logger);
+  check_crossing(m.AddressPattern());
 
 #if defined(OSSIA_BENCHMARK)
   auto t2 = std::chrono::high_resolution_clock::now();
@@ -844,6 +936,19 @@ bool oscquery_mirror_protocol::on_WSMessage(
             if(!m_host_info.osc_port)
               m_host_info.osc_port = std::stoi(m_queryPort);
           }
+          // Its name, to a server that lists its clients
+          if(m_host_info.extensions["PRISM_CONNECTIONS"] && m_device)
+          {
+            rapidjson::StringBuffer buf;
+            rapidjson::Writer<rapidjson::StringBuffer> wr{buf};
+            wr.StartObject();
+            wr.Key("COMMAND");
+            wr.String("PRISM_NAME");
+            wr.Key("DATA");
+            wr.String(m_device->get_name().c_str());
+            wr.EndObject();
+            ws_send_message(std::string(buf.GetString(), buf.GetSize()));
+          }
           if(m_host_info.osc_transport == host_info::UDP)
           {
             m_oscSender = std::make_unique<osc::sender<oscquery::osc_outbound_visitor>>(
@@ -889,8 +994,11 @@ bool oscquery_mirror_protocol::on_WSMessage(
               auto addr = node->get_parameter();
               if(addr)
               {
-                json_parser::parse_value(*addr, *obj_value);
-                m_device->on_message(*addr);
+                if(!p.only_if_changed || json_parser::value_differs(*addr, *obj_value))
+                {
+                  json_parser::parse_value(*addr, *obj_value);
+                  m_device->on_message(*addr);
+                }
               }
               else
               {

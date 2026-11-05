@@ -99,6 +99,12 @@ void parameter::destroy(parameter* x)
 {
   critical_enter(0);
   x->m_dead = true;
+  if(x->m_hold_clock)
+  {
+    clock_unset(x->m_hold_clock);
+    clock_free((t_object*)x->m_hold_clock);
+    x->m_hold_clock = nullptr;
+  }
   x->unregister();
   outlet_delete(x->m_data_out);
   outlet_delete(x->m_dumpout);
