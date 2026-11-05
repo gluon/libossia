@@ -34,6 +34,8 @@
 #include <rapidjson/document.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
+
+#include <algorithm>
 namespace ossia::oscquery_asio
 {
 
@@ -677,11 +679,20 @@ void oscquery_server_protocol_base::process_raw_osc_data(
 void oscquery_server_protocol_base::record_sender(const std::string& ip, uint16_t port)
 {
   std::lock_guard lock{m_sendersMutex};
-  auto& st = m_senders[ip + ":" + std::to_string(port)];
+  auto [it, added] = m_senders.try_emplace(ip + ":" + std::to_string(port));
+  auto& st = it->second;
   st.ip = ip;
   st.port = port;
   st.packets++;
   st.last = std::chrono::steady_clock::now();
+
+  // A source that changes its port at each datagram does not grow the list
+  if(added && m_senders.size() > max_senders)
+  {
+    m_senders.erase(std::min_element(
+        m_senders.begin(), m_senders.end(),
+        [](const auto& a, const auto& b) { return a.second.last < b.second.last; }));
+  }
 }
 
 bool oscquery_server_protocol_base::on_prism_name(
