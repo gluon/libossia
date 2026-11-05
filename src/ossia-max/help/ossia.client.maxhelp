@@ -2574,7 +2574,7 @@
 						"fontsize": 12.0,
 						"numinlets": 1,
 						"numoutlets": 0,
-						"text": "1. The device to connect to is in this tab, in p server: click the first message to expose it on 7413 and 7414, free ports, then connect by name (2) or by address (3). Create the client without argument, as here: [ossia.client <name>] sends itself connect without argument as it is created, then, every second, connect with nothing after it and the help of the protocols in the console, until a connect with arguments or a disconnect.",
+						"text": "1. The device to connect to is in this tab, in p server: click the first message to expose it on 7413 and 7414, free ports, then connect by name (2) or by address (3). Create the client without argument, as here, or with a name only: [ossia.client <name>] takes that name and connects nothing, until a connect.",
 						"linecount": 5
 					}
 				},
@@ -2610,7 +2610,7 @@
 						"fontsize": 12.0,
 						"numinlets": 1,
 						"numoutlets": 0,
-						"text": "2. connect <name> finds the OSCQuery device announced over mDNS under that name, in this Max, another Max or TouchDesigner of the same network. Until it is found, the outlet sends connect 0 <name> every second, then connect 1 <name>. Connected by name, the client reads the tree of the device again: the outlet reports every node removed, then created, and the ossia.remote objects register again.",
+						"text": "2. connect <name> finds the OSCQuery device announced over mDNS under that name, in this Max, another Max or TouchDesigner of the same network. Until it is found, the outlet sends connect 0 <name> every second, then connect 1 <name>. Connected by name, the client takes the tree of the listener's mirror: no node is removed and created again, and the ossia.remote objects do not register again.",
 						"linecount": 5
 					}
 				},
@@ -2736,7 +2736,7 @@
 						"fontsize": 12.0,
 						"numinlets": 1,
 						"numoutlets": 0,
-						"text": "5. @reconnect 0 turns off the attempts after a loss. A first connection that fails, an unreachable URL or a name not found, is tried again every second whatever @reconnect says, until it succeeds, a disconnect or a new connect.",
+						"text": "5. @reconnect 0 turns off the attempts, after a loss and for a first connection that fails, an unreachable URL or a name not found.",
 						"linecount": 3
 					}
 				},
