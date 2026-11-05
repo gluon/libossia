@@ -202,5 +202,31 @@ namespace Ossia.Tests
       Assert.AreEqual (new[] { "gain=0.25" }, received.ToArray ());
       Assert.AreEqual (0.25f, fields.gain);
     }
+
+    // A client's value comes in after the object published its change and before
+    // the end of the frame sends it: the object's value leaves after it, and is
+    // the one the parameter and the clients hold. The queue reads [the client's,
+    // the object's].
+    [UnityTest]
+    public IEnumerator AValueReplacedInTheSameFrameIsNotApplied ()
+    {
+      yield return Setup ();
+      var fields = AddExposed<ExposeOptionsFields> ("Opts");
+      var expose = fields.GetComponent<ExposeAttributes> ();
+      yield return null;
+      yield return null;
+      var received = new List<string> ();
+      expose.Received += (name, value) => received.Add (name + "=" + value);
+
+      fields.gain = 2;
+      // Back after the Update of the next frame, before its LateUpdate
+      yield return null;
+      Send ("/Opts/Ossia.Tests.ExposeOptionsFields/gain", 3f);
+      System.Threading.Thread.Sleep (100);
+      for (int i = 0; i < 5; i++)
+        yield return null;
+      Assert.AreEqual (2f, fields.gain, "the field holds what the parameter and the clients hold");
+      Assert.IsEmpty (received);
+    }
   }
 }
