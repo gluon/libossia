@@ -41,6 +41,13 @@ namespace Ossia
       values.RemoveRange (0, i + 1);
       return true;
     }
+
+    //! A value of the queue that is not the parameter's any more: what
+    //! replaced it left after it, and has its own message
+    public static bool Replaced (object v, object current)
+    {
+      return !System.Collections.StructuralComparisons.StructuralEqualityComparer.Equals (v, current);
+    }
   }
 
   //! Used to register C# fields to Ossia
@@ -90,6 +97,8 @@ namespace Ossia
         // publishes before the Controller reads its queue, the value of the
         // frame before comes back after the one of this frame is published.
         if (published.CameBack (new_val))
+          return;
+        if (Published.Replaced (new_val, ossia_parameter.GetValue ().Get (field.FieldType)))
           return;
 
         var cur_val = field.GetValue (parent.component);
@@ -161,6 +170,8 @@ namespace Ossia
           // As for a field: a published transform set back would hold the
           // object a frame behind the script that moves it.
           if (published.CameBack (new_val))
+            return;
+          if (Published.Replaced (new_val, ossia_parameter.GetValue ().Get (field.PropertyType)))
             return;
 
           var cur_val = field.GetValue (parent.component, null);
