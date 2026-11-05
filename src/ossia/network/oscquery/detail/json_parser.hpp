@@ -20,6 +20,8 @@ struct OSSIA_EXPORT json_parser
   static host_info parse_host_info(const rapidjson::Value& obj);
   static void parse_namespace(ossia::net::node_base& root, const rapidjson::Value& obj);
   static void parse_value(ossia::net::parameter_base& addr, const rapidjson::Value& obj);
+  static bool
+  value_differs(const ossia::net::parameter_base& addr, const rapidjson::Value& obj);
   static void parse_parameter_value(
       ossia::net::node_base& root, const rapidjson::Value& obj,
       ossia::net::device_base& dev);

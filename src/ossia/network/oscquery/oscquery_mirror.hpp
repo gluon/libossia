@@ -198,13 +198,17 @@ private:
     get_ws_promise& operator=(const get_ws_promise&) = delete;
     get_ws_promise& operator=(get_ws_promise&&) noexcept = default;
 
-    get_ws_promise(std::promise<void>&& p, const std::string& addr)
+    get_ws_promise(
+        std::promise<void>&& p, const std::string& addr, bool only_changes = false)
         : promise{std::move(p)}
         , address{addr}
+        , only_if_changed{only_changes}
     {
     }
     std::promise<void> promise;
     std::string address{};
+    // Read again after a crossing: the same value is not a new one
+    bool only_if_changed{};
   };
 
   ossia::spsc_queue<get_ws_promise> m_getWSPromises;

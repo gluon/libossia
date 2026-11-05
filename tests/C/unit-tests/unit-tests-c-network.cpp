@@ -1086,6 +1086,28 @@ TEST_CASE("C API: a bool is served as true or false", "[network_c]")
   REQUIRE(wait_for([&] { return bool_of(remote); }, 2000));
 }
 
+// The client reads the value again after a crossing: when the server already
+// sent it the value it holds, the client does not get it a second time.
+TEST_CASE("C API: a value read again that did not change is not a new value", "[network_c]")
+{
+  server s{"c_same_server"};
+  auto level = float_parameter(s.dev, "/level");
+  mirror m{s.url(), "c_same_mirror"};
+  auto remote = m.listen("/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  ossia_parameter_push_f(remote, 1.f);
+  REQUIRE(wait_for([&] { return value_of(level) == 1.f; }, 2000));
+  ossia_parameter_push_f(level, 2.f);
+  REQUIRE(wait_for([&] { return m.has(2.f); }, 2000));
+  // Past the time the value is read again
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  auto got = m.values();
+  INFO("the client received " << got.size() << " values");
+  REQUIRE(got == std::vector<float>{2.f});
+  REQUIRE(value_of(remote) == 2.f);
+}
+
 // Out of a crossing, nothing comes back: writes long after the server's last
 // value are not answered.
 TEST_CASE("C API: a write that crossed nothing is not sent back", "[network_c]")
