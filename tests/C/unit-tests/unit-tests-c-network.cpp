@@ -31,6 +31,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -849,6 +850,97 @@ TEST_CASE("C API: ?PRISM_CONNECTIONS lists the clients and the senders", "[netwo
   CHECK(num(senders[0], "PORT") == sender_port);
   CHECK(num(senders[0], "PACKETS") == 2);
   CHECK(senders[0].HasMember("LAST_MS"));
+}
+
+// A source that changes its port at each datagram: the list keeps the last 256
+// to send, and a source that sends again is one of the last.
+TEST_CASE("C API: ?PRISM_CONNECTIONS keeps the last 256 senders", "[network_c]")
+{
+  server s{"c_senders_server", 0, "127.0.0.1"};
+  auto other = float_parameter(s.dev, "/other");
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  float last = 0.f;
+  auto send = [&](int fd) {
+    last += 1.f;
+    std::string m = "/other";
+    m.append(4 - m.size() % 4, '\0');
+    m += ",f";
+    m.append(2, '\0');
+    uint32_t bits;
+    std::memcpy(&bits, &last, 4);
+    bits = htonl(bits);
+    m.append(reinterpret_cast<const char*>(&bits), 4);
+    sockaddr_in to{};
+    to.sin_family = AF_INET;
+    to.sin_port = htons(s.osc);
+    to.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ::sendto(fd, m.data(), m.size(), 0, (sockaddr*)&to, sizeof(to));
+  };
+  auto received = [&] { return wait_for([&] { return value_of(other) == last; }, 2000); };
+  auto open_sender = [](int& port) {
+    int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    sockaddr_in local{};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    ::bind(fd, (sockaddr*)&local, sizeof(local));
+    socklen_t len = sizeof(local);
+    ::getsockname(fd, (sockaddr*)&local, &len);
+    port = ntohs(local.sin_port);
+    return fd;
+  };
+  // n more sources that the server has not seen, from a port each
+  std::vector<int> ports;
+  auto others = [&](int n) {
+    for(int i = 0; i < n;)
+    {
+      int port;
+      int fd = open_sender(port);
+      if(std::find(ports.begin(), ports.end(), port) == ports.end())
+      {
+        ports.push_back(port);
+        send(fd);
+        REQUIRE(received());
+        i++;
+      }
+      ::close(fd);
+    }
+  };
+
+  int kept_port, gone_port;
+  int kept = open_sender(kept_port), gone = open_sender(gone_port);
+  ports.push_back(kept_port);
+  ports.push_back(gone_port);
+  send(kept);
+  REQUIRE(received());
+  send(gone);
+  REQUIRE(received());
+
+  // 256 sources: nothing goes yet. kept sends again, so gone is now the oldest.
+  others(254);
+  send(kept);
+  REQUIRE(received());
+  others(1);
+  const int newest_port = ports.back();
+  ::close(kept);
+  ::close(gone);
+
+  const auto json = http_get(s.ws, "/?PRISM_CONNECTIONS");
+  rapidjson::Document doc;
+  doc.Parse(json.c_str());
+  REQUIRE(!doc.HasParseError());
+  const auto& senders = doc["SENDERS"];
+  REQUIRE(senders.IsArray());
+  CHECK(senders.Size() == 256);
+  auto packets_of = [&](int port) {
+    for(const auto& v : senders.GetArray())
+      if(v["PORT"].GetInt() == port)
+        return v["PACKETS"].GetInt64();
+    return int64_t{0};
+  };
+  CHECK(packets_of(kept_port) == 2);
+  CHECK(packets_of(gone_port) == 0);
+  CHECK(packets_of(newest_port) == 1);
 }
 
 // The server sets a value and a client writes another one to the same

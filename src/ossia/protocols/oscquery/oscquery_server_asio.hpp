@@ -125,8 +125,8 @@ public:
   //! IP, PORT (TCP), NAME (given by the client, if any), OSC_PORT and
   //! SENDER_PORT (its UDP ports, if it streams), LISTEN (the addresses it
   //! asked for), PACKETS (the OSC packets it sent). A sender, a UDP source
-  //! that is none of the clients: IP, PORT, PACKETS, LAST_MS (since its last
-  //! packet).
+  //! that is none of the clients, the last 256 to send: IP, PORT, PACKETS,
+  //! LAST_MS (since its last packet).
   std::string query_connections();
 
   Nano::Signal<void(const std::string&)> onClientConnected;
@@ -235,7 +235,9 @@ protected:
     int64_t packets{};
     std::chrono::steady_clock::time_point last;
   };
-  // The UDP sources that are none of the clients, by "ip:port"
+  // The UDP sources that are none of the clients, by "ip:port": past
+  // max_senders, the one silent for the longest goes
+  static constexpr std::size_t max_senders = 256;
   std::mutex m_sendersMutex;
   std::unordered_map<std::string, sender_stats> m_senders;
 };
