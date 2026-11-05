@@ -4,7 +4,7 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [2.1.0+prism.10]
+## [2.1.0+prism.10] - 2026-11-05
 
 Taking control, listening on one address, a map of who follows whom and a panel built from a device's tree, for Max and Unity. The Unity package: the crash at the end of Play is gone, an exposed object publishes its transform once, `[Ossia.Expose]` takes bounds, a unit and an access mode. The core: a client reads a value again after a crossing, a boolean is served as `true` or `false`, and the server answers `?PRISM_CONNECTIONS`. Max: the defects of `ossia.client`, `[ossia] @bundle`, `dump` and the range of a list are fixed.
 
