@@ -195,6 +195,10 @@ namespace Ossia.Tests
       }
       Assert.IsEmpty (received, "after changes made in Unity");
 
+      // Once the last change has left: a value that comes before, the change
+      // replaces (AValueReplacedInTheSameFrameIsNotApplied)
+      yield return null;
+      yield return null;
       Send ("/Opts/Ossia.Tests.ExposeOptionsFields/gain", 0.25f);
       float end = Time.realtimeSinceStartup + 2;
       while (received.Count == 0 && Time.realtimeSinceStartup < end)
