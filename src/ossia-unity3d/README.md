@@ -38,7 +38,7 @@ Three things in the scene:
 2. Your script, on any GameObject, with the fields to expose marked `[Ossia.Expose("<name>")]`.
 3. The component `Ossia.ExposeAttributes` on that same GameObject. It reads the marked fields when the scene starts and publishes each one under `/<GameObject name>/<script class>/<name>`. It also always publishes the GameObject's transform, under `/<GameObject name>/transform/`: `position`, `rotation` and `localScale`.
 
-The script of the sample, `CustomParameters.cs`, copied as is into `Assets` (the file name must be the class name), on a cube named `Shape`:
+The script of the sample, `CustomParameters.cs`, copied as is into `Assets` (the file name must be the class name), on a cube named `Shape`. Do this in a project without the imported sample, or rename the class and the file: two classes `CustomParameters` stop the project compiling (`error CS0101`).
 
 ```csharp
 using UnityEngine;
@@ -72,7 +72,13 @@ public class CustomParameters : MonoBehaviour
   [Ossia.Expose("size")]
   public Vector3 size = Vector3.one;
 
+  // Taking control: when a client writes the orientation of the shape
+  // (/Shape/transform/rotation), the spin pauses this long, so that the
+  // client's value is not turned away at the next frame. Not exposed.
+  public float holdAfterClient = 1f;
+
   Material material;
+  float pausedUntil;
 
   void Start()
   {
@@ -87,11 +93,17 @@ public class CustomParameters : MonoBehaviour
         r.sharedMaterial = new Material(lit);
     }
     material = r.material;
+
+    // Received: a value of a client applied, never what Unity publishes
+    GetComponent<Ossia.ExposeAttributes>().Received += (name, value) => {
+      if (name == "rotation")
+        pausedUntil = Time.time + holdAfterClient;
+    };
   }
 
   void Update()
   {
-    if (spin) {
+    if (spin && Time.time >= pausedUntil) {
       var a = axis == 0 ? Vector3.right : axis == 2 ? Vector3.forward : Vector3.up;
       transform.Rotate(a, speed * Time.deltaTime);
     }
@@ -101,14 +113,14 @@ public class CustomParameters : MonoBehaviour
 }
 ```
 
-The `Start` method only matters for a cube made by the sample's scene file; a cube created in your own project with GameObject > 3D Object > Cube already has the material of its render pipeline, and `material = GetComponent<Renderer>().material;` is enough.
+The `Start` method: the render pipeline part only matters for a cube made by the sample's scene file; a cube created in your own project with GameObject > 3D Object > Cube already has the material of its render pipeline, and `material = GetComponent<Renderer>().material;` is enough. `Received` and `holdAfterClient` are taking control: leave them out if the spin may go on while a client writes the rotation.
 
 ### What a client sees
 
-Play, then `curl -s http://localhost:5678/Shape/CustomParameters` (output of the sample with `2.1.0+prism.9`; since `2.1.0+prism.10`, `spin` reads `"VALUE":true` and `size` has `"EXTENDED_TYPE":"vecf"`, see the table):
+Play, then `curl -s http://localhost:5678/Shape/CustomParameters` (output of the sample with `2.1.0+prism.10`):
 
 ```
-{"FULL_PATH":"/Shape/CustomParameters","CONTENTS":{"speed":{"FULL_PATH":"/Shape/CustomParameters/speed","TYPE":"f","VALUE":45.0,"ACCESS":3,"CLIPMODE":"none"},"axis":{"FULL_PATH":"/Shape/CustomParameters/axis","TYPE":"i","VALUE":1,"ACCESS":3,"CLIPMODE":"none"},"spin":{"FULL_PATH":"/Shape/CustomParameters/spin","TYPE":"T","VALUE":null,"ACCESS":3,"CLIPMODE":"none"},"color":{"FULL_PATH":"/Shape/CustomParameters/color","TYPE":"ffff","VALUE":[1.0,0.5,0.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["color.rgb.r","color.rgb.g","color.rgb.b","color.rgb.a"]},"size":{"FULL_PATH":"/Shape/CustomParameters/size","TYPE":"fff","VALUE":[1.0,1.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["position.cartesian.x","position.cartesian.y","position.cartesian.z"]}}}
+{"FULL_PATH":"/Shape/CustomParameters","CONTENTS":{"speed":{"FULL_PATH":"/Shape/CustomParameters/speed","TYPE":"f","VALUE":45.0,"ACCESS":3,"CLIPMODE":"none"},"axis":{"FULL_PATH":"/Shape/CustomParameters/axis","TYPE":"i","VALUE":1,"ACCESS":3,"CLIPMODE":"none"},"spin":{"FULL_PATH":"/Shape/CustomParameters/spin","TYPE":"T","VALUE":true,"ACCESS":3,"CLIPMODE":"none"},"color":{"FULL_PATH":"/Shape/CustomParameters/color","TYPE":"ffff","VALUE":[1.0,0.5,0.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":["color.rgb.r","color.rgb.g","color.rgb.b","color.rgb.a"]},"size":{"FULL_PATH":"/Shape/CustomParameters/size","TYPE":"fff","VALUE":[1.0,1.0,1.0],"ACCESS":3,"CLIPMODE":"none","EXTENDED_TYPE":"vecf"}}}
 ```
 
 Pipe it into `python3 -m json.tool` to read it indented. In short:
@@ -117,9 +129,9 @@ Pipe it into `python3 -m json.tool` to read it indented. In short:
 |---|---|---|---|
 | `/Shape/CustomParameters/speed` | `f` | `45.0` | |
 | `/Shape/CustomParameters/axis` | `i` | `1` | |
-| `/Shape/CustomParameters/spin` | `T` | `true` (`null` up to `2.1.0+prism.9`) | |
+| `/Shape/CustomParameters/spin` | `T` | `true` | |
 | `/Shape/CustomParameters/color` | `ffff` | `[1.0, 0.5, 0.0, 1.0]` | `color.rgb.r` ... `color.rgb.a` |
-| `/Shape/CustomParameters/size` | `fff` | `[1.0, 1.0, 1.0]` | `vecf` (`position.cartesian.x` ... `z` up to `2.1.0+prism.9`: a `Vector3` is no longer taken for a position) |
+| `/Shape/CustomParameters/size` | `fff` | `[1.0, 1.0, 1.0]` | `vecf` |
 
 `ACCESS` is 3 (read and write) for every parameter, `CLIPMODE` is `none`, and there is no `RANGE`: the script gives none (see below for `Min`, `Max`, `Unit` and `Access`). One value: `curl -s "http://localhost:5678/Shape/CustomParameters/speed?VALUE"` returns `{"VALUE":45.0}`.
 
@@ -144,9 +156,9 @@ What `[Ossia.Expose]` accepts, with what a client sees (measured):
 |---|---|---|---|
 | `float`, `double` | `f` | | `double` is sent as a 32-bit float |
 | `int` | `i` | | |
-| `bool` | `T` | | `VALUE` reads `null` over HTTP |
+| `bool` | `T` | | `VALUE` reads `true` or `false` over HTTP |
 | `string` | `s` | | |
-| `Vector2`, `Vector3`, `Vector4` | `ff`, `fff`, `ffff` | `position.cartesian.*` | the unit is a position, whatever the field means |
+| `Vector2`, `Vector3`, `Vector4` | `ff`, `fff`, `ffff` | `vecf` | no unit of its own; give one with `Unit` |
 | `Quaternion` | `ffff` | `orientation.quaternion` | x, y, z, w |
 | `Color` | `ffff` | `color.rgb.r` ... `color.rgb.a` | r, g, b, a from 0 to 1 |
 | `Color32` | `r` | | sent as an OSC color, `#RRGGBBAA` over HTTP |
@@ -159,7 +171,7 @@ What is read: the public fields declared in the script's own class, and its publ
 ### Limits
 
 - The server cannot tell a write that crossed its value from a write the client made right after receiving it: a client that writes less than 100 ms after a change in Unity gets its own value back, once, unchanged. Writes further apart get nothing.
-- `[Ossia.Expose]` takes a name, `Min`, `Max`, `Unit` and `Access` (`2.1.0+prism.10`), for instance `[Ossia.Expose ("speed", Min = 0, Max = 360, Unit = "angle.degree", Access = ossia_access_mode.GET)]`; without a name, the parameter takes the name of the field or property. No clip mode and no description: the bounds are published in `RANGE` and not enforced, so clamp the received values in your script, as the sample does for `axis`. A vector has the same bounds on each component.
+- `[Ossia.Expose]` takes a name, `Min`, `Max`, `Unit` and `Access` (`2.1.0+prism.10`), for instance `[Ossia.Expose ("speed", Min = 0, Max = 360, Unit = "angle.degree", Access = Ossia.ossia_access_mode.GET)]`; without a name, the parameter takes the name of the field or property. No clip mode and no description: the bounds are published in `RANGE` and not enforced, so clamp the received values in your script, as the sample does for `axis`. A vector has the same bounds on each component.
 - The node of a script is its full class name: a class `Params` in the namespace `MyGame` gives `/<GameObject>/MyGame.Params/...`.
 - The GameObject's name is read once, when the scene starts: renaming it in Play does not move its parameters.
 
@@ -186,7 +198,7 @@ It leaves `newDevice` to the reset of the library (`ossia_device_reset_static`),
 
 With the package `ossia-prism` in Max, the sample's `CustomParameters.maxpat`:
 
-- `[ossia.client]`, without argument, message `connect unity`: connects by name (mDNS); the console shows `client: connect 1 unity` once the device is found, `client: connect 0 unity` every second until then. Created with a name, `[ossia.client <name>]` would print the help of its protocols every second from the opening of the patch (see the README of ossia-prism, Discovery by name). Or `connect oscquery ws://127.0.0.1:5678`, by address.
+- `[ossia.client]`, without argument, message `connect unity`: connects by name (mDNS); the console shows `client: connect 1 unity` once the device is found, `client: connect 0 unity` every second until then. Created with a name, `[ossia.client <name>]` takes that name and connects nothing (see the README of ossia-prism, Discovery by name). Or `connect oscquery ws://127.0.0.1:5678`, by address.
 - one `[ossia.remote /Shape/CustomParameters/<name>]` per field: a number box for `speed`, a number box from 0 to 2 for `axis`, a toggle for `spin`, four number boxes into `[pak 1. 0.5 0. 1.]` for `color`, three into `[pak 1. 1. 1.]` for `size`;
 - right of each remote, a message box shows what Unity sends back (Send Updates is checked in the sample's scene).
 
@@ -203,7 +215,7 @@ For your own script: one `[ossia.remote /<GameObject>/<class>/<name>]` per field
 3. In Unity, open the scene `FollowADevice` and press Play. The console shows `OSSIA client: connected to ws://<machine>.local:9678 (follow_me)`; the Inspector of `OssiaClient` reads `Connected to ws://...`.
 4. In Max, change size, color and spin: the cube follows. The number under angle follows the cube as it turns.
 
-Measured with Max 9 and ossia-prism `2.1.0+prism.9`, in a new project, these steps followed with no click (`tests/Unity/cross/doc_follow.py`, see [Tests](#tests)): the console line `OSSIA client: connected to ws://<machine>.local:9678 (follow_me)`, the Inspector `Connected to ws://<machine>.local:9678`; after `size 2.` and `spin 180.` in Max, the cube's scale reads `(2.00, 2.00, 2.00)` and its spin 180; the angle Max receives moves.
+Measured with Max 9 and ossia-prism `2.1.0+prism.10`, in a new project, these steps followed with no click (`tests/Unity/cross/doc_follow.py`, see [Tests](#tests)): the console line `OSSIA client: connected to ws://<machine>.local:9678 (follow_me)`, the Inspector `Connected to ws://<machine>.local:9678`; after `size 2.` and `spin 180.` in Max, the cube's scale reads `(2.00, 2.00, 2.00)` and its spin 180; the angle Max receives moves.
 
 ### Your own script
 
@@ -249,7 +261,7 @@ The Remote binds at the next frame, once the device's tree holds the address.
 - **Tree changes.** Nodes the device adds after the connection are applied each frame; a Remote whose address did not exist binds when it appears, and takes its value. Measured: `/later`, created on the server half a second after the connection, bound and applied to the field.
 - **Loss and reconnection.** When the server stops, the Client reads `Lost`, the console warns `OSSIA client: lost ws://...`, the Remotes unbind, and with `reconnect` on (the default) it tries again every second until the server is back, then binds the Remotes again and applies the device's values. Measured: lost within 3 s of the stop, connected again within a few seconds of the return, and the field takes the value of the new server.
 
-All of this is measured by `Tests/Runtime/ClientTests.cs`, against a libossia server built in the test as `ossia.device` builds its device, and by the cross bench against Max (`ossia.device`) and TouchDesigner (`prism_oscquery_server` 0.3.2), by address and by name: values both ways, nothing back for 20 values written on either side, 0 divergence in 20 crossed writes (see [Tests](#tests)).
+All of this is measured by `Tests/Runtime/ClientTests.cs`, against a libossia server built in the test as `ossia.device` builds its device, and by the cross bench against Max (`ossia.device`) and TouchDesigner (`prism_oscquery_server` 0.3.3), by address and by name: values both ways, nothing back for 20 values written on either side, 0 divergence in 20 crossed writes (see [Tests](#tests)).
 
 ### Limits
 
