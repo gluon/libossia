@@ -4,12 +4,18 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [Unreleased]
+## [2.1.0+prism.10]
+
+Taking control, listening on one address, a map of who follows whom and a panel built from a device's tree, for Max and Unity. The Unity package: the crash at the end of Play is gone, an exposed object publishes its transform once, `[Ossia.Expose]` takes bounds, a unit and an access mode. The core: a client reads a value again after a crossing, a boolean is served as `true` or `false`, and the server answers `?PRISM_CONNECTIONS`. Max: the defects of `ossia.client`, `[ossia] @bundle`, `dump` and the range of a list are fixed.
+
+### Breaking
+
+- Unity: `ExposeAttributes` publishes the transform of its GameObject as `position`, `rotation` and `localScale` only. `localPosition`, `eulerAngles`, `localEulerAngles`, `localRotation`, `right`, `up`, `forward` and `lossyScale` are no longer in the tree: they said again what the three say, and, applied back, they disagreed with them (see Fixed). A client that follows or writes one of these addresses gets nothing from it. To migrate: `.../transform/eulerAngles`, `localEulerAngles` and `localRotation` become `.../transform/rotation`, the rotation in world space as a quaternion (x, y, z, w), not three angles; `localPosition` becomes `position`, in world space; `lossyScale` becomes `localScale`, relative to the parent; `up`, `right` and `forward` have no replacement: compute them from `rotation`.
 
 ### Added
 
 - C API: `ossia_protocol_oscquery_server_asio_create_bound(context, osc_port, ws_port, address)`, the server of `ossia_protocol_oscquery_server_asio_create` listening on one address: `127.0.0.1` for the clients of the machine, the address of one interface for that network. Such a server is not announced over mDNS. Test `C API: a server on 127.0.0.1 only`: reached on 127.0.0.1, refused through another interface, not announced.
-- OSCQuery server: `?PRISM_CONNECTIONS`, declared in the `EXTENSIONS` of `HOST_INFO`, lists the clients connected (address, port, the name an ossia-prism client sends with `PRISM_NAME`, OSC port, sender port, addresses listened to, packets) and the other senders of OSC (address, port, packets, last packet). The clients of the core send their device name when the server declares the extension. Test `C API: ?PRISM_CONNECTIONS lists the clients and the senders`.
+- OSCQuery server: `?PRISM_CONNECTIONS`, declared in the `EXTENSIONS` of `HOST_INFO`, lists the clients connected (address, port, the name an ossia-prism client sends with `PRISM_NAME`, OSC port, sender port, addresses listened to, packets) and the other senders of OSC, the last 256 (address, port, packets, last packet). The clients of the core send their device name when the server declares the extension. Tests `C API: ?PRISM_CONNECTIONS lists the clients and the senders`, `C API: ?PRISM_CONNECTIONS keeps the last 256 senders`.
 - Tools: `tools/prism-map/prism_map.py` draws the map of the OSCQuery devices of a network from `?PRISM_CONNECTIONS` (text, JSON, Graphviz or HTML), browsing mDNS or given hosts; tested against fake servers (`test_prism_map.py`).
 - Max: `@hold <ms>` on `ossia.parameter` and `ossia.remote`, taking control: after a value comes in by the inlet, the values of the network are held for that long, then the last one held comes out. Checked in Max by `tests/Max/check_max.py`.
 - Max: `expose oscquery <OSC port> <WebSocket port> <address>` on `ossia.device` listens on that address only, and is not announced over mDNS; the outlet adds the address to `expose 1 oscquery <ports>`. Checked by `tests/Max/check_max.py`.
@@ -30,7 +36,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Removed
 
 - Max: `@trim_address` of `ossia.v8connector`, which nothing read.
-- Unity: `ExposeAttributes` publishes the transform as `position`, `rotation` and `localScale` only. `localPosition`, `eulerAngles`, `localEulerAngles`, `localRotation`, `right`, `up`, `forward` and `lossyScale` are no longer in the tree: they said again what the three say, and, applied back, they disagreed with them (see Fixed). A client that wrote one of these addresses writes `position`, `rotation` or `localScale` instead.
 
 ### Fixed
 
