@@ -8,6 +8,7 @@ namespace Ossia
   internal interface OssiaEnabledElement
   {
     void ReceiveUpdates ();
+    void ReceiveUpdates (Ossia.Value value);
   }
 
   //! Used to register C# fields to Ossia
@@ -42,8 +43,14 @@ namespace Ossia
     //! Ossia -> C#
     public void ReceiveUpdates ()
     {
+      ReceiveUpdates (ossia_parameter.GetValue ());
+    }
+
+    //! A message of the queue, with its value: the parameter may already
+    //! hold a later one, and a message per value keeps Published in step
+    public void ReceiveUpdates (Ossia.Value value)
+    {
       try {
-        var value = ossia_parameter.GetValue ();
         var new_val = value.Get (field.FieldType);
 
         // The message queue also receives the values pushed here: while
@@ -106,9 +113,13 @@ namespace Ossia
     //! Ossia -> C#
     public void ReceiveUpdates ()
     {
+      ReceiveUpdates (ossia_parameter.GetValue ());
+    }
+
+    public void ReceiveUpdates (Ossia.Value value)
+    {
       if (field.CanRead && field.CanWrite) {   
         try {
-          var value = ossia_parameter.GetValue ();
           var new_val = value.Get (field.PropertyType);
 
           // As for a field: a published transform set back would hold the

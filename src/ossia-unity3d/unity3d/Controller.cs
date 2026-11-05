@@ -60,7 +60,7 @@ namespace Ossia
       Ossia.Message m;
       while (Queue.Pop (out m)) {
         if (Hash.ContainsKey (m.Address)) {
-          Hash [m.Address].ReceiveUpdates ();
+          Hash [m.Address].ReceiveUpdates (m.Value);
         }
       }
     }
