@@ -856,7 +856,12 @@ void oscquery_mirror_protocol::check_crossing(std::string_view address)
       return;
     auto node = ossia::net::find_node(m_device->get_root_node(), path);
     if(auto param = node ? node->get_parameter() : nullptr)
-      pull_async(*param);
+    {
+      auto text = param->get_node().osc_address();
+      m_getWSPromises.enqueue(get_ws_promise{std::promise<void>{}, text, true});
+      text += detail::query_value();
+      http_send_message(text);
+    }
   });
 }
 
@@ -989,8 +994,11 @@ bool oscquery_mirror_protocol::on_WSMessage(
               auto addr = node->get_parameter();
               if(addr)
               {
-                json_parser::parse_value(*addr, *obj_value);
-                m_device->on_message(*addr);
+                if(!p.only_if_changed || json_parser::value_differs(*addr, *obj_value))
+                {
+                  json_parser::parse_value(*addr, *obj_value);
+                  m_device->on_message(*addr);
+                }
               }
               else
               {
