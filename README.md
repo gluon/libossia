@@ -7,8 +7,8 @@ Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
 | Package | Latest version | Documentation | Changes | Binaries |
 |---|---|---|---|---|
-| ossia-prism (Max) | `2.1.0+prism.9` | [this README](#ossia-prism-for-max) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.9`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.9) |
-| ossia (PRISM), `io.ossia.ossia-unity` (Unity) | `2.1.0+prism.9` | [README](src/ossia-unity3d/README.md) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.9`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.9) |
+| ossia-prism (Max) | `2.1.0+prism.10` | [this README](#ossia-prism-for-max) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.10`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.10) |
+| ossia (PRISM), `io.ossia.ossia-unity` (Unity) | `2.1.0+prism.10` | [README](src/ossia-unity3d/README.md) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.10`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.10) |
 
 Both are published for macOS universal (Apple Silicon and Intel); Windows x64 to come, same version, added to the Release later. Every version is on the [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page. Questions and defects: the [issues](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/issues) of this repository.
 
@@ -242,7 +242,7 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 State on 2026-11-03, `2.1.0+prism.9` (the objects of the Max package unchanged since `2.1.0+prism.7`; `ossia.device` changes through the core: echo and crossed writes, below); the changes of the Unity package and of the C API are in the [CHANGELOG](CHANGELOG.md). "Fixed" means fixed in ossia-prism, not in ossia.
 
-Changed for `2.1.0+prism.10`, not released yet (the package still says `2.1.0+prism.9`):
+Changed in `2.1.0+prism.10`:
 
 - **`ossia.client`** (`client.cpp`): `[ossia.client <name>]` no longer connects by itself every second; a connection by name takes the tree of the listener's mirror instead of reading it again; `@reconnect 0` also stops the attempts of a first connection that fails.
 - **`[ossia]` bundles** what its objects push during a tick, as `ossia.device` does (`@bundle`, `ossia_object.cpp`); in ossia 2.1.0 the attribute did nothing.
@@ -250,7 +250,7 @@ Changed for `2.1.0+prism.10`, not released yet (the package still says `2.1.0+pr
 - **A list parameter bounded by `@min` and `@max`** (a `vec3f`, for instance) carries the range on every component; in ossia 2.1.0, on the first only.
 - **`@hold <ms>`** on `ossia.parameter` and `ossia.remote`: taking control. After a value comes in by the inlet, the values of the network are held for that long, then the last one held comes out. The example `examples/ossia.panel.maxpat` shows it.
 - **`expose oscquery <OSC port> <WebSocket port> <address>`** on `ossia.device`: both ports listen on that address only, `127.0.0.1` for the clients of this machine, the address of one interface for that network; such a device is not announced over mDNS, clients connect with `ws://<address>:<port>`. The outlet adds the address to `expose 1 oscquery <ports>`.
-- **The OSCQuery server** serves a boolean as `true` or `false` (it was `null`), and answers `?PRISM_CONNECTIONS`, declared in the `EXTENSIONS` of `HOST_INFO`: the clients connected (address, port, the name an ossia-prism client sends, its OSC port, the addresses it listens to, its packet count) and the other senders of OSC. `tools/prism-map` draws the map of a network from it.
+- **The OSCQuery server** serves a boolean as `true` or `false` (it was `null`), and answers `?PRISM_CONNECTIONS`, declared in the `EXTENSIONS` of `HOST_INFO`: the clients connected (address, port, the name an ossia-prism client sends, its OSC port, the addresses it listens to, its packet count) and the last 256 other senders of OSC. `tools/prism-map` draws the map of a network from it.
 - **The OSCQuery client reads a value again after a crossing** (`oscquery_mirror.cpp`): when a value received crosses one it sent on the same address less than 500 ms before, it asks the server for the value 100 ms later. Against a server that does not answer crossed writes, 20 divergences in 20 crossings before, 0 in 100 after.
 - **`extras/ossia.panel.html`**: a page that builds a control for each parameter of an OSCQuery device, from its tree, and follows it over the WebSocket; `examples/ossia.panel.maxpat` opens it in a `jweb`.
 - **`@trim_address`** is removed from `ossia.v8connector`, which never read it.
@@ -313,6 +313,26 @@ mDNS works within one subnet: the machines must share a VLAN, multicast 224.0.0.
 - A change leaves whatever its source, measured in Max 9 with `2.1.0+prism.10` and a WebSocket client: one value received for each change made by a message box, `set <value>`, a number box or a `live.dial` patched into the inlet, and a `pattrstorage` recall through a `[pattr]` patched into the inlet or bound to a `live.dial`; none through `[pattr @bindto]` on the parameter (see above). A gesture with the mouse is not measured: it takes the path of the number box's output. The benches change the values from a script. That a value an `ossia.device` or `ossia.client` receives does not leave again, and that crossed writes converge, is measured with Max 9 by the cross bench of the Unity package (`tests/Unity/cross/`, against Unity and TouchDesigner: nothing back for 20 values, 0 divergence in 20 crossed writes) and by the bench of prism-td-components (`bidir_run.py`: 0 copy sent back by `ossia.device` for 50 values written by TouchDesigner, 50 with `2.1.0+prism.8`).
 - Not tested: Intel Macs, Windows (not built), Max 8 and earlier.
 - The defects of ossia that ossia-prism does not fix are listed under [Differences from ossia 2.1.0](#differences-from-ossia-210).
+
+### Functional audit
+
+What the Max package does for each requirement of the PRISM platform, and what proves it, for `2.1.0+prism.10`. The requirements: values travel in OSC bundles, and only those that change (12); both directions, without echo (13): a value received is applied (a), every local change leaves whatever its source (b), a value received and applied does not leave again, and two sides writing at once agree (c).
+
+| Requirement | Server (`ossia.device`) | Client (`ossia.client`, `ossia.remote`) | Proven by |
+|---|---|---|---|
+| 12, bundles | what its objects push during a tick leaves at its end, in bundles of at most 1400 bytes | the same through the mirror: under 1400 bytes over UDP, one bundle over the WebSocket | load bench of [Bundles](#bundles); `tests/Max/check_max.py` (`[ossia] @bundle 1`: one frame for a tick) |
+| 12, only what changes | a repeated value leaves by default; `@repetitions 0` filters it | the same | not checked by a bench |
+| 13a, received values applied | at once, on the outlet of `ossia.parameter`, bounded as its `@clip` says | the same on `ossia.remote` | `tests/Unity/cross/cross_run.py`; the bench of the TouchDesigner component (`bidir_run.py`) |
+| 13b, every source leaves | a message box, `set`, a number box, a `live.dial`, a `pattrstorage` recall through a `[pattr]` patched into the inlet: one value per change | the same path | measured with a WebSocket client (see [Known limits](#known-limits)); `bidir_run.py`, echo |
+| 13c, no echo | a client's value goes to the others, never back to it | nothing it receives leaves again | `cross_run.py` (0 of 20 back on each side); `bidir_run.py` (0 of 50); `C API` tests of `tests/C/unit-tests/unit-tests-c-network.cpp` |
+| 13c, two writers agree | a write that crosses a value sent less than 100 ms before is answered with the final value | reads the value again 100 ms after a crossing | `cross_run.py` (0 divergence out of 40 crossings with Max); `bidir_run.py` (0 out of 100 with Max); `C API: crossed writes converge`, `C API: a mirror reads the value again after a crossing` |
+| Discovery by name | announces `_oscjson._tcp`; `announced <name>` says the name it got | `connect <name>` | `cross_run.py` (by name); `check_max.py` (the tree is not read again) |
+| Reconnection | a client that comes back is served; `expose` after a stop serves again | tries again every second; `@reconnect 0` stops it, first connection included | `bidir_run.py`, reconnection; `check_max.py` (`@reconnect 0`) |
+| Taking control | `@hold <ms>` on `ossia.parameter` | `@hold <ms>` on `ossia.remote` | `check_max.py` (`@hold 500`); `examples/ossia.panel.maxpat`, the PRISM tab of the help of `ossia.parameter` |
+| Where it listens | `expose oscquery <OSC port> <WebSocket port> <address>` listens there, and is not announced | no choice of interface | `check_max.py` (reached on `127.0.0.1`, refused through another interface, not announced) |
+| Who follows (map) | `?PRISM_CONNECTIONS`, the last 256 UDP senders | sends `PRISM_NAME` and what it listens to | `C API: ?PRISM_CONNECTIONS lists the clients and the senders`, `C API: ?PRISM_CONNECTIONS keeps the last 256 senders`; `check_max.py`; `tools/prism-map/test_prism_map.py` |
+
+What it does not do, also in the limits: a repeated value is not filtered by default; `[pattr @bindto]` cannot bind to an `ossia.parameter`; a gesture of the mouse on an interface object is measured by what the object sends, not with a mouse; `@hold` ends by time, not with the mouse button; a source that animates in Max is not paused by a value from the network (with `@hold`, the values it sends win over those of the network); a client does not choose the interface it follows from; an `ossia.remote` outputs twice the value of a node added while connected.
 
 ### Cross test with Unity and TouchDesigner
 

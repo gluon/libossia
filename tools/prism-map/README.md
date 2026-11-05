@@ -36,7 +36,7 @@ Python 3.8 or later, standard library only.
 | `OSC_PORT`, `SENDER_PORT` | the UDP ports the client receives on and sends from, when it streams OSC over UDP |
 | `LISTEN` | the addresses the client asked for with `LISTEN` |
 | `PACKETS` | the OSC packets the server received from that client, datagrams or WebSocket frames |
-| `SENDERS` | the UDP sources that are none of the clients: `IP`, `PORT`, `PACKETS`, `LAST_MS` since their last packet |
+| `SENDERS` | the UDP sources that are none of the clients, the last 256: `IP`, `PORT`, `PACKETS`, `LAST_MS` since their last packet |
 
 ## Outputs
 
