@@ -365,7 +365,7 @@ In the editor, a Play started less than two seconds after the previous one waits
 | A value sent from Max does not move anything | The address is wrong (check with `curl`), or the script overwrites the field every frame. | Copy the `FULL_PATH` from `curl`; set the visible property from the field, not the other way round. |
 | Max does not show what changes in Unity | Send Updates is unchecked on `ExposeAttributes` (on by default; a scene keeps the value it saved, as "Exposed cube" does). | Check it. |
 | `OSSIA client: "mydevice" is not announced over mDNS` | No device of that name on the network, or mDNS does not pass (see [mDNS](#mdns)). | `dns-sd -B _oscjson._tcp` lists the names; set Server to that name, or to `ws://host:port`. |
-| `OSSIA client: ws://...: no OSCQuery server answers at ws://...` | The server is not started, or another port. | Start it (`expose oscquery <osc> <ws>` in Max), check the port with `curl -s http://host:port`. |
+| `OSSIA client: ws://...: the tree of ws://... could not be read` (or `no OSCQuery server answers at ws://...`) | The server is not started, or another port. | Start it (`expose oscquery <osc> <ws>` in Max), check the port with `curl -s http://host:port`. |
 | `OSSIA remote /x: Y has no public field or property "z"` | Member misspelt, or the field is private. | Make the field public, copy its exact name. |
 | A Remote stays unbound, nothing moves | The address is not in the device's tree. | `curl -s http://host:port` shows the tree; copy the `FULL_PATH`. |
 | The cube of a sample is pink | The Exposed cube scene uses Unity's built-in default material, which the Universal and HD render pipelines cannot draw. | Cosmetic: the values still pass. Give the cube a material of your pipeline. |
