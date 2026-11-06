@@ -10,10 +10,11 @@ dir = "{version}"
 name = "core"
 targets = ["windows-x64", "linux-x86_64", "mac"]
 env = { OSSIA_TEST_PORTS = "27100-27299" }
-seed = [{ versions = "BOOST_1_90_0", into = "3rdparty" }]
+seed = [{ versions = "BOOST_1_90_0", into = "3rdparty", used_by = "Boost_INCLUDE_DIR" }]
 configure = ["cmake", "-S", "{src}", "-B", "{build}", "-GNinja",
   "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX={install}",
-  "-DOSSIA_SUBMODULE_AUTOUPDATE=OFF", "-DOSSIA_TESTING=1", "-DOSSIA_STATIC=1",
+  "-DBOOST_ROOT={src}/3rdparty/boost_1_90_0", "-DBoost_NO_SYSTEM_PATHS=ON", "-DBoost_NO_BOOST_CMAKE=ON",
+  "-DOSSIA_SUBMODULE_AUTOUPDATE=OFF", "-DOSSIA_TESTING=1", "-DOSSIA_STATIC=1", "-DOSSIA_DATAFLOW=0",
   "-DOSSIA_DNSSD=1", "-DOSSIA_EDITOR=0", "-DOSSIA_EXAMPLES=0", "-DOSSIA_GFX=0",
   "-DOSSIA_QT=0", "-DOSSIA_QML=0", "-DOSSIA_ENABLE_FFT=0", "-DOSSIA_ENABLE_JACK=0",
   "-DOSSIA_ENABLE_LIBSAMPLERATE=0", "-DOSSIA_ENABLE_PIPEWIRE=0",
