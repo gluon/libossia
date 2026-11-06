@@ -1,0 +1,30 @@
+schema = 1
+project = "libossia"
+submodules = "recursive"
+
+[release]
+tag = "v{version}"
+dir = "{version}"
+
+[[build]]
+name = "core"
+targets = ["windows-x64", "linux-x86_64", "mac"]
+env = { OSSIA_TEST_PORTS = "27100-27299" }
+seed = [{ versions = "BOOST_1_90_0", into = "3rdparty" }]
+configure = ["cmake", "-S", "{src}", "-B", "{build}", "-GNinja",
+  "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX={install}",
+  "-DOSSIA_SUBMODULE_AUTOUPDATE=OFF", "-DOSSIA_TESTING=1", "-DOSSIA_STATIC=1",
+  "-DOSSIA_DNSSD=1", "-DOSSIA_EDITOR=0", "-DOSSIA_EXAMPLES=0", "-DOSSIA_GFX=0",
+  "-DOSSIA_QT=0", "-DOSSIA_QML=0", "-DOSSIA_ENABLE_FFT=0", "-DOSSIA_ENABLE_JACK=0",
+  "-DOSSIA_ENABLE_LIBSAMPLERATE=0", "-DOSSIA_ENABLE_PIPEWIRE=0",
+  "-DOSSIA_ENABLE_PORTAUDIO=0", "-DOSSIA_ENABLE_RUBBERBAND=0", "-DOSSIA_ENABLE_SDL=0"]
+compile = ["cmake", "--build", "{build}"]
+test = ["ctest", "--test-dir", "{build}", "--output-on-failure", "--no-tests=error", "--timeout", "300"]
+install = ["cmake", "--install", "{build}"]
+artefacts = ["{install}"]
+
+[build.override.windows-x64]
+configure_add = ["-DOSSIA_PCH=0"]
+
+[build.override.mac]
+configure_add = ["-DCMAKE_OSX_ARCHITECTURES=arm64", "-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"]
