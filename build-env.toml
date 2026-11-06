@@ -1,3 +1,9 @@
+# Each configure option below comes from the effective configuration of a
+# Release: the configure log of the Max package of 2.1.0+prism.10, not its
+# CMake cache, where the OSSIA_MAX_ONLY block overrides what the cache shows.
+# The exceptions say so. An option absent here is left at the value the
+# Release had by default.
+
 schema = 1
 project = "libossia"
 submodules = "recursive"
@@ -12,20 +18,34 @@ targets = ["windows-x64", "linux-x86_64", "mac"]
 env = { OSSIA_TEST_PORTS = "27100-27299" }
 seed = [{ versions = "BOOST_1_90_0", into = "3rdparty", used_by = "Boost_INCLUDE_DIR" }]
 configure = ["cmake", "-S", "{src}", "-B", "{build}", "-GNinja",
-  "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX={install}",
+  # Log: "Build Type: Release"
+  "-DCMAKE_BUILD_TYPE=Release",
+  # Log: "Static: 1"
+  "-DOSSIA_STATIC=1",
+  # Log: "Dataflow: 0"
+  "-DOSSIA_DATAFLOW=0",
+  # Log: "Editor: OFF"
+  "-DOSSIA_EDITOR=0",
+  # Log: "Protocols: OSC;Minuit;OSCQuery", set the way the OSSIA_MAX_ONLY block sets it
+  "-DOSSIA_OVERRIDE_PROTOCOLS=OSC;MINUIT;OSCQUERY",
+  # Log: "Zeroconf: 1"
+  "-DOSSIA_DNSSD=1",
+  # Log: "Qt: 0"
+  "-DOSSIA_QT=0",
+  # Log: "OSX Architectures: 1"; no effect outside macOS
+  "-DOSSIA_OSX_FAT_LIBRARIES=1",
+  # Not in the log. The command of that Release passed it: without it, CMake
+  # rewrites the git configuration of the checkout.
+  "-DOSSIA_SUBMODULE_AUTOUPDATE=OFF",
+  # Exception: that Release took the Boost of the machine. Pinned from the next
+  # Release on, so that every target builds with the same Boost.
   "-DBOOST_ROOT={src}/3rdparty/boost_1_90_0", "-DBoost_NO_SYSTEM_PATHS=ON", "-DBoost_NO_BOOST_CMAKE=ON",
-  "-DOSSIA_SUBMODULE_AUTOUPDATE=OFF", "-DOSSIA_TESTING=1", "-DOSSIA_STATIC=1", "-DOSSIA_DATAFLOW=0",
-  "-DOSSIA_DNSSD=1", "-DOSSIA_EDITOR=0", "-DOSSIA_EXAMPLES=0", "-DOSSIA_GFX=0",
-  "-DOSSIA_QT=0", "-DOSSIA_QML=0", "-DOSSIA_ENABLE_FFT=0", "-DOSSIA_ENABLE_JACK=0",
-  "-DOSSIA_ENABLE_LIBSAMPLERATE=0", "-DOSSIA_ENABLE_PIPEWIRE=0",
-  "-DOSSIA_ENABLE_PORTAUDIO=0", "-DOSSIA_ENABLE_RUBBERBAND=0", "-DOSSIA_ENABLE_SDL=0"]
+  # Exception: this build exists to run the tests. Log of the Release: "Tests: OFF"
+  "-DOSSIA_TESTING=1",
+  # Exception: the C API ships in the Unity package and has its own tests.
+  # Log of the Unity package: "C: 1". Log of the Max package: "C: 0"
+  "-DOSSIA_C=1"]
 compile = ["cmake", "--build", "{build}"]
 test = ["ctest", "--test-dir", "{build}", "--output-on-failure", "--no-tests=error", "--timeout", "300"]
-install = ["cmake", "--install", "{build}"]
+install = ["cmake", "--install", "{build}", "--prefix", "{install}"]
 artefacts = ["{install}"]
-
-[build.override.windows-x64]
-configure_add = ["-DOSSIA_PCH=0"]
-
-[build.override.mac]
-configure_add = ["-DCMAKE_OSX_ARCHITECTURES=arm64", "-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0"]
