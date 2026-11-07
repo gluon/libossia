@@ -4,7 +4,9 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [2.1.0+prism.11]
+## [2.1.0+prism.11] - 2026-11-07
+
+Max no longer freezes when a Minuit device leaves the network, and a value written to the inlet of `ossia.parameter` is no longer lost while the object outputs a value of the network.
 
 ### Added
 
@@ -12,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Max: a Minuit device that leaves the network no longer freezes Max. The listener of `_minuit._tcp` took its own lock twice on a withdrawn announcement, on the scheduler thread with Overdrive, as soon as the package was loaded; same code in ossia 2.1.0 and up to `2.1.0+prism.10`. With `2.1.0+prism.10`, Max froze 1 s after the withdrawal; after, the metro of the test goes on, 3 runs of 3.
+- Max: a Minuit device that leaves the network no longer freezes Max. The listener of `_minuit._tcp` took its own lock twice on a withdrawn announcement, on the scheduler thread with Overdrive, as soon as the package was loaded; same code in ossia 2.1.0 and up to `2.1.0+prism.10`. With `2.1.0+prism.10`, Max froze 1 s after the withdrawal; after, the metro of the test goes on, 6 runs of 6.
 - Max: a value written to the inlet of `ossia.parameter` while the object outputs a value of the network on another thread is no longer lost without a message. With a consumer of about 100 ms on the outlet: 20 lost in 20 before, none after.
 
 ## [2.1.0+prism.10] - 2026-11-05
