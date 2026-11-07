@@ -6,11 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2.1.0+prism.11] - 2026-11-07
 
-Max no longer freezes when a Minuit device leaves the network, nor announces services without end when one comes; its connections to announced devices name the package; and a value written to the inlet of `ossia.parameter` is no longer lost while the object outputs a value of the network.
+Max no longer freezes when a Minuit device leaves the network, nor announces services without end when one comes; its connections to announced devices name the package; an `ossia.remote` gets the value of a node added while connected once; and a value written to the inlet of `ossia.parameter` is no longer lost while the object outputs a value of the network.
 
 ### Added
 
-- Tests: `tests/Max/check_minuit.py`, a Minuit device that comes makes no service of Max's own on the network, and one that leaves does not freeze Max (it freezes a Max with the defect, and asks for `--may-freeze`); `minuit_listener_device_does_not_announce`, the same without Max; `oscquery_directory_names_its_client`, the name the package gives a server; `tests/Max/check_outlet.py`, what `ossia.parameter` outputs when a value of the network and a value of the inlet come together.
+- Tests: `tests/Max/check_minuit.py`, a Minuit device that comes makes no service of Max's own on the network, and one that leaves does not freeze Max (it freezes a Max with the defect, and asks for `--may-freeze`); `minuit_listener_device_does_not_announce`, the same without Max; `oscquery_directory_names_its_client`, the name the package gives a server; `oscquery_mirror_added_node_value_once`, the value of a node the server adds, once; `tests/Max/check_outlet.py`, what `ossia.parameter` outputs when a value of the network and a value of the inlet come together.
 
 ### Fixed
 
@@ -18,6 +18,7 @@ Max no longer freezes when a Minuit device leaves the network, nor announces ser
 
 - Max: a Minuit device that leaves the network no longer freezes Max. The listener of `_minuit._tcp` took its own lock twice on a withdrawn announcement, on the scheduler thread with Overdrive, as soon as the package was loaded; same code in ossia 2.1.0 and up to `2.1.0+prism.10`. With `2.1.0+prism.10`, Max froze 1 s after the withdrawal; after, the metro of the test goes on, 6 runs of 6.
 - Max: the connection the package opens to each announced OSCQuery device, which `connect <name>` reuses, gives the server the name `max_client_<process>`, not the name of that device: a map from `?PRISM_CONNECTIONS` no longer shows an edge from a device to itself.
+- Max: an `ossia.remote` gets the value of a node the server adds while the client is connected once, not twice: the client read it again for each of the two `ATTRIBUTES_CHANGED` the server sends for a new parameter. Measured on the mirror without Max: 2 values before, 1 after.
 - Max: a value written to the inlet of `ossia.parameter` while the object outputs a value of the network on another thread is no longer lost without a message. With a consumer of about 100 ms on the outlet: 20 lost in 20 before, none after.
 
 ## [2.1.0+prism.10] - 2026-11-05
