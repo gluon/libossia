@@ -32,7 +32,7 @@ Python 3.8 or later, standard library only.
 |---|---|
 | `CLIENTS` | the WebSocket clients of the server |
 | `IP`, `PORT` | where the client connects from |
-| `NAME` | the name the client gave with the text command `{"COMMAND": "PRISM_NAME", "DATA": "<name>"}`; absent otherwise. `ossia.client` and `Ossia.Client` give their device name to a server that declares `PRISM_CONNECTIONS` |
+| `NAME` | the name the client gave with the text command `{"COMMAND": "PRISM_NAME", "DATA": "<name>"}`; absent otherwise. To a server that declares `PRISM_CONNECTIONS`, the Max package gives `max_client_<process>` for the connection it opens to each announced device, which `connect <name>` reuses (`2.1.0+prism.11`; before, the name of the device it connected to), and the name of the `ossia.client` for a connection by URL; `Ossia.Client` gives `unity_client_<id>_<attempt>` |
 | `OSC_PORT`, `SENDER_PORT` | the UDP ports the client receives on and sends from, when it streams OSC over UDP |
 | `LISTEN` | the addresses the client asked for with `LISTEN` |
 | `PACKETS` | the OSC packets the server received from that client, datagrams or WebSocket frames |

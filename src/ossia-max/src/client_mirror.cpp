@@ -86,13 +86,15 @@ bool oscquery_server_reachable(std::string_view ws_url, int timeout_ms)
 }
 
 oscquery_connect_attempt::oscquery_connect_attempt(
-    std::string ws_url, std::string device_name)
+    std::string ws_url, std::string device_name, std::string client_name)
 {
-  m_thread = std::thread([this, url = std::move(ws_url), name = std::move(device_name)] {
+  m_thread = std::thread([this, url = std::move(ws_url), name = std::move(device_name),
+                          client = std::move(client_name)]() mutable {
     try
     {
-      auto dev = std::make_shared<ossia::net::generic_device>(
-          std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url), name);
+      auto mirror = std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url);
+      mirror->set_client_name(std::move(client));
+      auto dev = std::make_shared<ossia::net::generic_device>(std::move(mirror), name);
       if(dev->get_protocol().update(dev->get_root_node()))
         m_device = std::move(dev);
       else
@@ -140,6 +142,9 @@ struct oscquery_directory::impl final : servus::Listener
   };
 
   servus::Servus service{"_oscjson._tcp"};
+  // The name each mirror gives a server that lists its clients: the client
+  // is this process, not the device it mirrors.
+  const std::string client_name = "max_client_" + std::to_string(getpid());
   // Filled by Servus during browse, read by poll.
   std::mutex events_mutex;
   std::vector<std::pair<bool, std::string>> events;
@@ -274,7 +279,7 @@ oscquery_directory::changes oscquery_directory::poll()
     }
     else if(now >= e.next_try)
     {
-      e.attempt = std::make_unique<oscquery_connect_attempt>(e.url, name);
+      e.attempt = std::make_unique<oscquery_connect_attempt>(e.url, name, d.client_name);
     }
   }
 
