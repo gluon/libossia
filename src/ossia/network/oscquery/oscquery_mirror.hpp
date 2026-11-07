@@ -8,6 +8,10 @@
 #include <ossia/network/oscquery/host_info.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 namespace osc
 {
@@ -211,6 +215,10 @@ private:
   };
 
   ossia::spsc_queue<get_ws_promise> m_getWSPromises;
+  // The values read again after an ATTRIBUTES_CHANGED, by address, until the
+  // answer comes (or for 1 s): one read at a time for an address.
+  std::mutex m_attributeReadsMutex;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_attributeReads;
   ossia::spsc_queue<std::function<void()>> m_functionQueue;
   std::function<void()> m_commandCallback;
 

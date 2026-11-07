@@ -980,6 +980,10 @@ bool oscquery_mirror_protocol::on_WSMessage(
           get_ws_promise p;
           if(m_getWSPromises.try_dequeue(p))
           {
+            {
+              std::lock_guard lock{m_attributeReadsMutex};
+              m_attributeReads.erase(p.address);
+            }
             auto node = ossia::net::find_node(m_device->get_root_node(), p.address);
 
             const rapidjson::Value* obj_value = data.get();
@@ -1099,11 +1103,25 @@ bool oscquery_mirror_protocol::on_WSMessage(
             ossia::net::parameter_base* request_value = nullptr;
             json_parser::parse_attributes_changed(
                 m_device->get_root_node(), *doc, request_value);
-            // TODO investigate why those are called twice in
-            // OSCQueryValueCallbackTest
+            // For one new parameter the server sends two ATTRIBUTES_CHANGED
+            // with a TYPE (the type, then the parameter): its value is read
+            // once, not once for each, else what follows it gets it twice.
             if(request_value)
             {
-              pull_async(*request_value);
+              auto address = request_value->get_node().osc_address();
+              const auto now = std::chrono::steady_clock::now();
+              bool read = false;
+              {
+                std::lock_guard lock{m_attributeReadsMutex};
+                auto [it, added] = m_attributeReads.try_emplace(address, now);
+                if(added || now - it->second > std::chrono::seconds(1))
+                {
+                  it->second = now;
+                  read = true;
+                }
+              }
+              if(read)
+                pull_async(*request_value);
             }
           });
           if(m_commandCallback)

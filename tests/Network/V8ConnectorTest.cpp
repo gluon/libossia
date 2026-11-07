@@ -3516,3 +3516,89 @@ TEST_CASE("minuit_listener_device_does_not_announce", "minuit_listener_device_do
   INFO("step: built in " << build_ms << " ms");
   CHECK(build_ms < 300);
 }
+
+
+// A node the server adds while the client is connected: what follows its
+// parameter on the client (an ossia.remote, a callback set when the parameter
+// appears) gets its value once, then once for each change. The server sends
+// two ATTRIBUTES_CHANGED with a TYPE for one new parameter (the type, then the
+// parameter), and the client read the value again for each: the value came
+// twice. Set on the server without a push, so that only the reads bring it;
+// a value equal to the default of the type comes once too.
+TEST_CASE("oscquery_mirror_added_node_value_once", "oscquery_mirror_added_node_value_once")
+{
+  const float initial = GENERATE(0.5f, 0.f);
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "a11_added"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(server.get_root_node(), "/bench/first"))->push_value(0.f);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, free_port(false), ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+          "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+      "a11_added");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+  REQUIRE(mirror);
+
+  std::mutex m;
+  std::vector<ossia::value> received;
+  struct follower
+  {
+    std::mutex* m;
+    std::vector<ossia::value>* received;
+    void on_created(const ossia::net::parameter_base& p)
+    {
+      auto* mm = m;
+      auto* r = received;
+      const_cast<ossia::net::parameter_base&>(p).add_callback([mm, r](const ossia::value& v) {
+        std::lock_guard l{*mm};
+        r->push_back(v);
+      });
+    }
+  } f{&m, &received};
+  client->on_parameter_created.connect<&follower::on_created>(f);
+
+  auto poll = [&](int ms) {
+    for(int t = 0; t < ms; t += 5)
+    {
+      mirror->run_commands();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  };
+  auto* late = ossia::try_setup_parameter(
+      "float", ossia::net::create_node(server.get_root_node(), "/bench/late"));
+  late->set_value(initial);
+  poll(1000);
+  std::vector<ossia::value> first;
+  {
+    std::lock_guard l{m};
+    first = received;
+    received.clear();
+  }
+  late->push_value(0.75f);
+  poll(1000);
+  std::vector<ossia::value> then;
+  {
+    std::lock_guard l{m};
+    then = received;
+  }
+  client->on_parameter_created.disconnect<&follower::on_created>(f);
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+
+  std::printf("oscquery_mirror_added_node_value_once: initial %g, %zu value(s) when added, %zu after one change\n",
+              initial, first.size(), then.size());
+  INFO("step: the added node's value " << initial << ", once");
+  CHECK(first.size() == 1);
+  CHECK((first.empty() || first[0] == ossia::value(initial)));
+  INFO("step: one change, one value");
+  CHECK(then.size() == 1);
+}
