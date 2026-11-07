@@ -4,6 +4,17 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [2.1.0+prism.11]
+
+### Added
+
+- Tests: `tests/Max/check_minuit.py`, a Minuit device that leaves the network does not freeze Max (it freezes a Max with the defect, and asks for `--may-freeze`); `tests/Max/check_outlet.py`, what `ossia.parameter` outputs when a value of the network and a value of the inlet come together.
+
+### Fixed
+
+- Max: a Minuit device that leaves the network no longer freezes Max. The listener of `_minuit._tcp` took its own lock twice on a withdrawn announcement, on the scheduler thread with Overdrive, as soon as the package was loaded; same code in ossia 2.1.0 and up to `2.1.0+prism.10`. With `2.1.0+prism.10`, Max froze 1 s after the withdrawal; after, the metro of the test goes on, 3 runs of 3.
+- Max: a value written to the inlet of `ossia.parameter` while the object outputs a value of the network on another thread is no longer lost without a message. With a consumer of about 100 ms on the outlet: 20 lost in 20 before, none after.
+
 ## [2.1.0+prism.10] - 2026-11-05
 
 Taking control, listening on one address, a map of who follows whom and a panel built from a device's tree, for Max and Unity. The Unity package: the crash at the end of Play is gone, an exposed object publishes its transform once, `[Ossia.Expose]` takes bounds, a unit and an access mode. The core: a client reads a value again after a crossing, a boolean is served as `true` or `false`, and the server answers `?PRISM_CONNECTIONS`. Max: the defects of `ossia.client`, `[ossia] @bundle`, `dump` and the range of a list are fixed.
