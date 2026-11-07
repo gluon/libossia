@@ -162,16 +162,6 @@ matcher::~matcher()
   }
   node = nullptr;
 }
-struct set_local_mute
-{
-  bool& m;
-  set_local_mute(bool& mute)
-      : m{mute}
-  {
-    m = true;
-  }
-  ~set_local_mute() { m = false; }
-};
 void matcher::output_value(ossia::value v)
 {
   if(owner->m_otype == object_class::param || owner->m_otype == object_class::remote)
@@ -181,7 +171,7 @@ void matcher::output_value(ossia::value v)
       return;
     // @hold: a value that comes while the inlet has the control waits
     const auto now = std::chrono::steady_clock::now();
-    if(pbase->holding(now) && !pbase->m_inputting && !owner->m_local_mute)
+    if(pbase->holding(now) && !pbase->m_inputting && !local_mute_scope::active(owner))
     {
       m_held = std::move(v);
       pbase->arm_hold(now);
@@ -189,9 +179,9 @@ void matcher::output_value(ossia::value v)
     }
   }
 
-  if(!owner->m_local_mute)
+  if(!local_mute_scope::active(owner))
   {
-    set_local_mute lm{owner->m_local_mute};
+    local_mute_scope lm{owner};
 
     auto param = node->get_parameter();
     auto filtered
