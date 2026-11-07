@@ -3436,3 +3436,41 @@ TEST_CASE("v8connector_context_change_leaves_a_shared_device", "v8connector_cont
     from_shared = from_shared || in.address == "/image/scale";
   REQUIRE(!from_shared);
 }
+
+#include <servus/servus.h>
+
+// The Minuit listener of the package builds a device for each instance it sees
+// under _minuit._tcp. That device must not announce itself: its announcement,
+// "<instance> Minuit server", is one more instance for the listener, whose
+// device announces itself in turn, without end (the names grow to the limit
+// of mDNS, then the system numbers them: thousands of services on the
+// network). Announcing also held the caller, the scheduler of Max.
+TEST_CASE("minuit_listener_device_does_not_announce", "minuit_listener_device_does_not_announce")
+{
+  const std::string instance = "prism11_m_" + std::to_string(getpid());
+  const auto start = std::chrono::steady_clock::now();
+  auto dev = ossia::max_binding::make_minuit_listener_device(
+      instance, "127.0.0.1", free_port(false), free_port(false));
+  const auto build_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count();
+
+  servus::Servus browser{"_minuit._tcp"};
+  browser.beginBrowsing(servus::Interface::IF_ALL);
+  std::string seen;
+  for(int i = 0; i < 300 && seen.empty(); i++)
+  {
+    browser.browse(10);
+    for(const auto& s : browser.getInstances())
+      if(s.rfind(instance, 0) == 0)
+        seen = s;
+  }
+  browser.endBrowsing();
+  std::printf("minuit_listener_device_does_not_announce: built in %lld ms, seen \"%s\"\n",
+              (long long)build_ms, seen.c_str());
+
+  INFO("step: no service of the device on the network within 3 s");
+  CHECK(seen.empty());
+  INFO("step: built in " << build_ms << " ms");
+  CHECK(build_ms < 300);
+}

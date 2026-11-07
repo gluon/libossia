@@ -42,6 +42,13 @@ polled_oscquery_mirror(ossia::net::device_base& dev)
   return mirror;
 }
 
+// The device the Minuit listener of the package builds for an instance it saw
+// announced under _minuit._tcp, at ip:remote_port; it listens on local_port.
+// It does not announce itself. Throws when local_port cannot be opened.
+std::unique_ptr<ossia::net::generic_device> make_minuit_listener_device(
+    const std::string& instance, const std::string& ip, uint16_t remote_port,
+    uint16_t local_port);
+
 // True when something accepts a TCP connection at the host and port of a
 // ws:// URL, within timeout_ms. Building a mirror on a server that is down
 // blocks the caller for 1.5 s before it fails; this costs timeout_ms at most.

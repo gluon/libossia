@@ -3,6 +3,8 @@
 
 #include "client_mirror.hpp"
 
+#include <ossia/network/minuit/minuit.hpp>
+
 #include <servus/listener.h>
 #include <servus/servus.h>
 
@@ -21,6 +23,18 @@ namespace ossia
 {
 namespace max_binding
 {
+
+std::unique_ptr<ossia::net::generic_device> make_minuit_listener_device(
+    const std::string& instance, const std::string& ip, uint16_t remote_port,
+    uint16_t local_port)
+{
+  // Not announced: the listener would see the announcement as a new instance,
+  // and build a device for it, which would announce itself in turn.
+  return std::make_unique<ossia::net::generic_device>(
+      std::make_unique<ossia::net::minuit_protocol>(
+          instance, ip, remote_port, local_port, false),
+      instance);
+}
 
 bool oscquery_server_reachable(std::string_view ws_url, int timeout_ms)
 {
