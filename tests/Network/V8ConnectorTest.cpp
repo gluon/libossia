@@ -3602,3 +3602,57 @@ TEST_CASE("oscquery_mirror_added_node_value_once", "oscquery_mirror_added_node_v
   INFO("step: one change, one value");
   CHECK(then.size() == 1);
 }
+
+// The server of tests/Max/check_remote.py, the same as above, in a process of
+// its own: device OSSIA_BENCH_NAME (announced over mDNS), /bench/first, on
+// OSSIA_BENCH_OSC and OSSIA_BENCH_WS. Reads one command a line on its standard
+// input and answers "done <command>": "add <v>" creates /bench/late and sets v
+// without a push, "push <v>" pushes v to it, "quit" stops.
+#include <iostream>
+TEST_CASE("zz_added_node_server", "[.]")
+{
+  const char* osc_s = std::getenv("OSSIA_BENCH_OSC");
+  const char* ws_s = std::getenv("OSSIA_BENCH_WS");
+  const char* name_s = std::getenv("OSSIA_BENCH_NAME");
+  REQUIRE(osc_s);
+  REQUIRE(ws_s);
+  REQUIRE(name_s);
+  auto ctx = ossia::net::create_network_context();
+  auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = mp.get();
+  ossia::net::generic_device dev{std::move(mp), name_s};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/bench/first"))->push_value(0.f);
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, std::atoi(osc_s), std::atoi(ws_s), false);
+  // OSSIA_BENCH_LOG: what the server receives and sends, when set
+  if(const char* log_s = std::getenv("OSSIA_BENCH_LOG"); log_s && *log_s)
+  {
+    ossia::net::network_logger l;
+    l.inbound_logger = spdlog::basic_logger_mt("added_in", log_s);
+    l.inbound_logger->flush_on(spdlog::level::info);
+    l.outbound_logger = l.inbound_logger;
+    server->set_logger(l);
+  }
+  multiplex->expose_to(std::move(server));
+  std::thread net([&] { ctx->run(); });
+
+  ossia::net::parameter_base* late{};
+  std::string command;
+  float v{};
+  while(std::cin >> command && command != "quit")
+  {
+    if(command == "add" && std::cin >> v && !late)
+    {
+      late = ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/bench/late"));
+      late->set_value(v);
+    }
+    else if(command == "push" && std::cin >> v && late)
+      late->push_value(v);
+    else
+      command = "refused";
+    std::printf("done %s\n", command.c_str());
+    std::fflush(stdout);
+  }
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+}
