@@ -10,8 +10,23 @@ set(MAXSDK_PATH "${OSSIA_3RDPARTY_FOLDER}/max-sdk" CACHE PATH "Path to Max SDK f
 # Name and version of the Max package, and name of the script-driven node
 # object. All are defined here only; the sources read them as compile definitions.
 set(OSSIA_MAX_PACKAGE_NAME "ossia-prism")
-set(OSSIA_MAX_PACKAGE_VERSION "2.1.0+prism.10")
+set(OSSIA_MAX_PACKAGE_VERSION "2.1.0+prism.11")
 set(OSSIA_V8CONNECTOR_NAME "ossia.v8connector")
+
+# docs/prism/LISEZMOI.txt and the release tag say the same version
+set(OSSIA_MAX_TAG "")
+find_package(Git QUIET)
+if(Git_FOUND)
+  execute_process(
+      COMMAND "${GIT_EXECUTABLE}" describe --tags --exact-match HEAD
+      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+      OUTPUT_VARIABLE OSSIA_MAX_TAG OUTPUT_STRIP_TRAILING_WHITESPACE
+      ERROR_QUIET)
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/check_version.cmake")
+ossia_max_check_version(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../docs/prism/LISEZMOI.txt"
+    "${OSSIA_MAX_PACKAGE_VERSION}" "${OSSIA_MAX_TAG}")
 
 include(GenerateExportHeader)
 if(APPLE)

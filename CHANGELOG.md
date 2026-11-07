@@ -10,7 +10,12 @@ Max no longer freezes when a Minuit device leaves the network, nor announces ser
 
 ### Added
 
+- Build: configuring the Max package stops when the first line of `docs/prism/LISEZMOI.txt`, which the package carries at its root, is not `ossia-prism <version of the package>`, or when the sources are built at a release tag other than `v<version>` (`src/ossia-max/check_version.cmake`).
 - Tests: `tests/Max/check_minuit.py`, a Minuit device that comes makes no service of Max's own on the network, and one that leaves does not freeze Max (it freezes a Max with the defect, and asks for `--may-freeze`); `minuit_listener_device_does_not_announce`, the same without Max; `oscquery_directory_names_its_client`, the name the package gives a server; `oscquery_mirror_added_node_value_once`, the value of a node the server adds, once; `tests/Max/check_outlet.py`, what `ossia.parameter` outputs when a value of the network and a value of the inlet come together.
+
+### Changed
+
+- Max: the version of the package is `2.1.0+prism.11`; `docs/prism/LISEZMOI.txt` says it (it still said `2.1.0+prism.9`).
 
 ### Fixed
 
