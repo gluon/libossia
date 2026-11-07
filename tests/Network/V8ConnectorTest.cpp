@@ -3205,6 +3205,49 @@ TEST_CASE("oscquery_directory_finds_its_own_device", "oscquery_directory_finds_i
   REQUIRE(found);
 }
 
+// The directory of the package opens one connection per announced device.
+// That client gives the server its own name, max_client_<process>, not the
+// name of the device it mirrors: ?PRISM_CONNECTIONS of unity_demo showed a
+// client unity_demo, an edge from a device to itself in prism_map. Only that
+// name is checked: a Max running on the machine sees the device too, and its
+// directory connects under the name of its own package.
+TEST_CASE("oscquery_directory_names_its_client", "oscquery_directory_names_its_client")
+{
+  const std::string name = "a11_named_" + std::to_string(getpid());
+  const std::string client = "max_client_" + std::to_string(getpid());
+  auto ctx = ossia::max_binding::make_device_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), name};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), free_port(true), false);
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+  std::atomic_bool stop{false};
+  std::thread scheduler([&] {
+    while(!stop)
+    {
+      ossia::max_binding::poll_device_network_context(*ctx);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  });
+
+  directory_poller p;
+  const bool found = p.until([&] { return p.dir.find(name) != nullptr; }, 15000);
+  std::string connections;
+  const bool named = found && p.until([&] {
+    connections = exposed->query_connections();
+    return connections.find("\"NAME\":\"" + client + "\"") != std::string::npos;
+  }, 3000);
+  multiplex.stop_expose_to(*exposed);
+  stop = true;
+  scheduler.join();
+  std::printf("oscquery_directory_names_its_client: %s\n", connections.c_str());
+  INFO("step: the device of this process found by name, within 15 s");
+  REQUIRE(found);
+  INFO("step: a client named " << client << " within 3 s: " << connections);
+  CHECK(named);
+}
+
 // The WebSocket of a device found by name goes down while the device stays
 // announced (its process killed, the announcement held by dns-sd): the
 // directory reports it lost within 2 s and drops it, then builds it again

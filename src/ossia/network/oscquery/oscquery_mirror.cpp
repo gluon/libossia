@@ -1014,7 +1014,9 @@ bool oscquery_mirror_protocol::on_WSMessage(
             wr.Key("COMMAND");
             wr.String("PRISM_NAME");
             wr.Key("DATA");
-            wr.String(m_device->get_name().c_str());
+            wr.String(
+                m_clientName.empty() ? m_device->get_name().c_str()
+                                     : m_clientName.c_str());
             wr.EndObject();
             ws_send_message(std::string(buf.GetString(), buf.GetSize()));
           }
