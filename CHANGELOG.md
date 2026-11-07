@@ -20,6 +20,7 @@ Max no longer freezes when a Minuit device leaves the network, nor announces ser
 - Max: the connection the package opens to each announced OSCQuery device, which `connect <name>` reuses, gives the server the name `max_client_<process>`, not the name of that device: a map from `?PRISM_CONNECTIONS` no longer shows an edge from a device to itself.
 - Max: an `ossia.remote` gets the value of a node the server adds while the client is connected once, not twice: the client read it again for each of the two `ATTRIBUTES_CHANGED` the server sends for a new parameter. Measured on the mirror without Max: 2 values before, 1 after.
 - Max: a value written to the inlet of `ossia.parameter` while the object outputs a value of the network on another thread is no longer lost without a message. With a consumer of about 100 ms on the outlet: 20 lost in 20 before, none after.
+- Tools: `prism_map.py --html` draws an edge from a device to itself as a loop above its box; it was a line of no length, invisible. `test_prism_map.py` closes the sockets of its fake servers, and a test that leaves one open fails. The README of the tool cites the TouchDesigner OSCQuery component, whose server answers `?PRISM_CONNECTIONS` from `oscquery` 0.3.3.
 
 ## [2.1.0+prism.10] - 2026-11-05
 

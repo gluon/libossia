@@ -10,7 +10,8 @@ Finds the devices announced over mDNS (_oscjson._tcp, through dns-sd, on
 macOS) and the ones given with --host, reads the HOST_INFO of each, then
 ?PRISM_CONNECTIONS from those that declare it in EXTENSIONS: the libossia
 servers of ossia-prism (Max ossia.device, Unity Controller) since
-2.1.0+prism.10. A device that does not declare it is listed, its
+2.1.0+prism.10, and the TouchDesigner OSCQuery component (prism-td-oscquery)
+since oscquery 0.3.3. A device that does not declare it is listed, its
 connections unknown.
 
 Each client of a server becomes an edge "follows" from the client to the
@@ -123,14 +124,23 @@ def to_html(doc):
            'markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>']
     for e in doc['edges']:
         (x1, y1), (x2, y2) = pos[e['from']], pos[e['to']]
-        dx, dy = x2 - x1, y2 - y1
-        n = math.hypot(dx, dy) or 1
-        x2, y2 = x2 - dx / n * 60, y2 - dy / n * 22
         dash = ' stroke-dasharray="6 4"' if e['kind'] == 'sends' else ''
         label = (f'{len(e["listen"])} LISTEN' if e['kind'] == 'follows' else 'UDP') + f', {e["packets"]} pkt'
-        svg.append(f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" stroke="currentColor"'
-                   f'{dash} marker-end="url(#arrow)"><title>{html.escape(", ".join(e.get("listen", [])))}</title></line>')
-        svg.append(f'<text x="{(x1 + x2) / 2:.0f}" y="{(y1 + y2) / 2 - 6:.0f}" font-size="11" '
+        title = f'<title>{html.escape(", ".join(e.get("listen", [])))}</title>'
+        if e['from'] == e['to']:
+            # From a box to itself: a loop above it, a line would have no length
+            svg.append(f'<path d="M{x1 - 24:.0f},{y1 - 18:.0f} C{x1 - 60:.0f},{y1 - 80:.0f} '
+                       f'{x1 + 60:.0f},{y1 - 80:.0f} {x1 + 24:.0f},{y1 - 18:.0f}" fill="none" '
+                       f'stroke="currentColor"{dash} marker-end="url(#arrow)">{title}</path>')
+            lx, ly = x1, y1 - 72
+        else:
+            dx, dy = x2 - x1, y2 - y1
+            n = math.hypot(dx, dy) or 1
+            x2, y2 = x2 - dx / n * 60, y2 - dy / n * 22
+            svg.append(f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" stroke="currentColor"'
+                       f'{dash} marker-end="url(#arrow)">{title}</line>')
+            lx, ly = (x1 + x2) / 2, (y1 + y2) / 2 - 6
+        svg.append(f'<text x="{lx:.0f}" y="{ly:.0f}" font-size="11" '
                    f'text-anchor="middle">{html.escape(label)}</text>')
     for n in nodes:
         x, y = pos[n]
