@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 CNRS
 # SPDX-FileContributor: Julien Bayle, PRISM <https://www.prism.cnrs.fr/>
-"""A Minuit device that leaves the network does not freeze Max, checked in a
-running Max with the package installed, no click.
+"""A Minuit device that comes does not make Max announce services of its own,
+and one that leaves the network does not freeze Max, checked in a running Max
+with the package installed, no click.
 
 usage: python3 tests/Max/check_minuit.py --may-freeze [--max <Max.app>] [--out <folder>]
 
@@ -14,11 +15,16 @@ bench of TouchDesigner is running.
 
 Opens check_minuit.maxpat (a metro that counts on UDP 41742; it closes itself).
 dns-sd announces a device _minuit._tcp; the listener of the package, which every
-ossia object starts, must hold it (get devices); dns-sd withdraws it. Nothing connects to it:
+ossia object starts, must hold it (get devices); 5 s later, dns-sd -B must see
+that one service and no other; dns-sd withdraws it. Nothing connects to it:
 loading the package is enough. The metro has to go on: a scheduler that stops
-stops it. A frozen Max is sampled into --out. Announcements of Max's own Minuit
-clients stay on the network until Max quits. The patcher also takes
-/connect <name>, to connect its ossia.client by hand.
+stops it. A frozen Max is sampled into --out. It refuses to run while
+_minuit._tcp services are on the network.
+
+With a package whose listener's devices announce themselves (ossia 2.1.0 to
+ossia-prism 2.1.0+prism.11 before the fix), Max announces services of its own,
+more and more, until it quits: quit Max after a failure. The patcher also
+takes /connect <name>, to connect its ossia.client by hand.
 """
 import argparse
 import os
@@ -66,6 +72,21 @@ def bench_running():
             if ('bidir_run.py' in l or 'load_run' in l or 'Contents/MacOS/TouchDesigner' in l) and 'grep' not in l]
 
 
+def minuit_services(seconds=4):
+    """The _minuit._tcp services on the network, as dns-sd -B sees them."""
+    try:
+        out = subprocess.run(['dns-sd', '-B', '_minuit._tcp', 'local'], capture_output=True,
+                             text=True, stdin=subprocess.DEVNULL, timeout=seconds).stdout
+    except subprocess.TimeoutExpired as e:
+        out = (e.stdout or b'').decode() if isinstance(e.stdout, bytes) else (e.stdout or '')
+    names = set()
+    for line in out.splitlines():
+        f = line.split(None, 6)
+        if len(f) == 7 and f[1] in ('Add', 'Rmv') and f[5] == '_minuit._tcp.':
+            (names.add if f[1] == 'Add' else names.discard)(f[6])
+    return sorted(names)
+
+
 class Patch:
     def __init__(self):
         self.tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -108,6 +129,9 @@ def main():
     running = bench_running()
     if running:
         sys.exit(f'a bench is running, not now: {running}')
+    before = minuit_services()
+    if before:
+        sys.exit(f'_minuit._tcp services on the network already, the count would be wrong: {before[:3]}')
     p = Patch()
     subprocess.run(['open', '-a', a.max, os.path.join(HERE, 'check_minuit.maxpat')], check=True)
     beats, _ = p.read(6)
@@ -126,6 +150,12 @@ def main():
     listed = [v for x, v in seen if x == '/client' and v[:2] == ['device', 'minuit']]
     check(f'the listener holds {NAME}', any(NAME in str(v[2]) for v in listed if len(v) > 2),
           str(listed[:4]))
+    beats, _ = p.read(5)
+    services = minuit_services()
+    check('one announcement, one service: the devices of the listener do not announce themselves',
+          services == [f'{NAME} Minuit server'], f'{len(services)} services: {services[:3]}')
+    if len(services) > 1:
+        print('INFO Max announces services of its own: they go on until Max quits', flush=True)
 
     dns.terminate()
     dns.wait(5)

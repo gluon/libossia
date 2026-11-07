@@ -81,10 +81,8 @@ void ZeroconfMinuitListener::add_instance(const std::string& instance)
     data.host = ip;
     data.remote_port = boost::lexical_cast<int>(port);
 
-    auto clt = std::make_unique<ossia::net::generic_device>(
-        std::make_unique<ossia::net::minuit_protocol>(
-            instance, ip, boost::lexical_cast<int>(port), (rand() % 64512) + 1024),
-        instance);
+    auto clt = make_minuit_listener_device(
+        instance, ip, boost::lexical_cast<int>(port), (rand() % 64512) + 1024);
 
     std::lock_guard<std::mutex> lock(ZeroconfMinuitListener::s_mutex);
     s_devices.push_back(std::move(clt));
