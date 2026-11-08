@@ -49,3 +49,7 @@ compile = ["cmake", "--build", "{build}"]
 test = ["ctest", "--test-dir", "{build}", "--output-on-failure", "--no-tests=error", "--timeout", "300"]
 install = ["cmake", "--install", "{build}", "--prefix", "{install}"]
 artefacts = ["{install}"]
+
+[build.override.linux-x86_64]
+# V8ConnectorTest concerns Max only, and Max does not exist on Linux.
+exclude = [{ args = ["-E", "^ossia_target_V8ConnectorTest$"], reason = "V8ConnectorTest concerns Max only, absent on Linux" }]
