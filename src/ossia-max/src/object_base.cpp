@@ -18,6 +18,8 @@
 
 #include <ctre.hpp>
 
+#include <thread>
+
 namespace ossia
 {
 namespace max_binding
@@ -918,24 +920,54 @@ void object_base::lock_and_touch(object_base* x, t_symbol* s)
   x->m_lock = false;
 }
 
+static thread_local const local_mute_scope* local_mute_top{};
+
+local_mute_scope::local_mute_scope(const object_base* obj)
+    : owner{obj}
+    , up{local_mute_top}
+{
+  local_mute_top = this;
+}
+
+local_mute_scope::~local_mute_scope()
+{
+  local_mute_top = up;
+}
+
+bool local_mute_scope::active(const object_base* obj)
+{
+  for(auto s = local_mute_top; s; s = s->up)
+    if(s->owner == obj)
+      return true;
+  return false;
+}
+
+// The parameters a thread is pushing, against a loop on that thread
+struct param_lock
+{
+  int64_t first;
+  ossia::net::parameter_base* second;
+  std::thread::id thread;
+};
 static std::mutex param_locks_mutex;
 static std::atomic_int64_t param_locks_counter{};
-static ossia::small_vector<std::pair<int64_t, ossia::net::parameter_base*>, 64>
-    param_locks;
+static ossia::small_vector<param_lock, 64> param_locks;
 void object_base::push_parameter_value(
     ossia::net::parameter_base* param, const ossia::value& val)
 {
   std::unique_lock<std::mutex> lock{param_locks_mutex};
-  auto it = ossia::find_if(
-      param_locks, [param](const auto& p) { return p.second == param; });
+  const auto self = std::this_thread::get_id();
+  auto it = ossia::find_if(param_locks, [param, self](const auto& p) {
+    return p.second == param && p.thread == self;
+  });
 
   if(it == param_locks.end())
   {
     int64_t r = param_locks_counter++;
-    param_locks.emplace_back(r, param);
+    param_locks.push_back(param_lock{r, param, self});
     lock.unlock();
 
-    if(!m_local_mute)
+    if(!local_mute_scope::active(this))
     {
       // The device of the parameter may send the values of the tick
       // together, at its end (@bundle of ossia.device and ossia.client).

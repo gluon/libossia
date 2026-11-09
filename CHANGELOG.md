@@ -4,6 +4,30 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [2.1.0+prism.11] - 2026-11-09
+
+Max no longer freezes when a Minuit device leaves the network, nor announces services without end when one comes; its connections to announced devices name the package; an `ossia.remote` gets the value of a node added while connected once; and a value written to the inlet of `ossia.parameter` is no longer lost while the object outputs a value of the network.
+
+### Added
+
+- Build: configuring the Max package stops when the first line of `docs/prism/LISEZMOI.txt`, which the package carries at its root, is not `ossia-prism <version of the package>`, or when the sources are built at a release tag other than `v<version>` (`src/ossia-max/check_version.cmake`).
+- Tests: `tests/Max/check_minuit.py`, a Minuit device that comes makes no service of Max's own on the network, and one that leaves does not freeze Max (it freezes a Max with the defect, and asks for `--may-freeze`); `minuit_listener_device_does_not_announce`, the same without Max; `oscquery_directory_names_its_client`, the name the package gives a server; `oscquery_mirror_added_node_value_once`, the value of a node the server adds, once; `tests/Max/check_remote.py`, the same in Max, an `ossia.remote` by URL and by name, against a libossia server in another process; `tests/Max/check_outlet.py`, what `ossia.parameter` outputs when a value of the network and a value of the inlet come together; in Unity, `ClientTests.AddressAddedLaterGetsItsValueOnce` and `ClientTests.ServerListsTheClientUnderItsOwnName`, the second a guard: the name of a client of Unity does not change in this version.
+
+### Changed
+
+- Max: the version of the package is `2.1.0+prism.11`; `docs/prism/LISEZMOI.txt` says it (it still said `2.1.0+prism.9`).
+
+### Fixed
+
+- Max: a Minuit device that comes no longer makes Max announce services without end. Each client the listener of `_minuit._tcp` built announced itself, the listener built a client for that announcement, and so on: 2576 services after three runs of the test in one Max, Max at about 700 % CPU, until it quit; each announcement held the scheduler 634 to 745 ms. The clients of the listener no longer announce themselves: one service for one announcement, the metro of the test stopping at most 0.11 s, 3 runs of 3. Same code in ossia 2.1.0.
+
+- Max: a Minuit device that leaves the network no longer freezes Max. The listener of `_minuit._tcp` took its own lock twice on a withdrawn announcement, on the scheduler thread with Overdrive, as soon as the package was loaded; same code in ossia 2.1.0 and up to `2.1.0+prism.10`. With `2.1.0+prism.10`, Max froze 1 s after the withdrawal; after, the metro of the test goes on, 6 runs of 6.
+- Max: the connection the package opens to each announced OSCQuery device, which `connect <name>` reuses, gives the server the name `max_client_<process>`, not the name of that device: a map from `?PRISM_CONNECTIONS` no longer shows an edge from a device to itself.
+- Max: an `ossia.remote` gets the value of a node the server adds while the client is connected once, not twice: the client read it again for each of the two `ATTRIBUTES_CHANGED` the server sends for a new parameter. Measured on the mirror without Max: 2 values before, 1 after. In Max (`tests/Max/check_remote.py`, by URL and by name): once in 47 runs of 48; twice by URL in one, seen once in 48 runs, before the server's log was kept, not reproduced. Without Max, 2 values once in a full run of the tests on a loaded machine, 0 of 60 when the test ran alone: a known defect, see the README.
+- Unity: a `Remote` gets the value of a node the device adds while the Client is connected once: the same fix, in the mirror the Client uses. `ClientTests.AddressAddedLaterGetsItsValueOnce`, with the published packages: twice with `2.1.0+prism.10`, 3 runs of 3; once with `2.1.0+prism.11`, 3 runs of 3.
+- Max: a value written to the inlet of `ossia.parameter` while the object outputs a value of the network on another thread is no longer lost without a message. With a consumer of about 100 ms on the outlet: 20 lost in 20 before, none after.
+- Tools: `prism_map.py --html` draws an edge from a device to itself as a loop above its box; it was a line of no length, invisible. `test_prism_map.py` closes the sockets of its fake servers, and a test that leaves one open fails. The README of the tool cites the TouchDesigner OSCQuery component, whose server answers `?PRISM_CONNECTIONS` from `oscquery` 0.3.3.
+
 ## [2.1.0+prism.10] - 2026-11-05
 
 Taking control, listening on one address, a map of who follows whom and a panel built from a device's tree, for Max and Unity. The Unity package: the crash at the end of Play is gone, an exposed object publishes its transform once, `[Ossia.Expose]` takes bounds, a unit and an access mode. The core: a client reads a value again after a crossing, a boolean is served as `true` or `false`, and the server answers `?PRISM_CONNECTIONS`. Max: the defects of `ossia.client`, `[ossia] @bundle`, `dump` and the range of a list are fixed.

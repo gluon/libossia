@@ -6,13 +6,17 @@ answers ?PRISM_CONNECTIONS, the other does not know it.
 
 usage: python3 test_prism_map.py
 """
+import gc
 import http.server
 import json
+import math
 import os
+import re
 import subprocess
 import sys
 import threading
 import unittest
+import warnings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAP = os.path.join(HERE, 'prism_map.py')
@@ -56,8 +60,17 @@ class PrismMapTests(unittest.TestCase):
         self.servers = []
 
     def tearDown(self):
-        for s in self.servers:
-            s.shutdown()
+        # Released here: a socket left open is a failure of this test
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always', ResourceWarning)
+            while self.servers:
+                s = self.servers.pop()
+                s.shutdown()
+                s.server_close()
+                del s
+            gc.collect()
+        leaks = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+        self.assertEqual(leaks, [])
 
     def serve(self, name, connections):
         s = fake_server(name, connections)
@@ -107,6 +120,25 @@ class PrismMapTests(unittest.TestCase):
         self.assertIn('<svg', html)
         self.assertIn('td_client', html)
         self.assertIn('dev_a', html)
+
+    def test_an_edge_to_itself_is_drawn(self):
+        # A client that gives the name of the server it follows: the edge goes
+        # from a box to the same box, and has to be seen.
+        a = self.serve('dev_a', {'CLIENTS': [{'IP': '127.0.0.1', 'PORT': 1, 'NAME': 'dev_a',
+                                              'LISTEN': [], 'PACKETS': 10}], 'SENDERS': []})
+        page = self.run_map('--host', f'127.0.0.1:{a}', '--html', '-')
+        svg = page[page.index('</defs>'):page.index('</svg>')]
+        extents = []
+        for m in re.finditer(r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"', svg):
+            x1, y1, x2, y2 = map(float, m.groups())
+            extents.append(math.hypot(x2 - x1, y2 - y1))
+        for m in re.finditer(r'<path d="([^"]*)"', svg):
+            n = [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', m.group(1))]
+            xs, ys = n[0::2], n[1::2]
+            extents.append(math.hypot(max(xs) - min(xs), max(ys) - min(ys)))
+        self.assertEqual(len(extents), 1, svg)
+        self.assertGreater(extents[0], 20, svg)
+        self.assertIn('10 pkt', svg)
 
     def test_unreachable_host(self):
         doc = json.loads(self.run_map('--host', '127.0.0.1:1', '--json', '-'))

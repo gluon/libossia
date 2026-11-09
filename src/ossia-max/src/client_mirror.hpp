@@ -42,6 +42,13 @@ polled_oscquery_mirror(ossia::net::device_base& dev)
   return mirror;
 }
 
+// The device the Minuit listener of the package builds for an instance it saw
+// announced under _minuit._tcp, at ip:remote_port; it listens on local_port.
+// It does not announce itself. Throws when local_port cannot be opened.
+std::unique_ptr<ossia::net::generic_device> make_minuit_listener_device(
+    const std::string& instance, const std::string& ip, uint16_t remote_port,
+    uint16_t local_port);
+
 // True when something accepts a TCP connection at the host and port of a
 // ws:// URL, within timeout_ms. Building a mirror on a server that is down
 // blocks the caller for 1.5 s before it fails; this costs timeout_ms at most.
@@ -56,7 +63,10 @@ bool oscquery_server_reachable(std::string_view ws_url, int timeout_ms);
 class oscquery_connect_attempt
 {
 public:
-  oscquery_connect_attempt(std::string ws_url, std::string device_name);
+  // client_name: the name given to a server that lists its clients; the
+  // device's name when empty.
+  oscquery_connect_attempt(
+      std::string ws_url, std::string device_name, std::string client_name = {});
   // Waits for the thread: at most the time of one attempt.
   ~oscquery_connect_attempt();
   oscquery_connect_attempt(const oscquery_connect_attempt&) = delete;
@@ -82,7 +92,8 @@ private:
 // the same Max, whose network context that thread polls, could never
 // connect. A build that fails is tried again every retry_ms while the device
 // is announced, and a mirror whose WebSocket goes down is dropped, reported,
-// and built again the same way.
+// and built again the same way. Each mirror is named after its device, and
+// gives a server that lists its clients the name max_client_<process>.
 class oscquery_directory
 {
 public:

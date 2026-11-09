@@ -76,7 +76,6 @@ public:
   bool m_dead{false}; // whether this object is being deleted or not;
   bool m_is_deleted{};
   bool m_lock{false}; // attribute lock
-  bool m_local_mute{false};
   bool m_registering{}; // true while registering to prevent recursive registration
   bool m_registered{};  // true if register_node() have been called at least once
   ossia::net::address_scope m_addr_scope{};
@@ -195,6 +194,22 @@ private:
   void create_patcher_hierarchy(ossia_max& omax);
   unsigned long poly_index();
   void make_global_paths(const std::string& name);
+};
+
+// While a thread is in the outlet of an object: a value that comes back to that
+// object on that thread is its own, and goes no further. Only that thread: the
+// network outputs on Max's scheduler while a script writes on the main thread,
+// and neither is the other's loop.
+struct local_mute_scope
+{
+  explicit local_mute_scope(const object_base* obj);
+  ~local_mute_scope();
+  local_mute_scope(const local_mute_scope&) = delete;
+  local_mute_scope& operator=(const local_mute_scope&) = delete;
+  static bool active(const object_base* obj);
+
+  const object_base* owner;
+  const local_mute_scope* up;
 };
 
 #pragma mark -

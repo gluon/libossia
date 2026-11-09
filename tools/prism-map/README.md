@@ -12,7 +12,7 @@ Python 3.8 or later, standard library only.
 
 1. The devices announced over mDNS (`_oscjson._tcp`), found with `dns-sd` for `--browse-ms` milliseconds (2000 by default). `dns-sd` ships with macOS; elsewhere, or for a device that is not announced (a server on `127.0.0.1` only), give it with `--host HOST:PORT`, repeatable, and `--no-browse` to skip the browsing.
 2. The `HOST_INFO` of each device.
-3. `?PRISM_CONNECTIONS` of each device that declares it in the `EXTENSIONS` of its `HOST_INFO`. The servers of ossia-prism `2.1.0+prism.10` declare it (Max `ossia.device`, Unity `Controller`). A device that does not is listed, with its connections unknown.
+3. `?PRISM_CONNECTIONS` of each device that declares it in the `EXTENSIONS` of its `HOST_INFO`. The servers of ossia-prism `2.1.0+prism.10` and later declare it (Max `ossia.device`, Unity `Controller`), and the server of TouchDesigner's OSCQuery component (prism-td-oscquery) from `oscquery` 0.3.3. A device that does not is listed, with its connections unknown.
 
 `?PRISM_CONNECTIONS` is a PRISM extension of OSCQuery. It answers on any path, as `HOST_INFO`:
 
@@ -32,7 +32,7 @@ Python 3.8 or later, standard library only.
 |---|---|
 | `CLIENTS` | the WebSocket clients of the server |
 | `IP`, `PORT` | where the client connects from |
-| `NAME` | the name the client gave with the text command `{"COMMAND": "PRISM_NAME", "DATA": "<name>"}`; absent otherwise. `ossia.client` and `Ossia.Client` give their device name to a server that declares `PRISM_CONNECTIONS` |
+| `NAME` | the name the client gave with the text command `{"COMMAND": "PRISM_NAME", "DATA": "<name>"}`; absent otherwise. To a server that declares `PRISM_CONNECTIONS`, the Max package gives `max_client_<process>` for the connection it opens to each announced device, which `connect <name>` reuses (`2.1.0+prism.11`; before, the name of the device it connected to), and the name of the `ossia.client` for a connection by URL; `Ossia.Client` gives `unity_client_<id>_<attempt>` |
 | `OSC_PORT`, `SENDER_PORT` | the UDP ports the client receives on and sends from, when it streams OSC over UDP |
 | `LISTEN` | the addresses the client asked for with `LISTEN` |
 | `PACKETS` | the OSC packets the server received from that client, datagrams or WebSocket frames |
@@ -60,4 +60,4 @@ Python 3.8 or later, standard library only.
 python3 test_prism_map.py
 ```
 
-Two fake servers on `127.0.0.1`, one that answers `?PRISM_CONNECTIONS` and one that does not.
+Fake servers on `127.0.0.1`, that answer `?PRISM_CONNECTIONS` or not: the edges read, the Graphviz and HTML outputs, an edge from a device to itself drawn as a loop in the HTML (since `2.1.0+prism.11`; a line had no length), an unreachable host. A test that leaves a socket open fails.

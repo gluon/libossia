@@ -3204,6 +3204,49 @@ TEST_CASE("oscquery_directory_finds_its_own_device", "oscquery_directory_finds_i
   REQUIRE(found);
 }
 
+// The directory of the package opens one connection per announced device.
+// That client gives the server its own name, max_client_<process>, not the
+// name of the device it mirrors: ?PRISM_CONNECTIONS of unity_demo showed a
+// client unity_demo, an edge from a device to itself in prism_map. Only that
+// name is checked: a Max running on the machine sees the device too, and its
+// directory connects under the name of its own package.
+TEST_CASE("oscquery_directory_names_its_client", "oscquery_directory_names_its_client")
+{
+  const std::string name = "a11_named_" + std::to_string(getpid());
+  const std::string client = "max_client_" + std::to_string(getpid());
+  auto ctx = ossia::max_binding::make_device_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), name};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), free_port(true), false);
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+  std::atomic_bool stop{false};
+  std::thread scheduler([&] {
+    while(!stop)
+    {
+      ossia::max_binding::poll_device_network_context(*ctx);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  });
+
+  directory_poller p;
+  const bool found = p.until([&] { return p.dir.find(name) != nullptr; }, 15000);
+  std::string connections;
+  const bool named = found && p.until([&] {
+    connections = exposed->query_connections();
+    return connections.find("\"NAME\":\"" + client + "\"") != std::string::npos;
+  }, 3000);
+  multiplex.stop_expose_to(*exposed);
+  stop = true;
+  scheduler.join();
+  std::printf("oscquery_directory_names_its_client: %s\n", connections.c_str());
+  INFO("step: the device of this process found by name, within 15 s");
+  REQUIRE(found);
+  INFO("step: a client named " << client << " within 3 s: " << connections);
+  CHECK(named);
+}
+
 // The WebSocket of a device found by name goes down while the device stays
 // announced (its process killed, the announcement held by dns-sd): the
 // directory reports it lost within 2 s and drops it, then builds it again
@@ -3434,4 +3477,182 @@ TEST_CASE("v8connector_context_change_leaves_a_shared_device", "v8connector_cont
   for(auto& in : b.drain())
     from_shared = from_shared || in.address == "/image/scale";
   REQUIRE(!from_shared);
+}
+
+#include <servus/servus.h>
+
+// The Minuit listener of the package builds a device for each instance it sees
+// under _minuit._tcp. That device must not announce itself: its announcement,
+// "<instance> Minuit server", is one more instance for the listener, whose
+// device announces itself in turn, without end (the names grow to the limit
+// of mDNS, then the system numbers them: thousands of services on the
+// network). Announcing also held the caller, the scheduler of Max.
+TEST_CASE("minuit_listener_device_does_not_announce", "minuit_listener_device_does_not_announce")
+{
+  const std::string instance = "prism11_m_" + std::to_string(getpid());
+  const auto start = std::chrono::steady_clock::now();
+  auto dev = ossia::max_binding::make_minuit_listener_device(
+      instance, "127.0.0.1", free_port(false), free_port(false));
+  const auto build_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - start)
+                            .count();
+
+  servus::Servus browser{"_minuit._tcp"};
+  browser.beginBrowsing(servus::Interface::IF_ALL);
+  std::string seen;
+  for(int i = 0; i < 300 && seen.empty(); i++)
+  {
+    browser.browse(10);
+    for(const auto& s : browser.getInstances())
+      if(s.rfind(instance, 0) == 0)
+        seen = s;
+  }
+  browser.endBrowsing();
+  std::printf("minuit_listener_device_does_not_announce: built in %lld ms, seen \"%s\"\n",
+              (long long)build_ms, seen.c_str());
+
+  INFO("step: no service of the device on the network within 3 s");
+  CHECK(seen.empty());
+  INFO("step: built in " << build_ms << " ms");
+  CHECK(build_ms < 300);
+}
+
+
+// A node the server adds while the client is connected: what follows its
+// parameter on the client (an ossia.remote, a callback set when the parameter
+// appears) gets its value once, then once for each change. The server sends
+// two ATTRIBUTES_CHANGED with a TYPE for one new parameter (the type, then the
+// parameter), and the client read the value again for each: the value came
+// twice. Set on the server without a push, so that only the reads bring it;
+// a value equal to the default of the type comes once too.
+TEST_CASE("oscquery_mirror_added_node_value_once", "oscquery_mirror_added_node_value_once")
+{
+  const float initial = GENERATE(0.5f, 0.f);
+  auto ctx = ossia::net::create_network_context();
+  auto server_multiplex = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = server_multiplex.get();
+  ossia::net::generic_device server{std::move(server_multiplex), "a11_added"};
+  ossia::try_setup_parameter("float", ossia::net::create_node(server.get_root_node(), "/bench/first"))->push_value(0.f);
+  const uint16_t ws = free_port(true);
+  multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, free_port(false), ws, false));
+  std::thread net([&] { ctx->run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+          "ws://127.0.0.1:" + std::to_string(ws), free_port(false)),
+      "a11_added");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  auto* mirror = ossia::max_binding::polled_oscquery_mirror(*client);
+  REQUIRE(mirror);
+
+  std::mutex m;
+  std::vector<ossia::value> received;
+  struct follower
+  {
+    std::mutex* m;
+    std::vector<ossia::value>* received;
+    void on_created(const ossia::net::parameter_base& p)
+    {
+      auto* mm = m;
+      auto* r = received;
+      const_cast<ossia::net::parameter_base&>(p).add_callback([mm, r](const ossia::value& v) {
+        std::lock_guard l{*mm};
+        r->push_back(v);
+      });
+    }
+  } f{&m, &received};
+  client->on_parameter_created.connect<&follower::on_created>(f);
+
+  auto poll = [&](int ms) {
+    for(int t = 0; t < ms; t += 5)
+    {
+      mirror->run_commands();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  };
+  auto* late = ossia::try_setup_parameter(
+      "float", ossia::net::create_node(server.get_root_node(), "/bench/late"));
+  late->set_value(initial);
+  poll(1000);
+  std::vector<ossia::value> first;
+  {
+    std::lock_guard l{m};
+    first = received;
+    received.clear();
+  }
+  late->push_value(0.75f);
+  poll(1000);
+  std::vector<ossia::value> then;
+  {
+    std::lock_guard l{m};
+    then = received;
+  }
+  client->on_parameter_created.disconnect<&follower::on_created>(f);
+  client.reset();
+  ossia::net::stop_network_context(*ctx);
+  net.join();
+
+  std::printf("oscquery_mirror_added_node_value_once: initial %g, %zu value(s) when added, %zu after one change\n",
+              initial, first.size(), then.size());
+  INFO("step: the added node's value " << initial << ", once");
+  CHECK(first.size() == 1);
+  CHECK((first.empty() || first[0] == ossia::value(initial)));
+  INFO("step: one change, one value");
+  CHECK(then.size() == 1);
+}
+
+// The server of tests/Max/check_remote.py, the same as above, in a process of
+// its own: device OSSIA_BENCH_NAME (announced over mDNS), /bench/first, on
+// OSSIA_BENCH_OSC and OSSIA_BENCH_WS. Reads one command a line on its standard
+// input and answers "done <command>": "add <v>" creates /bench/late and sets v
+// without a push, "push <v>" pushes v to it, "quit" stops.
+#include <iostream>
+TEST_CASE("zz_added_node_server", "[.]")
+{
+  const char* osc_s = std::getenv("OSSIA_BENCH_OSC");
+  const char* ws_s = std::getenv("OSSIA_BENCH_WS");
+  const char* name_s = std::getenv("OSSIA_BENCH_NAME");
+  REQUIRE(osc_s);
+  REQUIRE(ws_s);
+  REQUIRE(name_s);
+  auto ctx = ossia::net::create_network_context();
+  auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+  auto* multiplex = mp.get();
+  ossia::net::generic_device dev{std::move(mp), name_s};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/bench/first"))->push_value(0.f);
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, std::atoi(osc_s), std::atoi(ws_s), false);
+  // OSSIA_BENCH_LOG: what the server receives and sends, when set
+  if(const char* log_s = std::getenv("OSSIA_BENCH_LOG"); log_s && *log_s)
+  {
+    ossia::net::network_logger l;
+    l.inbound_logger = spdlog::basic_logger_mt("added_in", log_s);
+    l.inbound_logger->flush_on(spdlog::level::info);
+    l.outbound_logger = l.inbound_logger;
+    server->set_logger(l);
+  }
+  multiplex->expose_to(std::move(server));
+  std::thread net([&] { ctx->run(); });
+
+  ossia::net::parameter_base* late{};
+  std::string command;
+  float v{};
+  while(std::cin >> command && command != "quit")
+  {
+    if(command == "add" && std::cin >> v && !late)
+    {
+      late = ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/bench/late"));
+      late->set_value(v);
+    }
+    else if(command == "push" && std::cin >> v && late)
+      late->push_value(v);
+    else
+      command = "refused";
+    std::printf("done %s\n", command.c_str());
+    std::fflush(stdout);
+  }
+  ossia::net::stop_network_context(*ctx);
+  net.join();
 }

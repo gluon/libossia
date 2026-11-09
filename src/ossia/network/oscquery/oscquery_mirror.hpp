@@ -8,6 +8,10 @@
 #include <ossia/network/oscquery/host_info.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 namespace osc
 {
@@ -62,6 +66,10 @@ public:
   void stop() override;
   void set_device(net::device_base& dev) override;
   ossia::net::device_base& get_device() const { return *m_device; }
+
+  //! The name this client gives a server that lists its clients (PRISM_NAME);
+  //! the name of the device when empty. Set before the device.
+  void set_client_name(std::string name) { m_clientName = std::move(name); }
 
   /**
    * @brief Run the commands registered in th event queue
@@ -176,6 +184,7 @@ private:
   net::listened_parameters m_listening;
 
   ossia::net::device_base* m_device{};
+  std::string m_clientName;
 
   std::promise<void> m_namespacePromise;
 
@@ -206,6 +215,10 @@ private:
   };
 
   ossia::spsc_queue<get_ws_promise> m_getWSPromises;
+  // The values read again after an ATTRIBUTES_CHANGED, by address, until the
+  // answer comes (or for 1 s): one read at a time for an address.
+  std::mutex m_attributeReadsMutex;
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_attributeReads;
   ossia::spsc_queue<std::function<void()>> m_functionQueue;
   std::function<void()> m_commandCallback;
 
