@@ -7,8 +7,8 @@ Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
 | Package | Latest version | Documentation | Changes | Binaries |
 |---|---|---|---|---|
-| ossia-prism (Max) | `2.1.0+prism.10` | [this README](#ossia-prism-for-max) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.10`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.10) |
-| ossia (PRISM), `io.ossia.ossia-unity` (Unity) | `2.1.0+prism.10` | [README](src/ossia-unity3d/README.md) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.10`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.10) |
+| ossia-prism (Max) | `2.1.0+prism.11` | [this README](#ossia-prism-for-max) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.11`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.11) |
+| ossia (PRISM), `io.ossia.ossia-unity` (Unity) | `2.1.0+prism.11` | [README](src/ossia-unity3d/README.md) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.11`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.11) |
 
 Both are published for macOS universal (Apple Silicon and Intel); Windows x64 to come, same version, added to the Release later. Every version is on the [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page. Questions and defects: the [issues](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/issues) of this repository.
 
