@@ -297,6 +297,56 @@ namespace Ossia.Tests
       Assert.AreEqual (0.7f, fields.p0, "its value applied");
     }
 
+    // The value of a node the server adds while the client is connected
+    // reaches the Remote once, then once for each change: the server sends
+    // two ATTRIBUTES_CHANGED for a new parameter, and the mirror read the
+    // value for each.
+    [UnityTest]
+    public IEnumerator AddressAddedLaterGetsItsValueOnce ()
+    {
+      yield return Connect (null, 5);
+      var later = AddRemote ("/later", "p0");
+      var received = new List<object> ();
+      later.Received += v => received.Add (v);
+      yield return new WaitForSecondsRealtime (0.5f);
+      Assert.IsFalse (later.Bound, "no /later yet");
+
+      // Set without a push: what the client gets is what it reads
+      var p = Node.CreateNode (server.Device.GetRootNode (), "/later").CreateParameter (ossia_type.FLOAT);
+      p.SetValue (new Value (0.7f));
+      yield return Until (() => later.Bound && fields.p0 == 0.7f, 3);
+      Assert.AreEqual (0.7f, fields.p0, "its value applied");
+      yield return new WaitForSecondsRealtime (0.5f);
+      Debug.Log ("CLIENT added node, received: " + string.Join (" ", received));
+      Assert.AreEqual (1, received.Count (v => v.Equals (0.7f)), "the added value: " + string.Join (" ", received));
+
+      p.PushValue (0.9f);
+      yield return Until (() => fields.p0 == 0.9f, 2);
+      yield return new WaitForSecondsRealtime (0.5f);
+      Debug.Log ("CLIENT added node, after one change: " + string.Join (" ", received));
+      Assert.AreEqual (1, received.Count (v => v.Equals (0.9f)), "one change: " + string.Join (" ", received));
+    }
+
+    // The server lists a Client under the name of its device: the name a
+    // client of the package for Max takes is not given to this one. A Max
+    // on the machine connects to this server too, under its own process.
+    [UnityTest]
+    public IEnumerator ServerListsTheClientUnderItsOwnName ()
+    {
+      yield return Connect (null, 6);
+      var name = "\"NAME\":\"unity_client_" + client.GetInstanceID () + "_1\"";
+      string connections = "";
+      float end = Time.realtimeSinceStartup + 3;
+      while (!connections.Contains (name) && Time.realtimeSinceStartup < end) {
+        using (var web = new WebClient ())
+          connections = web.DownloadString ("http://127.0.0.1:" + server.WsPort + "/?PRISM_CONNECTIONS");
+        yield return new WaitForSecondsRealtime (0.1f);
+      }
+      Debug.Log ("CLIENT connections: " + connections);
+      StringAssert.Contains (name, connections);
+      StringAssert.DoesNotContain ("max_client_" + System.Diagnostics.Process.GetCurrentProcess ().Id, connections);
+    }
+
     [UnityTest]
     public IEnumerator ReconnectsWhenTheServerComesBack ()
     {
