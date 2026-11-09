@@ -121,10 +121,12 @@ def run(server, patch, max_app, max_pid):
     if not ready:
         return
     # The listener of the package connects to every announced device
-    found = until(lambda: f'max_client_{max_pid}' in clients(), 20)
+    found = until(lambda: len(clients()) > 0, 20)
     check(f'Max found {NAME} by name', found, str(clients()))
     if not found:
         return
+    named = f'max_client_{max_pid}'
+    check(f'its connection is named {named}', until(lambda: named in clients(), 3), str(clients()))
     patch.send('/connect')
     connected = until(lambda: 'prism11_url' in clients(), 10)
     got = patch.read(2)
