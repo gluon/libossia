@@ -4,7 +4,7 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [2.1.0+prism.11] - 2026-11-07
+## [2.1.0+prism.11] - 2026-11-09
 
 Max no longer freezes when a Minuit device leaves the network, nor announces services without end when one comes; its connections to announced devices name the package; an `ossia.remote` gets the value of a node added while connected once; and a value written to the inlet of `ossia.parameter` is no longer lost while the object outputs a value of the network.
 
