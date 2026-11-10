@@ -2096,6 +2096,7 @@ struct fake_device
   std::mutex mutex;
   std::vector<std::string> commands;
   std::atomic<float> value{1.f};
+  std::atomic_bool late_child{false};
   std::atomic_int value_requests{0};
   std::map<std::string, std::string> extra; // path -> JSON of the node
   ossia::net::websocket_server::connection_handler client;
@@ -2129,7 +2130,9 @@ struct fake_device
       else if(!text.empty() && text[0] == '/')
         reply.data = "{\"FULL_PATH\":\"/\",\"ACCESS\":0,\"CONTENTS\":{"
                      "\"f\":{\"FULL_PATH\":\"/f\",\"TYPE\":\"f\",\"ACCESS\":3,\"VALUE\":1.0},"
-                     "\"so\":{\"FULL_PATH\":\"/so\",\"TYPE\":\"f\",\"ACCESS\":2,\"VALUE\":1.0}}}";
+                     "\"so\":{\"FULL_PATH\":\"/so\",\"TYPE\":\"f\",\"ACCESS\":2,\"VALUE\":1.0}"
+                     + std::string{late_child ? ",\"late\":{\"FULL_PATH\":\"/late\",\"TYPE\":\"f\",\"ACCESS\":3,\"VALUE\":1.0}" : ""}
+                     + "}}";
       else
       {
         std::lock_guard lock{mutex};
@@ -2319,9 +2322,9 @@ TEST_CASE("C API: a mirror reads again the address of a PATH_CHANGED", "[network
   REQUIRE(apply_until(zombie));
 
   // The whole tree
+  d.late_child = true;
   d.path_changed("/");
-  settle();
-  ossia_device_run_commands(m.dev);
+  REQUIRE(apply_until([&] { return find_parameter(m.dev, "/late") != nullptr; }));
   REQUIRE(find_parameter(m.dev, "/f"));
 
   // What is not a path is ignored
