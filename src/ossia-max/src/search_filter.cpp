@@ -6,6 +6,7 @@
 
 #include <ossia/detail/algorithms.hpp>
 #include <ossia/network/base/node_attributes.hpp>
+#include <ossia/network/oscquery/oscquery_mirror.hpp>
 
 namespace ossia
 {
@@ -197,7 +198,7 @@ void dump_node_list(
       // Print the param
       if(auto param = n.get_parameter())
       {
-        const ossia::value& val = param->value();
+        const ossia::value val = ossia::oscquery::read_followed_value(*param);
         val.apply(vm);
       }
 

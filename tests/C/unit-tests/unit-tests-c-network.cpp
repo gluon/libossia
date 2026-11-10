@@ -2163,3 +2163,82 @@ TEST_CASE("C API: a mirror gives its name with what the server declares", "[netw
     REQUIRE(d.count("\"PRISM_NAME\"") == e.prism_name);
   }
 }
+
+// A parameter no callback follows gets no value from the server, which sends
+// only what is listened to: reading it asks the server
+TEST_CASE("C API: reading a mirrored parameter nothing follows asks the server", "[network_c]")
+{
+  fake_device d{"\"LISTEN\":true"};
+  settle();
+  mirror m{d.url(), "c_read_mirror"};
+  auto f = find_parameter(m.dev, "/f");
+  REQUIRE(f);
+  settle();
+
+  d.value = 2.f;
+  REQUIRE(value_of(f) == 2.f);
+  REQUIRE(d.value_requests == 1);
+
+  // Once followed, the values come by themselves: no request
+  auto noop = [](void*, ossia_value_t) {};
+  auto cb = ossia_parameter_add_callback(f, noop, nullptr);
+  d.value = 3.f;
+  REQUIRE(value_of(f) == 2.f);
+  REQUIRE(d.value_requests == 1);
+  ossia_parameter_remove_callback(f, cb);
+
+  // What this client has just written is the latest it knows
+  ossia_parameter_push_f(f, 9.f);
+  REQUIRE(value_of(f) == 9.f);
+  REQUIRE(d.value_requests == 1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  d.value = 4.f;
+  REQUIRE(value_of(f) == 4.f);
+  REQUIRE(d.value_requests == 2);
+
+  // The value of a write-only parameter cannot be read
+  auto so = find_parameter(m.dev, "/so");
+  REQUIRE(so);
+  value_of(so);
+  REQUIRE(d.value_requests == 2);
+}
+
+// The mirror does not reopen its WebSocket: after a reconnection the host makes
+// a new one and binds again, and that one must listen to what is followed
+TEST_CASE("C API: a mirror listens again after a reconnection", "[network_c]")
+{
+  const uint16_t osc = free_port(false), ws_port = free_port(true);
+  auto listened = [&] {
+    settle();
+    auto doc = json_at(ws_port, "/?PEERS");
+    std::vector<std::string> out;
+    for(auto& c : doc["CLIENTS"].GetArray())
+      for(auto& l : c["LISTEN"].GetArray())
+        out.emplace_back(l.GetString());
+    return out;
+  };
+  auto noop = [](void*, ossia_value_t) {};
+  auto make_server = [&](const char* name, std::unique_ptr<server>& s) {
+    s = std::make_unique<server>(name, osc, "127.0.0.1", ws_port);
+    float_parameter(s->dev, "/a");
+    float_parameter(s->dev, "/b");
+    settle();
+  };
+
+  std::unique_ptr<server> s;
+  make_server("c_relisten_1", s);
+  {
+    mirror m{s->url(), "c_relisten_m"};
+    ossia_parameter_add_callback(find_parameter(m.dev, "/a"), noop, nullptr);
+    REQUIRE(listened() == std::vector<std::string>{"/a"});
+
+    s.reset();
+    REQUIRE(wait_for([&] { return ossia_device_connected(m.dev) == 0; }, 3000));
+  }
+
+  make_server("c_relisten_2", s);
+  REQUIRE(listened().empty());
+  mirror again{s->url(), "c_relisten_m"};
+  ossia_parameter_add_callback(find_parameter(again.dev, "/a"), noop, nullptr);
+  REQUIRE(listened() == std::vector<std::string>{"/a"});
+}

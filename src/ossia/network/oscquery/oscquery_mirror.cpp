@@ -819,6 +819,15 @@ void oscquery_mirror_protocol::record_sent(
       address, crossing_state::sent_value{std::chrono::steady_clock::now(), v});
 }
 
+bool oscquery_mirror_protocol::written_recently(const std::string& address)
+{
+  std::lock_guard lock{m_crossing->mutex};
+  auto it = m_crossing->sent.find(address);
+  return it != m_crossing->sent.end()
+         && std::chrono::steady_clock::now() - it->second.time
+                <= crossing_state::crossing_window;
+}
+
 void oscquery_mirror_protocol::check_crossing(std::string_view address)
 {
   const auto now = std::chrono::steady_clock::now();
@@ -1164,6 +1173,18 @@ bool oscquery_mirror_protocol::on_BinaryWSMessage(
   h.ProcessPacket(message.data(), message.size(), {});
 
   return {};
+}
+
+ossia::value read_followed_value(ossia::net::parameter_base& param)
+{
+  auto* mirror = dynamic_cast<oscquery_mirror_protocol*>(
+      &param.get_node().get_device().get_protocol());
+  // What this client has just written may not have reached the server yet
+  if(mirror && param.callback_count() == 0
+     && param.get_access() != ossia::access_mode::SET
+     && !mirror->written_recently(param.get_node().osc_address()))
+    return param.fetch_value();
+  return param.value();
 }
 
 void load_oscquery_device(net::device_base& dev, std::string json)

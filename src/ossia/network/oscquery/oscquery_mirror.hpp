@@ -120,6 +120,9 @@ public:
    * (default), remove it otherwise.
    * @param zombie_on_removed
    */
+  //! Whether this client wrote that address within the last moments
+  bool written_recently(const std::string& address);
+
   void set_zombie_on_remove(bool zombie_on_remove)
   {
     m_zombie_on_remove = zombie_on_remove;
@@ -240,6 +243,11 @@ private:
 };
 
 //! Use this function to load a device preset in the OSCQuery format.
+//! The value to give someone who reads a parameter. On a mirror, a parameter
+//! nothing follows gets no value from the server, which sends only what is
+//! listened to: it is asked for, and the local value would be out of date.
+OSSIA_EXPORT ossia::value read_followed_value(ossia::net::parameter_base& param);
+
 OSSIA_EXPORT void load_oscquery_device(ossia::net::device_base& dev, std::string json);
 }
 }

@@ -1,5 +1,6 @@
 #include <ossia/network/generic/generic_device.hpp>
 #include <ossia/network/oscquery/detail/value_to_json.hpp>
+#include <ossia/network/oscquery/oscquery_mirror.hpp>
 #include <ossia/preset/preset.hpp>
 
 #include <ossia-max/src/node_base.hpp>
@@ -183,7 +184,7 @@ void node_base::get_namespace(node_base* x, t_symbol* s, long argc, t_atom* argv
       auto param = child->get_parameter();
       if(param)
       {
-        ossia::value val = child->get_parameter()->value();
+        ossia::value val = ossia::oscquery::read_followed_value(*param);
         val.apply(vm);
       }
 
