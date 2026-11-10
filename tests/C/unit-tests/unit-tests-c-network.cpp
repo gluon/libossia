@@ -2066,3 +2066,76 @@ TEST_CASE("C API: CLIENT_NAME names a client", "[network_c]")
   client.ws.send_message(std::string{"{\"COMMAND\":\"PRISM_NAME\",\"DATA\":\"old\"}"});
   REQUIRE(name() == "old");
 }
+
+namespace
+{
+// A server of the test: it declares these extensions, has an empty tree and
+// keeps the commands it receives
+struct fake_device
+{
+  uint16_t port = free_port(true);
+  std::string host_info;
+  std::mutex mutex;
+  std::vector<std::string> commands;
+  ossia::net::websocket_server ws;
+  std::thread thread;
+
+  explicit fake_device(const std::string& extensions)
+  {
+    host_info = "{\"NAME\":\"fake\",\"OSC_PORT\":" + std::to_string(free_port(false))
+                + ",\"OSC_TRANSPORT\":\"UDP\",\"EXTENSIONS\":{" + extensions + "}}";
+    ws.set_open_handler([](auto) {});
+    ws.set_close_handler([](auto) {});
+    ws.set_message_handler([this](auto, auto, const std::string& text) {
+      ossia::net::server_reply reply;
+      reply.type = ossia::net::server_reply::data_type::json;
+      if(text.find("HOST_INFO") != std::string::npos)
+        reply.data = host_info;
+      else if(!text.empty() && text[0] == '/')
+        reply.data = "{\"FULL_PATH\":\"/\",\"CONTENTS\":{}}";
+      else
+      {
+        std::lock_guard lock{mutex};
+        commands.push_back(text);
+      }
+      return reply;
+    });
+    ws.listen(port);
+    thread = std::thread([this] { ws.run(); });
+  }
+  ~fake_device()
+  {
+    ws.stop();
+    thread.join();
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(port); }
+  int count(const std::string& what)
+  {
+    std::lock_guard lock{mutex};
+    return std::count_if(commands.begin(), commands.end(), [&](const auto& t) {
+      return t.find(what) != std::string::npos;
+    });
+  }
+};
+}
+
+TEST_CASE("C API: a mirror gives its name with what the server declares", "[network_c]")
+{
+  struct expected
+  {
+    const char* extensions;
+    int client_name, prism_name;
+  };
+  for(auto e : {expected{"\"CLIENT_NAME\":true,\"PRISM_CONNECTIONS\":true", 1, 0},
+                expected{"\"CLIENT_NAME\":true", 1, 0},
+                expected{"\"PRISM_CONNECTIONS\":true", 0, 1}, expected{"", 0, 0}})
+  {
+    INFO(e.extensions);
+    fake_device d{e.extensions};
+    settle();
+    mirror m{d.url(), "c_named_mirror"};
+    settle();
+    REQUIRE(d.count("\"CLIENT_NAME\"") == e.client_name);
+    REQUIRE(d.count("\"PRISM_NAME\"") == e.prism_name);
+  }
+}

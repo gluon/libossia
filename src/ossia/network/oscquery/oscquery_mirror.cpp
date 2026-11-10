@@ -1006,13 +1006,14 @@ bool oscquery_mirror_protocol::on_WSMessage(
               m_host_info.osc_port = std::stoi(m_queryPort);
           }
           // Its name, to a server that lists its clients
-          if(m_host_info.extensions["PRISM_CONNECTIONS"] && m_device)
+          const bool client_name = m_host_info.extensions["CLIENT_NAME"];
+          if((client_name || m_host_info.extensions["PRISM_CONNECTIONS"]) && m_device)
           {
             rapidjson::StringBuffer buf;
             rapidjson::Writer<rapidjson::StringBuffer> wr{buf};
             wr.StartObject();
             wr.Key("COMMAND");
-            wr.String("PRISM_NAME");
+            wr.String(client_name ? "CLIENT_NAME" : "PRISM_NAME");
             wr.Key("DATA");
             wr.String(
                 m_clientName.empty() ? m_device->get_name().c_str()
