@@ -7,6 +7,8 @@
 #include <ossia/network/context.hpp>
 #include <ossia/network/generic/generic_device.hpp>
 #include <ossia/network/oscquery/detail/json_writer.hpp>
+#include <ossia/detail/logger.hpp>
+#include <ossia/network/http/http_client.hpp>
 #include <ossia/network/sockets/websocket_client_beast.hpp>
 #include <ossia/protocols/oscquery/oscquery_mirror_asio.hpp>
 #include <ossia/protocols/oscquery/oscquery_server_asio.hpp>
@@ -21,6 +23,7 @@
 
 #include <oscpack/osc/OscReceivedElements.h>
 #include <rapidjson/document.h>
+#include <spdlog/sinks/ostream_sink.h>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -41,6 +44,7 @@
 #include <cmath>
 #include <functional>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1913,4 +1917,48 @@ TEST_CASE("C API: no answer to a crossing on an address not listened to", "[netw
   REQUIRE(wait_for([&] { return value_of(d.a) == 0.75f; }, 2000));
   settle();
   REQUIRE(addresses_of(writer.sink).empty());
+}
+
+namespace
+{
+struct http_ignored
+{
+  static constexpr int reserve_expect = 65535;
+  template <typename T, typename S>
+  void operator()(T&, const S&)
+  {
+  }
+};
+struct http_error_ignored
+{
+  template <typename T>
+  void operator()(T&)
+  {
+  }
+};
+std::string http_client_log(uint16_t port, const std::string& path)
+{
+  std::ostringstream log;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(log);
+  auto& sinks = ossia::logger().sinks();
+  sinks.push_back(sink);
+  boost::asio::io_context ctx;
+  using request = ossia::net::http_get_request<http_ignored, http_error_ignored>;
+  std::make_shared<request>(http_ignored{}, http_error_ignored{}, ctx, "127.0.0.1", path)
+      ->resolve("127.0.0.1", std::to_string(port));
+  ctx.run_for(std::chrono::seconds(2));
+  sinks.pop_back();
+  return log.str();
+}
+}
+
+// The value of a write-only parameter is 204 since ACCESS is applied: a client
+// that asks for it is told so, it is not an error of the network
+TEST_CASE("C API: the HTTP client does not log a 204 as an error", "[network_c]")
+{
+  server s{"c_http_204", 0, "127.0.0.1"};
+  ossia_parameter_set_access_mode(float_parameter(s.dev, "/so"), SET);
+  settle();
+  REQUIRE(http_client_log(s.ws, "/so?VALUE").find("HTTP Error") == std::string::npos);
+  REQUIRE(http_client_log(s.ws, "/nothing").find("status code 404") != std::string::npos);
 }

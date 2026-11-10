@@ -173,6 +173,12 @@ private:
 
     auto& res = m_parser.get();
     auto status = res.result_int();
+    // No content: the server has nothing to say about what was asked
+    if(status == 204)
+    {
+      close();
+      return;
+    }
     if(status != 200)
     {
       ossia::logger().error("HTTP Error: status code {}", (int)status);
