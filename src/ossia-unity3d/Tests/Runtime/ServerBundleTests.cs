@@ -78,6 +78,12 @@ namespace Ossia.Tests
       var start = "{\"COMMAND\":\"START_OSC_STREAMING\",\"DATA\":{\"LOCAL_SERVER_PORT\":" + sink.Port + ",\"LOCAL_SENDER_PORT\":0}}";
       var send = ws.SendAsync (new ArraySegment<byte> (Encoding.UTF8.GetBytes (start)), WebSocketMessageType.Text, true, CancellationToken.None);
       yield return new WaitUntil (() => send.IsCompleted);
+      // A client gets only the addresses it listens to
+      foreach (var name in new[] { "a", "b", "c", "d", "e", "f", "g", "h" }) {
+        var listen = "{\"COMMAND\":\"LISTEN\",\"DATA\":\"/Shape/" + typeof (BundleFields).ToString () + "/" + name + "\"}";
+        send = ws.SendAsync (new ArraySegment<byte> (Encoding.UTF8.GetBytes (listen)), WebSocketMessageType.Text, true, CancellationToken.None);
+        yield return new WaitUntil (() => send.IsCompleted);
+      }
       yield return new WaitForSecondsRealtime (0.3f);
       sink.Drain ();
 
