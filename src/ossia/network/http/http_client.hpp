@@ -135,6 +135,9 @@ private:
         ossia::logger().error("HTTP Error: Invalid response");
         return;
       }
+      // No content: the server has nothing to say about what was asked
+      if(status_code == 204)
+        return;
       if(status_code != 200)
       {
         ossia::logger().error("HTTP Error: status code {}", status_code);
