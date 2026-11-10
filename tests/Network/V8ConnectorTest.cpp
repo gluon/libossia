@@ -3690,7 +3690,8 @@ TEST_CASE("zz_added_node_server", "[.]")
   auto mp = std::make_unique<ossia::net::multiplex_protocol>();
   auto* multiplex = mp.get();
   ossia::net::generic_device dev{std::move(mp), name_s};
-  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/bench/first"))->push_value(0.f);
+  auto* first = ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/bench/first"));
+  first->push_value(0.f);
   auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
       ctx, std::atoi(osc_s), std::atoi(ws_s), false);
   // OSSIA_BENCH_LOG: what the server receives and sends, when set
@@ -3717,6 +3718,8 @@ TEST_CASE("zz_added_node_server", "[.]")
     }
     else if(command == "push" && std::cin >> v && late)
       late->push_value(v);
+    else if(command == "first" && std::cin >> v)
+      first->push_value(v);
     else
       command = "refused";
     std::printf("done %s\n", command.c_str());
