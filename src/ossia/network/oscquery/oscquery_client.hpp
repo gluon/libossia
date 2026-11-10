@@ -1,5 +1,4 @@
 #pragma once
-#include <atomic>
 #include <string_view>
 
 #include <ossia/detail/mutex.hpp>
@@ -28,8 +27,6 @@ struct oscquery_client
   ossia::net::websocket_server::connection_handler connection;
   mutex_t listeningMutex;
   string_map<ossia::net::parameter_base*> listening TS_GUARDED_BY(listeningMutex);
-  //! It sent LISTEN at least once
-  std::atomic_bool has_listened{};
 
   std::string client_ip;
   std::unique_ptr<osc::sender<oscquery::osc_outbound_visitor>> sender;
@@ -47,18 +44,15 @@ public:
   {
   }
 
-  //! A client that sent LISTEN gets only what it listens to, one that never did gets all
+  //! A client gets only the addresses it sent LISTEN for
   bool listens_to(std::string_view path)
   {
-    if(!has_listened)
-      return true;
     std::lock_guard lck{listeningMutex};
     return listening.find(path) != listening.end();
   }
 
   void start_listen(std::string path, ossia::net::parameter_base* addr)
   {
-    has_listened = true;
     if(addr)
     {
       std::lock_guard lck{listeningMutex};

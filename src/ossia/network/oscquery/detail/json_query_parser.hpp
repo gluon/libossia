@@ -128,9 +128,6 @@ struct json_query_answerer
     if(m == doc.MemberEnd() || !m->value.IsString())
       return {};
 
-    // Even for a container or an unknown path: this client has chosen what it follows
-    clt->has_listened = true;
-
     auto nodes = ossia::net::find_nodes(
         proto.get_device().get_root_node(), m->value.GetString());
     for(auto n : nodes)

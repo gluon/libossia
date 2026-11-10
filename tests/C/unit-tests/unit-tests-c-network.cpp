@@ -555,6 +555,8 @@ TEST_CASE("C API: ossia_device_push_bundle from a server", "[network_c]")
   raw_client client{s.url()};
   REQUIRE(client.ws.connected());
   client.stream_to(sink.port());
+  for(int i = 0; i < n; i++)
+    client.ws.send_message(ossia::oscquery::json_writer::listen("/p" + std::to_string(i)));
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
   std::vector<ossia_value_t> values;
@@ -1412,6 +1414,7 @@ void same_port_on_another_address(
   REQUIRE(client.ws.connected());
   const uint16_t sender = free_port(false);
   client.stream_to(sink.port(), sender);
+  client.ws.send_message(ossia::oscquery::json_writer::listen("/level"));
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
   send_osc_float(other, osc, "/level", 0.25f, other, sender);
@@ -1816,10 +1819,9 @@ void listen_filters(ossia_device_t dev, uint16_t osc, const std::string& url)
   writer.listen("/b");
   settle();
 
-  const addresses all{"/a", "/b", "/ctn/sub"};
   auto check = [&](const addresses& for_writer) {
     settle();
-    REQUIRE(addresses_of(never.sink) == all);
+    REQUIRE(addresses_of(never.sink).empty());
     REQUIRE(addresses_of(partial.sink) == addresses{"/a"});
     REQUIRE(addresses_of(ignoring.sink) == addresses{"/a"});
     REQUIRE(addresses_of(container.sink).empty());
@@ -1850,7 +1852,7 @@ void listen_filters(ossia_device_t dev, uint16_t osc, const std::string& url)
   ossia_parameter_push_f(d.b, 0.1f);
   settle();
   REQUIRE(addresses_of(ws_partial.sink) == addresses{"/a"});
-  REQUIRE(addresses_of(ws_never.sink) == addresses{"/a", "/b"});
+  REQUIRE(addresses_of(ws_never.sink).empty());
   clear(ws_partial.sink);
   clear(ws_never.sink);
 
@@ -1859,7 +1861,7 @@ void listen_filters(ossia_device_t dev, uint16_t osc, const std::string& url)
     send_osc_float("127.0.0.1", osc, path, 0.2f);
   settle();
   REQUIRE(addresses_of(ws_partial.sink) == addresses{"/a"});
-  REQUIRE(addresses_of(ws_never.sink) == addresses{"/a", "/b"});
+  REQUIRE(addresses_of(ws_never.sink).empty());
 }
 }
 
@@ -1897,7 +1899,7 @@ TEST_CASE("C API: a bundle follows what each client listens to", "[network_c]")
     ossia_value_free(v);
   settle();
 
-  REQUIRE(addresses_of(never.sink) == addresses{"/a", "/b", "/ctn/sub"});
+  REQUIRE(addresses_of(never.sink).empty());
   REQUIRE(addresses_of(partial.sink) == addresses{"/a"});
   REQUIRE(addresses_of(none.sink).empty());
 }

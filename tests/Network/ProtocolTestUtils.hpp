@@ -229,7 +229,8 @@ void push_all_values_domain(
 template<typename FunProto1, typename FunProto2>
 void test_comm_generic(
     FunProto1 local_proto,
-    FunProto2 remote_proto)
+    FunProto2 remote_proto,
+    bool listen_first = false)
 {
   int N = NUM_ADDRESSES_TO_TEST;
   remote_data rem{std::move(local_proto), std::move(remote_proto)};
@@ -237,26 +238,33 @@ void test_comm_generic(
   auto& remote_addr = rem.remote_addr;
 
 
+  auto follow = [&] {
+    for(const auto& vec : local_addr)
+    {
+      for(auto val : vec)
+      {
+        rem.local_device.get_protocol().observe(*val, true);
+      }
+    }
+    for(const auto& vec : remote_addr)
+    {
+      for(auto val : vec)
+      {
+        rem.remote_device.get_protocol().observe(*val, true);
+      }
+    }
+    // An OSCQuery client gets only what it listens to, from the moment the
+    // server has read each LISTEN
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  };
+
+  if(listen_first)
+    follow();
+
   push_all_values(local_addr, remote_addr);
 
-
-  for(const auto& vec : local_addr)
-  {
-    for(auto val : vec)
-    {
-      rem.local_device.get_protocol().observe(*val, true);
-    }
-  }
-  for(const auto& vec : remote_addr)
-  {
-    for(auto val : vec)
-    {
-      rem.remote_device.get_protocol().observe(*val, true);
-    }
-  }
-  // An OSCQuery client gets only what it listens to, from the moment the server
-  // has read each LISTEN
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  if(!listen_first)
+    follow();
 
   push_all_values(local_addr, remote_addr);
 

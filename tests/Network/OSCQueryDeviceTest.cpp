@@ -44,7 +44,7 @@ TEST_CASE("test_comm_oscquery", "test_comm_oscquery")
         [] {
       return std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
           "ws://127.0.0.1:5678");
-    });
+    }, true);
   }
   catch(const std::exception& e)
   {
