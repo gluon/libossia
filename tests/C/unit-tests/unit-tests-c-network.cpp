@@ -546,6 +546,40 @@ TEST_CASE("C API: a parameter added later comes with its value", "[network_c]")
   REQUIRE(got);
 }
 
+// Ossia.Remote binds as it does in Unity: it reads the value of the new
+// parameter, then the Client adds its callback. The read asks the server, the
+// parameter being followed by nothing yet; its answer comes after the reading
+// of the new parameter and must not give the same value a second time.
+TEST_CASE("C API: an added parameter read then followed gets its value once", "[network_c]")
+{
+  server s{"c_read_then_follow_server", 0, "127.0.0.1"};
+  float_parameter(s.dev, "/level");
+  mirror m{s.url(), "c_read_then_follow_mirror"};
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  auto later = float_parameter(s.dev, "/later");
+  auto v = ossia_value_create_float(0.7f);
+  ossia_parameter_set_value(later, v);
+  ossia_value_free(v);
+  ossia_parameter_t remote{};
+  REQUIRE(wait_for(
+      [&] {
+    ossia_device_run_commands(m.dev);
+    return (remote = find_parameter(m.dev, "/later")) != nullptr;
+      },
+      2000));
+  value_of(remote);
+  m.listen("/later");
+  for(int t = 0; t < 1000; t += 5)
+  {
+    ossia_device_run_commands(m.dev);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  const auto got = m.values();
+  INFO("received: " << Catch::Detail::stringify(got));
+  REQUIRE(std::count(got.begin(), got.end(), 0.7f) == 1);
+}
+
 TEST_CASE("C API: ossia_device_push_bundle from a server", "[network_c]")
 {
   const int n = 40;
