@@ -23,6 +23,8 @@ the same instant; both must end on the same value):
   then by name;
 - Unity (Ossia.Client) follows Max (ossia.device max_cross) and
   TouchDesigner (prism_oscquery_server td_cross), by address, then by name;
+  following td_cross by address, Unity listens to /probe/value only, and
+  TouchDesigner sends it nothing of /probe/other, which it does not follow;
 - Unity plays the scene of the sample "Follow a device", which follows
   follow_me, the device of FollowADevice.maxpat, by name, then by address;
   Max reads and writes follow_me as another client.
@@ -43,6 +45,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_PORT, TD_PORT, UNITY_PORTS = 7493, 7494, {'unity1': 7495, 'unity2': 7497}
@@ -438,6 +441,28 @@ def read_lines(path, side):
 
 # -- the bench ---------------------------------------------------------------
 
+def listen_part(pair, port):
+    """A client gets only what it listens to: unity2 follows /probe/value of a
+    tree that also holds /probe/other, which the TouchDesigner server sends
+    it nothing of."""
+    try:
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/?PRISM_CONNECTIONS', timeout=2) as r:
+            clients = json.loads(r.read().decode().rstrip('\0')).get('CLIENTS', [])
+    except (OSError, ValueError) as e:
+        check(f'{pair}: the server lists its clients', False, str(e))
+        return
+    unity = {c.get('NAME', ''): sorted(c.get('LISTEN', [])) for c in clients
+             if c.get('NAME', '').startswith('unity_client')}
+    check(f'{pair}: the client listens to /probe/value only, not /probe/other',
+          bool(unity) and all(paths == ['/probe/value'] for paths in unity.values()), f'{unity}')
+    before = TD('server').stats()
+    L.text('td', 'other', 7)
+    time.sleep(1)
+    after = TD('server').stats()
+    check(f'{pair}: a value of /probe/other is not sent to it',
+          bool(before and after) and after[1] == before[1], f'sent {before} then {after}')
+
+
 def unity_follows(tag, server, address, timeout=20):
     L.text(tag, 'follow', server, address)
     got = until(lambda: (lambda s: s if s and s[0] == 'Connected' and s[1] == '1' else None)(
@@ -527,6 +552,7 @@ def run_pairs(sample_patch):
     got = unity_follows('unity2', f'ws://127.0.0.1:{thttp}', '/probe/value')
     check('Unity (unity2) connects to td_cross by address', bool(got), f'{got}')
     pair_checks('TouchDesigner server x Unity client (by address)', ts, u2, 8)
+    listen_part('TouchDesigner server x Unity client (by address)', thttp)
     L.text('unity2', 'unfollow')
     time.sleep(1)
     got = unity_follows('unity2', tname, '/probe/value')
