@@ -94,6 +94,13 @@ public:
             r.type = ossia::net::server_reply::data_type::json;
             return r;
           }
+          // At the root only: elsewhere it is an attribute this server does not know
+          if(path == "/" && parameters.find("PEERS") != parameters.end())
+          {
+            ossia::net::server_reply r{proto.query_peers()};
+            r.type = ossia::net::server_reply::data_type::json;
+            return r;
+          }
         }
 
         auto host_it = parameters.find("HOST_INFO");

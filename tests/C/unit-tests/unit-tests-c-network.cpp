@@ -10,6 +10,7 @@
 #include <ossia/detail/logger.hpp>
 #include <ossia/network/http/http_client.hpp>
 #include <ossia/network/sockets/websocket_client.hpp>
+#include <ossia/network/sockets/websocket_server.hpp>
 #include <ossia/protocols/oscquery/oscquery_mirror_asio.hpp>
 #include <ossia/protocols/oscquery/oscquery_server_asio.hpp>
 #include <ossia/network/base/node_functions.hpp>
@@ -1958,4 +1959,107 @@ TEST_CASE("C API: the HTTP client does not log a 204 as an error", "[network_c]"
   settle();
   REQUIRE(http_client_log(s.ws, "/so?VALUE").find("HTTP Error") == std::string::npos);
   REQUIRE(http_client_log(s.ws, "/nothing").find("status code 404") != std::string::npos);
+}
+
+namespace
+{
+rapidjson::Document json_at(uint16_t port, const std::string& resource)
+{
+  rapidjson::Document doc;
+  doc.Parse(http_get(port, resource).c_str());
+  return doc;
+}
+
+bool has_key(const rapidjson::Value& v, const char* key)
+{
+  return v.IsObject() && v.HasMember(key);
+}
+}
+
+TEST_CASE("C API: PEERS and CLIENT_NAME are declared", "[network_c]")
+{
+  server s{"c_peers_declared", 0, "127.0.0.1"};
+  settle();
+  REQUIRE(extension(s.ws, "PEERS") == 1);
+  REQUIRE(extension(s.ws, "CLIENT_NAME") == 1);
+  REQUIRE(extension(s.ws, "PRISM_CONNECTIONS") == 1);
+}
+
+TEST_CASE("C API: ?PEERS lists the clients and the senders", "[network_c]")
+{
+  server s{"c_peers_server", 0, "127.0.0.1"};
+  float_parameter(s.dev, "/level");
+  settle();
+  raw_client client{s.url()};
+  REQUIRE(client.ws.connected());
+  settle();
+
+  // Two UDP sources, the first one sent first
+  const uint16_t first = free_port(false), second = free_port(false);
+  send_osc_float("127.0.0.1", s.osc, "/level", 0.25f, "127.0.0.1", first);
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  send_osc_float("127.0.0.1", s.osc, "/level", 0.5f, "127.0.0.1", second);
+  settle();
+
+  auto doc = json_at(s.ws, "/?PEERS");
+  REQUIRE(!doc.HasParseError());
+  REQUIRE(doc["CLIENTS"].Size() == 1);
+  const auto& c = doc["CLIENTS"][0];
+  REQUIRE(std::string{c["IP"].GetString()} == "127.0.0.1");
+  REQUIRE(c["PORT"].GetInt() > 0);
+  REQUIRE(c["LISTEN"].IsArray());
+  REQUIRE(c["PACKETS"].IsInt64());
+  // A field the server cannot fill is omitted
+  REQUIRE(!has_key(c, "NAME"));
+  REQUIRE(!has_key(c, "OSC_PORT"));
+  REQUIRE(!has_key(c, "SENDER_PORT"));
+
+  // Most recent first
+  REQUIRE(doc["SENDERS"].Size() == 2);
+  REQUIRE(doc["SENDERS"][0]["PORT"].GetInt() == second);
+  REQUIRE(doc["SENDERS"][1]["PORT"].GetInt() == first);
+  REQUIRE(doc["SENDERS"][0]["LAST_MS"].IsInt64());
+
+  // A source that a client has since declared is that client
+  udp_sink sink{free_port(false)};
+  client.stream_to(sink.port(), first);
+  settle();
+  auto after = json_at(s.ws, "/?PEERS");
+  REQUIRE(after["SENDERS"].Size() == 1);
+  REQUIRE(after["SENDERS"][0]["PORT"].GetInt() == second);
+  REQUIRE(after["CLIENTS"][0]["OSC_PORT"].GetInt() == sink.port());
+  REQUIRE(after["CLIENTS"][0]["SENDER_PORT"].GetInt() == first);
+
+  // ?PRISM_CONNECTIONS does not change
+  auto old = json_at(s.ws, "/level?PRISM_CONNECTIONS");
+  REQUIRE(!old.HasParseError());
+  REQUIRE(old["SENDERS"].Size() == 2);
+
+  // At the root only: elsewhere it is an unknown attribute
+  REQUIRE(http_status(s.ws, "/level?PEERS") == 204);
+  REQUIRE(http_status(s.ws, "/nothing?PEERS") == 404);
+}
+
+TEST_CASE("C API: CLIENT_NAME names a client", "[network_c]")
+{
+  server s{"c_client_name_server", 0, "127.0.0.1"};
+  settle();
+  raw_client client{s.url()};
+  REQUIRE(client.ws.connected());
+  auto name = [&] {
+    settle();
+    auto doc = json_at(s.ws, "/?PEERS");
+    const auto& c = doc["CLIENTS"][0];
+    return has_key(c, "NAME") ? std::string{c["NAME"].GetString()} : std::string{"absent"};
+  };
+  REQUIRE(name() == "absent");
+  client.ws.send_message(std::string{"{\"COMMAND\":\"CLIENT_NAME\",\"DATA\":\"one\"}"});
+  REQUIRE(name() == "one");
+  client.ws.send_message(std::string{"{\"COMMAND\":\"CLIENT_NAME\",\"DATA\":\"two\"}"});
+  REQUIRE(name() == "two");
+  client.ws.send_message(std::string{"{\"COMMAND\":\"CLIENT_NAME\",\"DATA\":12}"});
+  REQUIRE(name() == "two");
+  // PRISM_NAME still does, during the transition
+  client.ws.send_message(std::string{"{\"COMMAND\":\"PRISM_NAME\",\"DATA\":\"old\"}"});
+  REQUIRE(name() == "old");
 }

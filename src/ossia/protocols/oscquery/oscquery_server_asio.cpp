@@ -710,14 +710,16 @@ void oscquery_server_protocol_base::record_sender(const std::string& ip, uint16_
   }
 }
 
-bool oscquery_server_protocol_base::on_prism_name(
+bool oscquery_server_protocol_base::on_client_name(
     const connection_handler& hdl, const rapidjson::Document& doc)
 {
   if(!doc.IsObject())
     return false;
   auto cmd = doc.FindMember("COMMAND");
-  if(cmd == doc.MemberEnd() || !cmd->value.IsString()
-     || std::string_view{cmd->value.GetString()} != "PRISM_NAME")
+  if(cmd == doc.MemberEnd() || !cmd->value.IsString())
+    return false;
+  const std::string_view command{cmd->value.GetString()};
+  if(command != "CLIENT_NAME" && command != "PRISM_NAME")
     return false;
   auto data = doc.FindMember("DATA");
   if(data == doc.MemberEnd() || !data->value.IsString())
@@ -735,6 +737,16 @@ bool oscquery_server_protocol_base::on_prism_name(
 }
 
 std::string oscquery_server_protocol_base::query_connections()
+{
+  return write_connections(false);
+}
+
+std::string oscquery_server_protocol_base::query_peers()
+{
+  return write_connections(true);
+}
+
+std::string oscquery_server_protocol_base::write_connections(bool peers)
 {
   rapidjson::StringBuffer buf;
   rapidjson::Writer<rapidjson::StringBuffer> wr{buf};
@@ -789,8 +801,24 @@ std::string oscquery_server_protocol_base::query_connections()
   {
     const auto now = std::chrono::steady_clock::now();
     std::lock_guard lock{m_sendersMutex};
+    std::vector<const sender_stats*> senders;
     for(auto& [key, st] : m_senders)
     {
+      if(peers)
+      {
+        lock_t clients_lock(m_clientsMutex);
+        if(ossia::any_of(m_clients, [&st = st](const auto& c) {
+             return c->client_ip == st.ip && c->remote_sender_port == st.port;
+           }))
+          continue;
+      }
+      senders.push_back(&st);
+    }
+    if(peers)
+      std::sort(senders.begin(), senders.end(), [](auto* a, auto* b) { return a->last > b->last; });
+    for(auto* sender : senders)
+    {
+      auto& st = *sender;
       wr.StartObject();
       wr.Key("IP");
       wr.String(st.ip.c_str());
@@ -1113,7 +1141,7 @@ ossia::net::server_reply oscquery_server_protocol_base::on_text_ws_message(
 
     if(!doc.HasParseError())
     {
-      if(on_prism_name(hdl, doc))
+      if(on_client_name(hdl, doc))
         return {};
       auto s = ossia::oscquery::json_query_answerer{}(*this, hdl, doc);
       return std::string{};

@@ -609,6 +609,10 @@ json_writer::string_t json_writer::query_host_info(
 
   if(prism_connections)
   {
+    wr.Key("PEERS");
+    wr.Bool(true);
+    wr.Key("CLIENT_NAME");
+    wr.Bool(true);
     wr.Key("PRISM_CONNECTIONS");
     wr.Bool(true);
   }
