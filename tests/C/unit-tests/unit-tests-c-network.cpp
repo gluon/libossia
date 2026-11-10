@@ -1255,3 +1255,17 @@ TEST_CASE("C API: LISTEN and IGNORE whose DATA is not a string are ignored", "[n
 
   REQUIRE(http_get(s.ws, "/level?VALUE") == "{\"VALUE\":0.5}");
 }
+
+// The proposal: 404 for a path that does not exist, 400 for a bad request.
+TEST_CASE("C API: a missing node is 404 and a bad request 400", "[network_c]")
+{
+  server s{"c_http_status_server"};
+  float_parameter(s.dev, "/level");
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  REQUIRE(http_status(s.ws, "/level?VALUE") == 200);
+  REQUIRE(http_status(s.ws, "/nothing") == 404);
+  REQUIRE(http_status(s.ws, "/nothing?TYPE") == 404);
+  // LISTEN over HTTP has no WebSocket client to apply to
+  REQUIRE(http_status(s.ws, "/level?LISTEN=true") == 400);
+}
