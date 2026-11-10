@@ -186,6 +186,9 @@ if(OSSIA_C)
   ossia_add_test(presets_c  "${CMAKE_CURRENT_SOURCE_DIR}/C/unit-tests/unit-tests-presets.cpp")
   if(OSSIA_PROTOCOL_OSCQUERY)
     ossia_add_test(network_c "${CMAKE_CURRENT_SOURCE_DIR}/C/unit-tests/unit-tests-c-network.cpp")
+    # Apart: without an interface other than the loopback they are skipped, not passed
+    add_test(NAME ossia_target_network_c_sender_address COMMAND ossia_network_c "[sender_address]")
+    set_tests_properties(ossia_target_network_c_sender_address PROPERTIES SKIP_RETURN_CODE 4)
   endif()
 endif()
 

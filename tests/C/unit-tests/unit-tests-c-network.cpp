@@ -127,6 +127,8 @@ ossia_parameter_t find_parameter(ossia_device_t dev, const char* path)
 std::string other_ipv4()
 {
   std::string found;
+  if(std::getenv("OSSIA_TEST_NO_OTHER_INTERFACE"))
+    return found;
   ifaddrs* addrs{};
   if(::getifaddrs(&addrs) != 0)
     return found;
@@ -1405,26 +1407,20 @@ void same_port_on_another_address(
 }
 }
 
-TEST_CASE("C API: asio server knows a sender by its address and port", "[network_c]")
+TEST_CASE("C API: asio server knows a sender by its address and port", "[.][sender_address]")
 {
   const auto other = other_ipv4();
   if(other.empty())
-  {
-    WARN("no interface other than the loopback: not tested");
-    return;
-  }
+    SKIP("no interface other than the loopback");
   server s{"c_sender_address_asio"};
   same_port_on_another_address(s.dev, s.osc, s.url(), other);
 }
 
-TEST_CASE("C API: WebSocket++ server knows a sender by its address and port", "[network_c]")
+TEST_CASE("C API: WebSocket++ server knows a sender by its address and port", "[.][sender_address]")
 {
   const auto other = other_ipv4();
   if(other.empty())
-  {
-    WARN("no interface other than the loopback: not tested");
-    return;
-  }
+    SKIP("no interface other than the loopback");
   const uint16_t osc = free_port(false), ws = free_port(true);
   auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_sender_address_wspp");
   REQUIRE(dev);
