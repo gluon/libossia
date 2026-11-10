@@ -1361,3 +1361,11 @@ TEST_CASE("C API: HOST_INFO says whether the server echoes", "[network_c]")
   ossia_device_set_echo(s.dev, 0);
   REQUIRE(extension(s.ws, "ECHO") == 0);
 }
+
+// An optional attribute that is not listed is not supported, for a client
+TEST_CASE("C API: EXTENDED_TYPE is declared in HOST_INFO", "[network_c]")
+{
+  server s{"c_ext_type_declared_server"};
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  REQUIRE(extension(s.ws, "EXTENDED_TYPE") == 1);
+}
