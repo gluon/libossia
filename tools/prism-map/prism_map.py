@@ -8,15 +8,17 @@ usage: python3 prism_map.py [--host HOST:PORT ...] [--browse-ms MS] [--no-browse
 
 Finds the devices announced over mDNS (_oscjson._tcp, through dns-sd, on
 macOS) and the ones given with --host, reads the HOST_INFO of each, then
-?PRISM_CONNECTIONS from those that declare it in EXTENSIONS: the libossia
+?PEERS from those that declare it in EXTENSIONS, or else ?PRISM_CONNECTIONS
+from those that declare that: the libossia
 servers of ossia-prism (Max ossia.device, Unity Controller) since
 2.1.0+prism.10, and the TouchDesigner OSCQuery component (prism-td-oscquery)
-since oscquery 0.3.3. A device that does not declare it is listed, its
+since oscquery 0.3.3. A device that declares neither is listed, its
 connections unknown.
 
 Each client of a server becomes an edge "follows" from the client to the
 server, with the addresses it listens to and the OSC packets it sent; a
-client is named by the name it gave, else by IP:PORT. Each UDP source that
+client is named by the name it gave, else by IP:PORT, else "unknown": ?PEERS
+omits what a server cannot fill. Each UDP source that
 is none of the clients becomes an edge "sends". FILE "-" writes to the
 standard output. Without any output option, prints a text summary.
 Python 3.8 or later, standard library only.
@@ -71,8 +73,10 @@ def read_device(host, port, announced=None):
     try:
         info = get_json(host, port, '?HOST_INFO')
         d['name'] = info.get('NAME') or d['name']
-        if info.get('EXTENSIONS', {}).get('PRISM_CONNECTIONS'):
-            conn = get_json(host, port, '?PRISM_CONNECTIONS')
+        extensions = info.get('EXTENSIONS', {})
+        query = next((q for q in ('PEERS', 'PRISM_CONNECTIONS') if extensions.get(q)), None)
+        if query:
+            conn = get_json(host, port, '?' + query)
             d['connections'] = True
             d['clients'] = conn.get('CLIENTS', [])
             d['senders'] = conn.get('SENDERS', [])
@@ -81,14 +85,19 @@ def read_device(host, port, announced=None):
     return d
 
 
+def where(entry):
+    """IP:PORT of a client or a UDP source, or "unknown" if the server omitted it."""
+    return f"{entry['IP']}:{entry['PORT']}" if 'IP' in entry and 'PORT' in entry else 'unknown'
+
+
 def edges_of(devices):
     edges = []
     for d in devices:
         for c in d['clients']:
-            edges.append({'from': c.get('NAME') or f"{c.get('IP')}:{c.get('PORT')}", 'to': d['name'],
+            edges.append({'from': c.get('NAME') or where(c), 'to': d['name'],
                           'kind': 'follows', 'listen': c.get('LISTEN', []), 'packets': c.get('PACKETS', 0)})
         for s in d['senders']:
-            edges.append({'from': f"{s.get('IP')}:{s.get('PORT')}", 'to': d['name'], 'kind': 'sends',
+            edges.append({'from': where(s), 'to': d['name'], 'kind': 'sends',
                           'packets': s.get('PACKETS', 0), 'last_ms': s.get('LAST_MS')})
     return edges
 
@@ -156,7 +165,7 @@ def to_html(doc):
             '<style>body{font-family:sans-serif;margin:16px}table{border-collapse:collapse}'
             'td,th{border:1px solid #ccc;padding:4px 8px}</style></head><body>'
             f'<h1>OSCQuery map</h1><p>Read {html.escape(doc["read_at"])}.</p>{"".join(svg)}'
-            '<table><tr><th>Device</th><th>Address</th><th>PRISM_CONNECTIONS</th><th>Error</th></tr>'
+            '<table><tr><th>Device</th><th>Address</th><th>Connections</th><th>Error</th></tr>'
             f'{rows}</table></body></html>\n')
 
 
@@ -195,7 +204,7 @@ def main():
         write(a.html, to_html(doc))
     if not (a.json or a.dot or a.html):
         for d in devices:
-            state = d['error'] or ('connections read' if d['connections'] else 'no PRISM_CONNECTIONS')
+            state = d['error'] or ('connections read' if d['connections'] else 'no connections declared')
             print(f'{d["name"]} ({d["host"]}:{d["port"]}): {state}')
         for e in doc['edges']:
             what = f'listens to {len(e["listen"])}' if e['kind'] == 'follows' else 'sends over UDP'

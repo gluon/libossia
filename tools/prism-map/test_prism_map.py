@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 CNRS
 # SPDX-FileContributor: Julien Bayle, PRISM <https://www.prism.cnrs.fr/>
-"""Tests of prism_map.py against two fake OSCQuery servers on 127.0.0.1: one
-answers ?PRISM_CONNECTIONS, the other does not know it.
+"""Tests of prism_map.py against fake OSCQuery servers on 127.0.0.1: they answer
+?PEERS, ?PRISM_CONNECTIONS, both, or neither.
 
 usage: python3 test_prism_map.py
 """
@@ -22,15 +22,25 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAP = os.path.join(HERE, 'prism_map.py')
 
 
-def fake_server(name, connections):
-    """An HTTP server answering ?HOST_INFO and, if connections is not None,
-    ?PRISM_CONNECTIONS; started on a port the system chooses."""
+def fake_server(name, connections, peers=None):
+    """An HTTP server answering ?HOST_INFO and, if connections or peers is not
+    None, ?PRISM_CONNECTIONS or ?PEERS; started on a port the system chooses.
+    It keeps the paths it was asked for in .asked."""
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
+            self.server.asked.append(self.path)
             ext = {'LISTEN': True, 'VALUE': True}
             if connections is not None:
                 ext['PRISM_CONNECTIONS'] = True
-            if self.path.endswith('?HOST_INFO'):
+            if peers is not None:
+                ext['PEERS'] = True
+            if self.path == '/?PEERS' and peers is not None:
+                body = peers
+            elif self.path.endswith('?PEERS'):
+                self.send_response(404)
+                self.end_headers()
+                return
+            elif self.path.endswith('?HOST_INFO'):
                 body = {'NAME': name, 'OSC_PORT': self.server.server_port, 'EXTENSIONS': ext}
             elif self.path.endswith('?PRISM_CONNECTIONS') and connections is not None:
                 body = connections
@@ -51,6 +61,7 @@ def fake_server(name, connections):
             pass
 
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    srv.asked = []
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
 
@@ -72,10 +83,13 @@ class PrismMapTests(unittest.TestCase):
         leaks = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
         self.assertEqual(leaks, [])
 
-    def serve(self, name, connections):
-        s = fake_server(name, connections)
+    def serve(self, name, connections, peers=None):
+        s = fake_server(name, connections, peers)
         self.servers.append(s)
         return s.server_port
+
+    def asked(self, port):
+        return next(s.asked for s in self.servers if s.server_port == port)
 
     def run_map(self, *args):
         out = subprocess.run([sys.executable, MAP, '--no-browse', *args],
@@ -110,6 +124,43 @@ class PrismMapTests(unittest.TestCase):
         sends = edges[('127.0.0.1:53012', 'dev_a', 'sends')]
         self.assertEqual(sends['packets'], 3)
         self.assertEqual(len(doc['edges']), 3)
+
+    def test_peers_is_read_when_the_server_declares_it(self):
+        a = self.serve('dev_a',
+                       {'CLIENTS': [{'IP': '127.0.0.1', 'PORT': 1, 'NAME': 'old', 'LISTEN': [], 'PACKETS': 0}],
+                        'SENDERS': []},
+                       {'CLIENTS': [{'IP': '127.0.0.1', 'PORT': 1, 'NAME': 'new', 'LISTEN': ['/x'], 'PACKETS': 2}],
+                        'SENDERS': [{'IP': '127.0.0.1', 'PORT': 9, 'PACKETS': 1, 'LAST_MS': 5}]})
+        doc = json.loads(self.run_map('--host', f'127.0.0.1:{a}', '--json', '-'))
+        self.assertEqual({(e['from'], e['kind']) for e in doc['edges']}, {('new', 'follows'), ('127.0.0.1:9', 'sends')})
+        self.assertTrue(doc['devices'][0]['connections'])
+        self.assertIn('/?PEERS', self.asked(a))
+        self.assertNotIn('/?PRISM_CONNECTIONS', self.asked(a))
+
+    def test_peers_alone_is_enough(self):
+        a = self.serve('dev_a', None, {'CLIENTS': [{'IP': '127.0.0.1', 'PORT': 1, 'NAME': 'new', 'LISTEN': [],
+                                                    'PACKETS': 0}], 'SENDERS': []})
+        doc = json.loads(self.run_map('--host', f'127.0.0.1:{a}', '--json', '-'))
+        self.assertEqual([e['from'] for e in doc['edges']], ['new'])
+
+    def test_prism_connections_is_read_when_peers_is_not_declared(self):
+        a = self.serve('dev_a', {'CLIENTS': [{'IP': '127.0.0.1', 'PORT': 1, 'NAME': 'old', 'LISTEN': [],
+                                              'PACKETS': 0}], 'SENDERS': []})
+        doc = json.loads(self.run_map('--host', f'127.0.0.1:{a}', '--json', '-'))
+        self.assertEqual([e['from'] for e in doc['edges']], ['old'])
+        self.assertNotIn('/?PEERS', self.asked(a))
+
+    def test_fields_omitted_by_peers_are_read_and_drawn(self):
+        # ?PEERS omits what the server cannot fill: no "None:None" on the map
+        a = self.serve('dev_a', None, {'CLIENTS': [{'LISTEN': [], 'PACKETS': 0}],
+                                       'SENDERS': [{'IP': '127.0.0.1', 'PORT': 9, 'PACKETS': 1}]})
+        doc = json.loads(self.run_map('--host', f'127.0.0.1:{a}', '--json', '-'))
+        edges = {(e['from'], e['kind']): e for e in doc['edges']}
+        self.assertIn(('unknown', 'follows'), edges)
+        self.assertIsNone(edges[('127.0.0.1:9', 'sends')]['last_ms'])
+        self.assertNotIn('None', self.run_map('--host', f'127.0.0.1:{a}', '--dot', '-'))
+        self.assertNotIn('None:None', self.run_map('--host', f'127.0.0.1:{a}', '--html', '-'))
+        self.run_map('--host', f'127.0.0.1:{a}')
 
     def test_dot_and_html(self):
         a = self.serve('dev_a', {'CLIENTS': [{'IP': '127.0.0.1', 'PORT': 1, 'NAME': 'td_client',
