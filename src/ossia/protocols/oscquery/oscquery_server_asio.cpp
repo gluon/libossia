@@ -32,6 +32,8 @@
 #include <ossia/protocols/oscquery/oscquery_client_asio.hpp>
 
 #include <rapidjson/document.h>
+
+#include <boost/asio/ip/address.hpp>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
 
@@ -44,13 +46,25 @@ struct oscquery_server_protocol::osc_receiver_impl : ossia::net::udp_receive_soc
   using udp_receive_socket::udp_receive_socket;
 };
 
+// Whether the address a client connected from is this IPv4 address of a datagram
+static bool same_address(const std::string& client_ip, unsigned long address)
+{
+  boost::system::error_code ec;
+  auto ip = boost::asio::ip::make_address(client_ip, ec);
+  if(ec)
+    return false;
+  if(ip.is_v6() && ip.to_v6().is_v4_mapped())
+    ip = boost::asio::ip::make_address_v4(boost::asio::ip::v4_mapped, ip.to_v6());
+  return ip.is_v4() && ip.to_v4().to_uint() == address;
+}
+
 static uintptr_t
 client_identifier(const clients& clts, const oscpack::IpEndpointName& ip)
 {
   for(const auto& client_p : clts)
   {
     auto& c = *client_p;
-    if(c.remote_sender_port == ip.port)
+    if(c.remote_sender_port == ip.port && same_address(c.client_ip, ip.address))
     {
       return (uintptr_t)c.connection.lock().get();
     }
@@ -857,9 +871,10 @@ void oscquery_server_protocol_base::answer_crossing(
   }
 }
 
-uintptr_t oscquery_server_protocol_base::client_of_sender_port(int port)
+uintptr_t oscquery_server_protocol_base::client_of_sender(unsigned long address, int port)
 {
   oscpack::IpEndpointName ip;
+  ip.address = address;
   ip.port = port;
   lock_t lock(m_clientsMutex);
   return client_identifier(m_clients, ip);
@@ -1135,11 +1150,15 @@ void oscquery_server_protocol::set_device(ossia::net::device_base& dev)
   oscquery_server_protocol_base::set_device(dev);
 
   m_oscServer->open();
-  // The client a datagram comes from, by its UDP source port, as
+  // The client a datagram comes from, by its address and UDP source port, as
   // ossia::oscquery::oscquery_server_protocol does
   m_oscServer->receive_from(
       [this](const char* data, std::size_t sz, const boost::asio::ip::udp::endpoint& from) {
-    const auto origin = client_of_sender_port(from.port());
+    auto address = from.address();
+    if(address.is_v6() && address.to_v6().is_v4_mapped())
+      address = boost::asio::ip::make_address_v4(boost::asio::ip::v4_mapped, address.to_v6());
+    const auto origin
+        = client_of_sender(address.is_v4() ? address.to_v4().to_uint() : 0, from.port());
     if(!origin)
     {
       auto ip = from.address().to_string();
