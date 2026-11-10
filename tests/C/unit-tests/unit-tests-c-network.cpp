@@ -38,6 +38,7 @@
 #include <cstring>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -1268,4 +1269,71 @@ TEST_CASE("C API: a missing node is 404 and a bad request 400", "[network_c]")
   REQUIRE(http_status(s.ws, "/nothing?TYPE") == 404);
   // LISTEN over HTTP has no WebSocket client to apply to
   REQUIRE(http_status(s.ws, "/level?LISTEN=true") == 400);
+}
+
+namespace
+{
+// Whether a strict parser reads this text: JSON has no NaN or Infinity
+bool strict_json(const std::string& text)
+{
+  rapidjson::Document doc;
+  doc.Parse<rapidjson::kParseNoFlags>(text.c_str(), text.size());
+  return !text.empty() && !doc.HasParseError();
+}
+}
+
+// A value JSON cannot write is null: one of them made the whole tree unreadable
+TEST_CASE("C API: a value that is not finite is served as null", "[network_c]")
+{
+  server s{"c_nan_server"};
+  auto nan = float_parameter(s.dev, "/nan");
+  auto inf = float_parameter(s.dev, "/inf");
+  auto vec = ossia_node_create_parameter(
+      ossia_node_create(ossia_device_get_root_node(s.dev), "/vec"), VEC3F_T);
+  ossia_parameter_push_f(nan, std::nanf(""));
+  ossia_parameter_push_f(inf, HUGE_VALF);
+  ossia_parameter_push_3f(vec, 1.f, std::nanf(""), 3.f);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  REQUIRE(http_get(s.ws, "/nan?VALUE") == "{\"VALUE\":null}");
+  REQUIRE(http_get(s.ws, "/inf?VALUE") == "{\"VALUE\":null}");
+  REQUIRE(http_get(s.ws, "/vec?VALUE") == "{\"VALUE\":[1.0,null,3.0]}");
+  REQUIRE(strict_json(http_get(s.ws, "/")));
+}
+
+TEST_CASE("C API: a range or an attribute that is not finite keeps the JSON valid", "[network_c]")
+{
+  server s{"c_nan_attr_server"};
+  auto level = float_parameter(s.dev, "/level");
+  auto min = ossia_value_create_float(std::nanf(""));
+  auto max = ossia_value_create_float(1.f);
+  ossia_parameter_set_domain(level, ossia_domain_make_min_max(min, max));
+  ossia_value_free(min);
+  ossia_value_free(max);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  REQUIRE(strict_json(http_get(s.ws, "/level")));
+
+  auto node = ossia_node_find(ossia_device_get_root_node(s.dev), "/level");
+  ossia_node_set_priority(node, std::nanf(""));
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  REQUIRE(strict_json(http_get(s.ws, "/level")));
+
+  ossia_node_unset_priority(node);
+  ossia_node_set_value_step_size(node, std::nan(""));
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  REQUIRE(strict_json(http_get(s.ws, "/level")));
+}
+
+// CHAR_T of the C API is converted to val_type::MAP. A map has no JSON writer:
+// its key was left without a value, and the tree could not be read.
+TEST_CASE("C API: a parameter of type map keeps the JSON valid", "[network_c]")
+{
+  server s{"c_map_server"};
+  float_parameter(s.dev, "/level");
+  ossia_node_create_parameter(ossia_node_create(ossia_device_get_root_node(s.dev), "/map"), CHAR_T);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  REQUIRE(http_get(s.ws, "/map?VALUE") == "{\"VALUE\":null}");
+  REQUIRE(strict_json(http_get(s.ws, "/map")));
+  REQUIRE(strict_json(http_get(s.ws, "/")));
 }
