@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <future>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -123,6 +124,12 @@ public:
   //! Whether this client wrote that address within the last moments
   bool written_recently(const std::string& address);
 
+  //! Asks the server for the value of a parameter nothing follows, without
+  //! waiting for it: at most one request in flight for an address, and one
+  //! per refresh_interval. A reader gets the last value known meanwhile.
+  void refresh_unfollowed(const std::string& address);
+  static constexpr std::chrono::milliseconds refresh_interval{100};
+
   void set_zombie_on_remove(bool zombie_on_remove)
   {
     m_zombie_on_remove = zombie_on_remove;
@@ -224,6 +231,16 @@ private:
   };
 
   ossia::spsc_queue<get_ws_promise> m_getWSPromises;
+  // The reads of a parameter nothing follows, by address: the last request
+  // and its answer to come
+  struct unfollowed_read
+  {
+    std::chrono::steady_clock::time_point asked{};
+    std::future<void> answer;
+  };
+  std::mutex m_unfollowedMutex;
+  std::unordered_map<std::string, unfollowed_read> m_unfollowed;
+
   // The values read again after an ATTRIBUTES_CHANGED, by address, until the
   // answer comes (or for 1 s): one read at a time for an address.
   std::mutex m_attributeReadsMutex;
@@ -251,7 +268,10 @@ private:
 //! Use this function to load a device preset in the OSCQuery format.
 //! The value to give someone who reads a parameter. On a mirror, a parameter
 //! nothing follows gets no value from the server, which sends only what is
-//! listened to: it is asked for, and the local value would be out of date.
+//! listened to: it is asked for, without waiting, at most every
+//! refresh_interval, and the last value known is given meanwhile. To follow a
+//! value, put a callback on the parameter (ossia.remote, Ossia.Remote): the
+//! server then sends each value as it changes.
 OSSIA_EXPORT ossia::value read_followed_value(ossia::net::parameter_base& param);
 
 OSSIA_EXPORT void load_oscquery_device(ossia::net::device_base& dev, std::string json);

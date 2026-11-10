@@ -621,6 +621,11 @@ void ossia_parameter_set_value(ossia_parameter_t param, ossia_value_t value);
 /**
  * @see ossia::net::parameter_base::value
  * @note Multithread guarantees: Data-Safe.
+ * @note On a parameter of an OSCQuery mirror that no callback follows, the
+ * server sends no value: the call asks it for one without waiting, at most
+ * every 100 ms, and returns the last value known. To follow a value, add a
+ * callback (ossia_parameter_add_callback): the mirror listens to the address
+ * and gets each value as the server sends it.
  */
 OSSIA_EXPORT
 ossia_value_t ossia_parameter_get_value(ossia_parameter_t param);

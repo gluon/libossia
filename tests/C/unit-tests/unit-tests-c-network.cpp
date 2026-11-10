@@ -2098,6 +2098,8 @@ struct fake_device
   std::vector<std::string> commands;
   std::atomic<float> value{1.f};
   std::atomic_bool late_child{false};
+  std::atomic_int value_delay_ms{0};
+  std::atomic_int lost_answers{0};
   std::atomic_int value_requests{0};
   std::map<std::string, std::string> extra; // path -> JSON of the node
   ossia::net::websocket_server::connection_handler client;
@@ -2121,6 +2123,13 @@ struct fake_device
       else if(text.find("?VALUE") != std::string::npos)
       {
         value_requests++;
+        if(value_delay_ms > 0)
+          std::this_thread::sleep_for(std::chrono::milliseconds(value_delay_ms.load()));
+        if(lost_answers > 0)
+        {
+          lost_answers--;
+          return reply;
+        }
         reply.data = "{\"VALUE\":" + std::to_string(value.load()) + "}";
       }
       else if(auto node = extra_node(text); !node.empty())
@@ -2203,7 +2212,8 @@ TEST_CASE("C API: a mirror gives its name with what the server declares", "[netw
 }
 
 // A parameter no callback follows gets no value from the server, which sends
-// only what is listened to: reading it asks the server
+// only what is listened to: reading it asks the server, without waiting, and
+// at most every refresh_interval
 TEST_CASE("C API: reading a mirrored parameter nothing follows asks the server", "[network_c]")
 {
   fake_device d{"\"LISTEN\":true"};
@@ -2214,31 +2224,83 @@ TEST_CASE("C API: reading a mirrored parameter nothing follows asks the server",
   settle();
 
   d.value = 2.f;
-  REQUIRE(value_of(f) == 2.f);
-  REQUIRE(d.value_requests == 1);
+  REQUIRE(wait_for([&] { return value_of(f) == 2.f; }, 2000));
+  REQUIRE(d.value_requests >= 1);
+
+  // Read every millisecond, it asks every refresh_interval
+  using clock = std::chrono::steady_clock;
+  {
+    const int before = d.value_requests;
+    const auto end = clock::now() + std::chrono::milliseconds(350);
+    while(clock::now() < end)
+    {
+      value_of(f);
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const int n = d.value_requests - before;
+    INFO(n << " requests in 350 ms");
+    REQUIRE(n >= 2);
+    REQUIRE(n <= 4);
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  const int asked = d.value_requests;
+
+  // A read does not wait for the server, and reads in a row ask once
+  d.value_delay_ms = 500;
+  d.value = 3.f;
+  double worst = 0;
+  for(int i = 0; i < 100; i++)
+  {
+    const auto t0 = clock::now();
+    REQUIRE(value_of(f) == 2.f);
+    worst = std::max(worst, std::chrono::duration<double, std::milli>(clock::now() - t0).count());
+  }
+  INFO("longest read " << worst << " ms");
+  REQUIRE(worst < 50);
+  for(int i = 0; i < 2; i++)
+  {
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    REQUIRE(value_of(f) == 2.f);
+  }
+  REQUIRE(wait_for([&] { return value_of(f) == 3.f; }, 2000));
+  d.value_delay_ms = 0;
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  // The request, and one that a read after the answer may have sent
+  REQUIRE(d.value_requests <= asked + 2);
 
   // Once followed, the values come by themselves: no request
   auto noop = [](void*, ossia_value_t) {};
   auto cb = ossia_parameter_add_callback(f, noop, nullptr);
-  d.value = 3.f;
-  REQUIRE(value_of(f) == 2.f);
-  REQUIRE(d.value_requests == 1);
+  const int followed = d.value_requests;
+  d.value = 4.f;
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  REQUIRE(value_of(f) == 3.f);
+  REQUIRE(d.value_requests == followed);
   ossia_parameter_remove_callback(f, cb);
 
   // What this client has just written is the latest it knows
   ossia_parameter_push_f(f, 9.f);
   REQUIRE(value_of(f) == 9.f);
-  REQUIRE(d.value_requests == 1);
-  std::this_thread::sleep_for(std::chrono::milliseconds(600));
-  d.value = 4.f;
-  REQUIRE(value_of(f) == 4.f);
-  REQUIRE(d.value_requests == 2);
+  REQUIRE(d.value_requests == followed);
 
   // The value of a write-only parameter cannot be read
   auto so = find_parameter(m.dev, "/so");
   REQUIRE(so);
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
   value_of(so);
-  REQUIRE(d.value_requests == 2);
+  settle();
+  REQUIRE(d.value_requests == followed);
+
+  // An answer that never comes holds the address one second at most
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));
+  d.lost_answers = 1;
+  d.value = 5.f;
+  value_of(f);
+  REQUIRE(wait_for([&] { return d.value_requests == followed + 1; }, 1000));
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  value_of(f);
+  REQUIRE(d.value_requests == followed + 1);
+  REQUIRE(wait_for([&] { return value_of(f) == 5.f; }, 3000));
 }
 
 // The mirror does not reopen its WebSocket: after a reconnection the host makes
@@ -2403,4 +2465,60 @@ TEST_CASE("a value read for a new parameter comes once however late the second c
   REQUIRE(count() == 2);
 
   client->on_parameter_created.disconnect<&follower::on_created>(f);
+}
+
+// The cost of reading, every frame, parameters of a mirror that nothing
+// follows: an Update loop of Unity, a metro on namespace in Max. Not a test of
+// behaviour: it prints what a read costs the calling thread and the network.
+TEST_CASE("bench: reading a mirrored parameter nothing follows, every frame", "[.][read_bench]")
+{
+  using clock = std::chrono::steady_clock;
+  auto ms = [](auto d) { return std::chrono::duration<double, std::milli>(d).count(); };
+
+  // 50 parameters read once each in one frame, as namespace on a client
+  {
+    server s{"c_read_bench_many", 0, "127.0.0.1"};
+    for(int i = 0; i < 50; i++)
+      float_parameter(s.dev, ("/p" + std::to_string(i)).c_str());
+    settle();
+    mirror m{s.url(), "c_read_bench_many_mirror"};
+    std::vector<ossia_parameter_t> params;
+    for(int i = 0; i < 50; i++)
+      params.push_back(find_parameter(m.dev, ("/p" + std::to_string(i)).c_str()));
+    for(int pass = 0; pass < 3; pass++)
+    {
+      const auto t0 = clock::now();
+      for(auto p : params)
+        value_of(p);
+      std::printf("read bench, 50 parameters in one frame, pass %d: %.2f ms\n", pass + 1,
+                  ms(clock::now() - t0));
+      std::this_thread::sleep_for(std::chrono::milliseconds(17));
+    }
+  }
+
+  // One parameter at 60 frames per second for 2 s: requests sent, time blocked
+  {
+    fake_device d{"\"LISTEN\":true"};
+    settle();
+    mirror m{d.url(), "c_read_bench_one"};
+    auto f = find_parameter(m.dev, "/f");
+    REQUIRE(f);
+    double worst = 0, total = 0;
+    const int frames = 120;
+    const int before = d.value_requests;
+    const auto start = clock::now();
+    for(int i = 0; i < frames; i++)
+    {
+      const auto t0 = clock::now();
+      value_of(f);
+      const auto spent = ms(clock::now() - t0);
+      worst = std::max(worst, spent);
+      total += spent;
+      std::this_thread::sleep_until(start + std::chrono::microseconds(16667 * (i + 1)));
+    }
+    std::printf(
+        "read bench, 1 parameter at 60 fps for 2 s: %d requests (%.1f per second), "
+        "%.3f ms per read on average, %.3f ms at worst\n",
+        d.value_requests - before, (d.value_requests - before) / 2.0, total / frames, worst);
+  }
 }
