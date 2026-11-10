@@ -174,7 +174,9 @@ bool tcp_connects(const std::string& ip, uint16_t port)
 }
 
 // Sends "<address> <f>" in one datagram to ip:port
-void send_osc_float(const std::string& ip, uint16_t port, const std::string& address, float f)
+void send_osc_float(
+    const std::string& ip, uint16_t port, const std::string& address, float f,
+    const std::string& from_ip = {}, uint16_t from_port = 0)
 {
   std::string m = address;
   m.append(4 - m.size() % 4, '\0');
@@ -189,6 +191,14 @@ void send_osc_float(const std::string& ip, uint16_t port, const std::string& add
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
   ::inet_pton(AF_INET, ip.c_str(), &addr.sin_addr);
+  if(from_port != 0)
+  {
+    sockaddr_in from{};
+    from.sin_family = AF_INET;
+    from.sin_port = htons(from_port);
+    ::inet_pton(AF_INET, from_ip.c_str(), &from.sin_addr);
+    REQUIRE(::bind(fd, (sockaddr*)&from, sizeof(from)) == 0);
+  }
   ::sendto(fd, m.data(), m.size(), 0, (sockaddr*)&addr, sizeof(addr));
   ::close(fd);
 }
@@ -436,9 +446,9 @@ struct raw_client
     ws.stop();
     thread.join();
   }
-  void stream_to(uint16_t udp_port)
+  void stream_to(uint16_t udp_port, uint16_t sender_port = 0)
   {
-    auto msg = ossia::oscquery::json_writer::start_osc_streaming(udp_port, 0);
+    auto msg = ossia::oscquery::json_writer::start_osc_streaming(udp_port, sender_port);
     ws.send_message(std::string(msg.GetString(), msg.GetSize()));
   }
 };
@@ -1368,4 +1378,55 @@ TEST_CASE("C API: EXTENDED_TYPE is declared in HOST_INFO", "[network_c]")
   server s{"c_ext_type_declared_server"};
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   REQUIRE(extension(s.ws, "EXTENDED_TYPE") == 1);
+}
+
+namespace
+{
+// A datagram from another address than a client's, from the source port that
+// client declared, is not that client's: it is forwarded to it like any other.
+void same_port_on_another_address(
+    ossia_device_t dev, uint16_t osc, const std::string& url, const std::string& other)
+{
+  auto level = float_parameter(dev, "/level");
+  ossia_device_set_echo(dev, 1);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  udp_sink sink{free_port(false)};
+  raw_client client{url};
+  REQUIRE(client.ws.connected());
+  const uint16_t sender = free_port(false);
+  client.stream_to(sink.port(), sender);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  send_osc_float(other, osc, "/level", 0.25f, other, sender);
+  REQUIRE(wait_for([&] { return value_of(level) == 0.25f; }, 2000));
+  REQUIRE(sink.wait_messages(1, 2000));
+}
+}
+
+TEST_CASE("C API: asio server knows a sender by its address and port", "[network_c]")
+{
+  const auto other = other_ipv4();
+  if(other.empty())
+  {
+    WARN("no interface other than the loopback: not tested");
+    return;
+  }
+  server s{"c_sender_address_asio"};
+  same_port_on_another_address(s.dev, s.osc, s.url(), other);
+}
+
+TEST_CASE("C API: WebSocket++ server knows a sender by its address and port", "[network_c]")
+{
+  const auto other = other_ipv4();
+  if(other.empty())
+  {
+    WARN("no interface other than the loopback: not tested");
+    return;
+  }
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_sender_address_wspp");
+  REQUIRE(dev);
+  same_port_on_another_address(dev, osc, "ws://127.0.0.1:" + std::to_string(ws), other);
+  ossia_device_free(dev);
 }

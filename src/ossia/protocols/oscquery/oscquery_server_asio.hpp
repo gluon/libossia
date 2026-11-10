@@ -139,9 +139,10 @@ protected:
   // a value its device echoes is not sent back to it.
   void on_osc_message(const oscpack::ReceivedMessage& m, uintptr_t origin);
   void process_raw_osc_data(const char* data, std::size_t sz, uintptr_t origin);
-  // The client whose OSC sender has that UDP port (LOCAL_SENDER_PORT of its
-  // START_OSC_STREAMING), 0 if none.
-  uintptr_t client_of_sender_port(int port);
+  // The client connected from that IPv4 address (in host order) whose OSC
+  // sender has that UDP port (LOCAL_SENDER_PORT of its START_OSC_STREAMING),
+  // 0 if none.
+  uintptr_t client_of_sender(unsigned long address, int port);
   // A UDP packet of a source that is none of the clients
   void record_sender(const std::string& ip, uint16_t port);
   // PRISM_NAME, a text command a client sends on the WebSocket to give its
