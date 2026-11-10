@@ -40,6 +40,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <set>
 #include <string>
 #include <thread>
 
@@ -3214,6 +3215,62 @@ TEST_CASE("oscquery_directory_finds_its_own_device", "oscquery_directory_finds_i
   scheduler.join();
   INFO("step: the device of this process found by name, its tree read, within 15 s");
   REQUIRE(found);
+}
+
+// An announcement withdrawn and made again at the same address while the
+// mirror of its device is being built, as when a server restarts: one build.
+// The first went on, connected, and was dropped once the second had connected:
+// two connections for one, seen several times per run of the bench.
+TEST_CASE("oscquery_directory_keeps_its_build", "oscquery_directory_keeps_its_build")
+{
+  const std::string name = "a12_keep_" + std::to_string(getpid());
+  auto ctx = ossia::max_binding::make_device_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), name};
+  ossia::try_setup_parameter("float", ossia::net::create_node(dev.get_root_node(), "/foo/bar"));
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  const uint16_t ws = free_port(true);
+  // On 127.0.0.1: not announced, the test gives the announcements
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+      ctx, free_port(false), ws, false, "127.0.0.1");
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+  std::atomic_bool stop{false};
+  std::thread scheduler([&] {
+    while(!stop)
+    {
+      ossia::max_binding::poll_device_network_context(*ctx);
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  });
+  const std::string own = "max_client_" + std::to_string(getpid());
+  std::set<int> ports;
+  auto seen = [&] {
+    rapidjson::Document doc;
+    const auto json = exposed->query_connections();
+    doc.Parse(json.c_str());
+    for(auto& c : doc["CLIENTS"].GetArray())
+      if(c.HasMember("NAME") && own == c["NAME"].GetString())
+        ports.insert(c["PORT"].GetInt());
+  };
+
+  directory_poller p;
+  p.dir.inject(true, name, "127.0.0.1", std::to_string(ws));
+  p.dir.poll(); // the build starts
+  p.dir.inject(false, name);
+  p.dir.inject(true, name, "127.0.0.1", std::to_string(ws));
+  REQUIRE(p.until([&] {
+    seen();
+    return p.dir.find(name) != nullptr;
+  }, 5000));
+  p.until([&] {
+    seen();
+    return false;
+  }, 1000);
+  multiplex.stop_expose_to(*exposed);
+  stop = true;
+  scheduler.join();
+  INFO("client ports of the directory: " << ports.size());
+  REQUIRE(ports.size() == 1);
 }
 
 // The directory of the package opens one connection per announced device.

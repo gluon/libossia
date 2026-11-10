@@ -114,6 +114,10 @@ public:
   // WebSocket of each mirror. Called regularly, always on the same thread.
   changes poll();
 
+  // What mDNS reports, given directly: an announcement of that instance at
+  // host:port, or its withdrawal. Applied at the next poll, as Servus's own.
+  void inject(bool added, std::string name, std::string host = {}, std::string port = {});
+
   // Any thread. The mirror of the device announced under that name, nullptr
   // while it is not built.
   std::shared_ptr<ossia::net::generic_device> find(const std::string& name) const;

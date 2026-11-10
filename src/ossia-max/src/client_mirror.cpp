@@ -146,14 +146,19 @@ struct oscquery_directory::impl final : servus::Listener
   // is this process, not the device it mirrors.
   const std::string client_name = "max_client_" + std::to_string(getpid());
   // Filled by Servus during browse, read by poll.
+  struct event
+  {
+    bool added{};
+    std::string name, host, port;
+  };
   std::mutex events_mutex;
-  std::vector<std::pair<bool, std::string>> events;
+  std::vector<event> events;
   // The mirrors, read by find and devices from any thread.
   mutable std::mutex mutex;
   std::map<std::string, entry> entries;
   // Builds that ended their use (device removed or announced elsewhere):
   // released once their thread is done.
-  std::vector<std::unique_ptr<oscquery_connect_attempt>> abandoned;
+  std::vector<std::pair<std::string, std::unique_ptr<oscquery_connect_attempt>>> abandoned;
 
   impl()
   {
@@ -175,6 +180,20 @@ struct oscquery_directory::impl final : servus::Listener
     events.push_back({true, instance});
   }
 
+  // A build abandoned while its device was announced again at the same
+  // address is taken back: else both connect, and the first is dropped.
+  std::unique_ptr<oscquery_connect_attempt> take_abandoned(const std::string& url)
+  {
+    auto it = std::find_if(abandoned.begin(), abandoned.end(), [&](const auto& a) {
+      return a.first == url;
+    });
+    if(it == abandoned.end())
+      return {};
+    auto attempt = std::move(it->second);
+    abandoned.erase(it);
+    return attempt;
+  }
+
   void instanceRemoved(const std::string& instance) override
   {
     std::lock_guard lock{events_mutex};
@@ -184,7 +203,7 @@ struct oscquery_directory::impl final : servus::Listener
   void abandon(entry& e)
   {
     if(e.attempt)
-      abandoned.push_back(std::move(e.attempt));
+      abandoned.emplace_back(e.url, std::move(e.attempt));
   }
 };
 
@@ -207,7 +226,7 @@ oscquery_directory::changes oscquery_directory::poll()
   {
   }
 
-  std::vector<std::pair<bool, std::string>> events;
+  std::vector<impl::event> events;
   {
     std::lock_guard lock{d.events_mutex};
     events.swap(d.events);
@@ -215,16 +234,19 @@ oscquery_directory::changes oscquery_directory::poll()
 
   const auto now = impl::clock::now();
   std::lock_guard lock{d.mutex};
-  for(const auto& [added, name] : events)
+  for(const auto& [added, name, given_host, given_port] : events)
   {
     if(added)
     {
       // The address of the SRV record, resolved by the system when the
       // WebSocket connects, as the mirror of ossia.client always did.
-      std::string host = d.service.get(name, "servus_ip");
+      std::string host = given_host;
+      if(host.empty())
+        host = d.service.get(name, "servus_ip");
       if(host.empty())
         host = d.service.get(name, "servus_host");
-      const std::string port = d.service.get(name, "servus_port");
+      const std::string port
+          = given_port.empty() ? d.service.get(name, "servus_port") : given_port;
       if(host.empty() || port.empty())
         continue;
       const std::string url = "ws://" + host + ":" + port;
@@ -237,6 +259,7 @@ oscquery_directory::changes oscquery_directory::poll()
         e.port = port;
         e.url = url;
         e.next_try = now;
+        e.attempt = d.take_abandoned(url);
       }
     }
     else if(auto it = d.entries.find(name); it != d.entries.end())
@@ -283,8 +306,14 @@ oscquery_directory::changes oscquery_directory::poll()
     }
   }
 
-  std::erase_if(d.abandoned, [](const auto& a) { return a->done(); });
+  std::erase_if(d.abandoned, [](const auto& a) { return a.second->done(); });
   return out;
+}
+
+void oscquery_directory::inject(bool added, std::string name, std::string host, std::string port)
+{
+  std::lock_guard lock{m_impl->events_mutex};
+  m_impl->events.push_back({added, std::move(name), std::move(host), std::move(port)});
 }
 
 std::shared_ptr<ossia::net::generic_device>
