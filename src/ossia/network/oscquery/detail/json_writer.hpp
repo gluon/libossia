@@ -24,10 +24,12 @@ public:
   static string_t device_info(int port);
 
   //! prism_connections: the server answers ?PRISM_CONNECTIONS
+  //! echo: the server forwards a client's values to its other clients
   static string_t query_host_info(
       std::string_view name,
       const std::vector<ossia::net::osc_server_configuration>& osc_port,
-      std::string_view local_ip, int ws_port, bool prism_connections = false);
+      std::string_view local_ip, int ws_port, bool prism_connections = false,
+      bool echo = false);
 
   // Format interface
   // Queries

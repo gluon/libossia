@@ -1337,3 +1337,27 @@ TEST_CASE("C API: a parameter of type map keeps the JSON valid", "[network_c]")
   REQUIRE(strict_json(http_get(s.ws, "/map")));
   REQUIRE(strict_json(http_get(s.ws, "/")));
 }
+
+namespace
+{
+// An entry of the EXTENSIONS of HOST_INFO: 1 true, 0 false, -1 absent
+int extension(uint16_t port, const char* key)
+{
+  rapidjson::Document doc;
+  doc.Parse(http_get(port, "/?HOST_INFO").c_str());
+  if(doc.HasParseError() || !doc.HasMember("EXTENSIONS") || !doc["EXTENSIONS"].HasMember(key))
+    return -1;
+  return doc["EXTENSIONS"][key].GetBool() ? 1 : 0;
+}
+}
+
+TEST_CASE("C API: HOST_INFO says whether the server echoes", "[network_c]")
+{
+  server s{"c_echo_declared_server"};
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  REQUIRE(extension(s.ws, "ECHO") == 0);
+  ossia_device_set_echo(s.dev, 1);
+  REQUIRE(extension(s.ws, "ECHO") == 1);
+  ossia_device_set_echo(s.dev, 0);
+  REQUIRE(extension(s.ws, "ECHO") == 0);
+}
