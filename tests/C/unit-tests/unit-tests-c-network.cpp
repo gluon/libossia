@@ -7,6 +7,7 @@
 #include <ossia/network/context.hpp>
 #include <ossia/network/generic/generic_device.hpp>
 #include <ossia/network/oscquery/detail/json_writer.hpp>
+#include <ossia/network/oscquery/oscquery_mirror.hpp>
 #include <ossia/detail/logger.hpp>
 #include <ossia/network/http/http_client.hpp>
 #include <ossia/network/sockets/websocket_client_beast.hpp>
@@ -2338,4 +2339,74 @@ TEST_CASE("C API: a mirror reads again the address of a PATH_CHANGED", "[network
   settle();
   ossia_device_run_commands(m.dev);
   REQUIRE(find_parameter(m.dev, "/f"));
+}
+
+// Two ATTRIBUTES_CHANGED with a TYPE for one new parameter, the second one
+// applied after the answer to the reading the first one asked for, which is
+// what a loaded host does: what follows the parameter gets its value once.
+TEST_CASE("a value read for a new parameter comes once however late the second change", "[network_c]")
+{
+  fake_device d{"\"LISTEN\":true"};
+  settle();
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(d.url()), "c_once");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+  auto& proto = static_cast<ossia::oscquery::oscquery_mirror_protocol&>(client->get_protocol());
+
+  std::mutex mutex;
+  std::vector<float> received;
+  struct follower
+  {
+    std::mutex* m;
+    std::vector<float>* r;
+    void on_created(const ossia::net::parameter_base& p)
+    {
+      const_cast<ossia::net::parameter_base&>(p).add_callback([m = m, r = r](const ossia::value& v) {
+        std::lock_guard l{*m};
+        r->push_back(ossia::convert<float>(v));
+      });
+    }
+  } f{&mutex, &received};
+  client->on_parameter_created.connect<&follower::on_created>(f);
+
+  auto poll = [&](int ms) {
+    for(int t = 0; t < ms; t += 5)
+    {
+      proto.run_commands();
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+  };
+  auto count = [&] {
+    std::lock_guard l{mutex};
+    return received.size();
+  };
+  const std::string changed
+      = "{\"COMMAND\":\"ATTRIBUTES_CHANGED\",\"DATA\":{\"FULL_PATH\":\"/n\",\"TYPE\":\"f\"}}";
+
+  d.send("{\"COMMAND\":\"PATH_ADDED\",\"DATA\":\"/n\"}");
+  d.send(changed);
+  poll(300);
+  REQUIRE(d.value_requests == 1);
+  REQUIRE(count() == 1);
+
+  // Answered, then the second change: nothing more
+  d.send(changed);
+  poll(300);
+  REQUIRE(count() == 1);
+
+  // Later: read again, and the same value is not a new one
+  poll(1200);
+  d.send(changed);
+  poll(300);
+  REQUIRE(d.value_requests == 2);
+  REQUIRE(count() == 1);
+
+  // A value that did change comes
+  poll(1200);
+  d.value = 8.f;
+  d.send(changed);
+  poll(300);
+  REQUIRE(count() == 2);
+
+  client->on_parameter_created.disconnect<&follower::on_created>(f);
 }

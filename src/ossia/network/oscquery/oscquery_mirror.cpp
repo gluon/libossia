@@ -1059,10 +1059,6 @@ bool oscquery_mirror_protocol::on_WSMessage(
           get_ws_promise p;
           if(m_getWSPromises.try_dequeue(p))
           {
-            {
-              std::lock_guard lock{m_attributeReadsMutex};
-              m_attributeReads.erase(p.address);
-            }
             auto node = ossia::net::find_node(m_device->get_root_node(), p.address);
 
             const rapidjson::Value* obj_value = data.get();
@@ -1188,18 +1184,25 @@ bool oscquery_mirror_protocol::on_WSMessage(
             {
               auto address = request_value->get_node().osc_address();
               const auto now = std::chrono::steady_clock::now();
-              bool read = false;
+              // Read again a little later only if the value differs: the
+              // answer to the first reading may already have come.
+              bool read = false, first = false;
               {
                 std::lock_guard lock{m_attributeReadsMutex};
                 auto [it, added] = m_attributeReads.try_emplace(address, now);
-                if(added || now - it->second > std::chrono::seconds(1))
+                const auto elapsed = now - it->second;
+                first = added || elapsed > std::chrono::seconds(5);
+                if(first || elapsed > std::chrono::seconds(1))
                 {
                   it->second = now;
                   read = true;
                 }
               }
               if(read)
-                pull_async(*request_value);
+              {
+                m_getWSPromises.enqueue(get_ws_promise{std::promise<void>{}, address, !first});
+                http_send_message(address + std::string{detail::query_value()});
+              }
             }
           });
           if(m_commandCallback)
