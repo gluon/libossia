@@ -15,7 +15,10 @@ itself): two ossia.client, prism11_url connected by URL and prism11_byname
 connected by name, each with an ossia.remote bench/late, which sends what it
 outputs to UDP 41744. Then the server adds /bench/late with 0.5, set without a
 push, and pushes 0.75. With ossia-prism 2.1.0+prism.10 the remote output the
-added value twice. What the server receives and sends is written to
+added value twice. Then the server pushes /bench/first, which no remote
+follows: each client of Max listens to /bench/late only, and the server sends
+it nothing of /bench/first (a client gets only what it listens to, since
+2.1.0+prism.12). What the server receives and sends is written to
 --out/server.log. Refuses to run while a bench of TouchDesigner is running.
 Prints one line per check, then RESULT: PASS or RESULT: FAIL.
 """
@@ -43,9 +46,19 @@ def check(name, ok, detail=''):
     print(f'{"PASS" if ok else "FAIL"} {name}' + (f': {detail}' if detail != '' else ''), flush=True)
 
 
-def clients():
+def connections():
     with urllib.request.urlopen(f'http://127.0.0.1:{WS}/?PRISM_CONNECTIONS', timeout=2) as r:
-        return [c.get('NAME', '') for c in json.loads(r.read().decode().rstrip('\0')).get('CLIENTS', [])]
+        return json.loads(r.read().decode().rstrip('\0')).get('CLIENTS', [])
+
+
+def clients():
+    return [c.get('NAME', '') for c in connections()]
+
+
+def sent(log, address):
+    """How many values of that address the server sent, by its log"""
+    with open(log) as f:
+        return sum(1 for line in f if f'Out: {address} ' in line)
 
 
 def until(f, seconds):
@@ -111,7 +124,7 @@ def values(got, address):
     return [round(v[0], 4) if isinstance(v[0], float) else v for a, v in got if a == address and v]
 
 
-def run(server, patch, max_app, max_pid):
+def run(server, patch, max_app, max_pid, log):
     if not until(lambda: clients() is not None, 10):
         check(f'the server answers on {WS}', False)
         return
@@ -151,6 +164,16 @@ def run(server, patch, max_app, max_pid):
         check(f'{how}: one change, one value', values(pushed, address) == [0.75],
               str(values(pushed, address)))
 
+    # A client gets only what it listens to: the remotes follow /bench/late
+    listens = {c.get('NAME'): sorted(c.get('LISTEN', [])) for c in connections()}
+    for client in (named, 'prism11_url'):
+        check(f'{client} listens to /bench/late only', listens.get(client) == ['/bench/late'], str(listens))
+    late, first = sent(log, '/bench/late'), sent(log, '/bench/first')
+    server.send('first 3')
+    patch.read(1)
+    check('a value no remote follows is not sent: /bench/first', sent(log, '/bench/first') == first,
+          f'{sent(log, "/bench/first") - first} sent; /bench/late was sent {late} times')
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -171,7 +194,7 @@ def main():
     server = Server(a.tests, os.path.abspath(log))
     patch = Patch()
     try:
-        run(server, patch, a.max, max_pid[0])
+        run(server, patch, a.max, max_pid[0], os.path.abspath(log))
     finally:
         patch.send('/close')
         server.stop()
