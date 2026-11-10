@@ -1944,7 +1944,8 @@ struct http_error_ignored
   {
   }
 };
-std::string http_client_log(uint16_t port, const std::string& path)
+std::string http_client_log(
+    uint16_t port, const std::string& path, const std::string& host = "127.0.0.1")
 {
   std::ostringstream log;
   auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(log);
@@ -1952,8 +1953,8 @@ std::string http_client_log(uint16_t port, const std::string& path)
   sinks.push_back(sink);
   boost::asio::io_context ctx;
   using request = ossia::net::http_get_request<http_ignored, http_error_ignored>;
-  std::make_shared<request>(http_ignored{}, http_error_ignored{}, ctx, "127.0.0.1", path)
-      ->resolve("127.0.0.1", std::to_string(port));
+  std::make_shared<request>(http_ignored{}, http_error_ignored{}, ctx, host, path)
+      ->resolve(host, std::to_string(port));
   ctx.run_for(std::chrono::seconds(2));
   sinks.pop_back();
   return log.str();
@@ -1969,6 +1970,27 @@ TEST_CASE("C API: the HTTP client does not log a 204 as an error", "[network_c]"
   settle();
   REQUIRE(http_client_log(s.ws, "/so?VALUE").find("HTTP Error") == std::string::npos);
   REQUIRE(http_client_log(s.ws, "/nothing").find("status code 404") != std::string::npos);
+}
+
+// "HTTP Error: Host not found (authoritative)" in the console of Max said
+// neither which device nor which request: the line names both
+TEST_CASE("C API: an HTTP error names the host and the request", "[network_c]")
+{
+  const auto unknown = http_client_log(1234, "/f?VALUE", "prism-host.invalid");
+  INFO(unknown);
+  REQUIRE(unknown.find("HTTP Error") != std::string::npos);
+  REQUIRE(unknown.find("prism-host.invalid:1234/f?VALUE") != std::string::npos);
+
+  const auto closed_port = free_port(true);
+  const auto refused = http_client_log(closed_port, "/f");
+  INFO(refused);
+  REQUIRE(refused.find("127.0.0.1:" + std::to_string(closed_port) + "/f") != std::string::npos);
+
+  server s{"c_http_named", 0, "127.0.0.1"};
+  settle();
+  const auto missing = http_client_log(s.ws, "/nothing");
+  INFO(missing);
+  REQUIRE(missing.find("127.0.0.1:" + std::to_string(s.ws) + "/nothing: status code 404") != std::string::npos);
 }
 
 namespace

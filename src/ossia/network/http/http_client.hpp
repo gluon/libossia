@@ -46,6 +46,7 @@ public:
       : m_resolver{boost::asio::make_strand(ctx)}
       , m_stream{boost::asio::make_strand(ctx)}
       , m_host{server}
+      , m_target{server + path}
       , m_fun{std::move(f)}
       , m_err{std::move(err)}
   {
@@ -65,6 +66,9 @@ public:
 
   void resolve(const std::string& server, const std::string& port)
   {
+    // What an error names: the host as it is resolved, and the request
+    const auto path = m_target.substr(std::min(m_target.find('/'), m_target.size()));
+    m_target = server + ":" + port + path;
     m_resolver.async_resolve(
         server, port,
         [self = this->shared_from_this()](
@@ -110,7 +114,7 @@ private:
   {
     if(ec)
     {
-      ossia::logger().error("HTTP Error: {}", ec.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
       m_err(*this);
       return;
     }
@@ -128,7 +132,7 @@ private:
   {
     if(ec)
     {
-      ossia::logger().error("HTTP Error: {}", ec.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
       m_err(*this);
       return;
     }
@@ -145,7 +149,7 @@ private:
   {
     if(ec)
     {
-      ossia::logger().error("HTTP Error: {}", ec.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
       m_err(*this);
       return;
     }
@@ -166,7 +170,7 @@ private:
     if(ec && ec != boost::beast::http::error::end_of_stream
        && ec != boost::asio::error::eof)
     {
-      ossia::logger().error("HTTP Error: {}", ec.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
       m_err(*this);
       return;
     }
@@ -181,7 +185,7 @@ private:
     }
     if(status != 200)
     {
-      ossia::logger().error("HTTP Error: status code {}", (int)status);
+      ossia::logger().error("HTTP Error: {}: status code {}", m_target, (int)status);
       m_err(*this);
       close();
       return;
@@ -205,6 +209,7 @@ private:
   boost::beast::http::request<boost::beast::http::empty_body> m_req;
   boost::beast::http::response_parser<boost::beast::http::string_body> m_parser;
   std::string m_host;
+  std::string m_target;
   Fun m_fun;
   Err m_err;
 };
