@@ -1599,3 +1599,17 @@ TEST_CASE("C API: an unknown attribute is 204 without a body", "[network_c]")
   REQUIRE(http_status(s.ws, "/ctn/sub?VALUE=1") == 200);
   REQUIRE(member_of(s.ws, "/ctn/sub?VALUE=1", "VALUE") == member_of(s.ws, "/ctn/sub", "VALUE"));
 }
+
+// The proposal: the fragment of the URL is stripped and disregarded
+TEST_CASE("C API: the fragment of a URL is disregarded", "[network_c]")
+{
+  server s{"c_fragment_server"};
+  auto level = float_parameter(s.dev, "/level");
+  ossia_parameter_push_f(level, 0.5f);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  REQUIRE(http_status(s.ws, "/level#frag") == 200);
+  REQUIRE(http_get(s.ws, "/level#frag") == http_get(s.ws, "/level"));
+  REQUIRE(http_get(s.ws, "/level?VALUE#frag") == "{\"VALUE\":0.5}");
+  REQUIRE(http_status(s.ws, "/nothing#frag") == 404);
+}
