@@ -142,7 +142,8 @@ bool oscquery_server_protocol::push_impl(const T& addr, const ossia::value& v)
   auto val = bound_value(addr, v);
   if(val.valid())
   {
-    // Push to all clients
+    const std::string_view address = ossia::net::osc_address(addr);
+    // Push to the clients that listen to it
     auto critical = addr.get_critical();
     if(!critical)
     {
@@ -150,6 +151,8 @@ bool oscquery_server_protocol::push_impl(const T& addr, const ossia::value& v)
       for(auto& client_p : m_clients)
       {
         auto& client = *client_p;
+        if(!client.listens_to(address))
+          continue;
         if(client.sender)
         {
           if(m_logger.outbound_logger)
@@ -177,6 +180,8 @@ bool oscquery_server_protocol::push_impl(const T& addr, const ossia::value& v)
       for(auto& client_p : m_clients)
       {
         auto& client = *client_p;
+        if(!client.listens_to(address))
+          continue;
         if(m_logger.outbound_logger)
         {
           m_logger.outbound_logger->info(
@@ -265,6 +270,7 @@ bool oscquery_server_protocol::echo_incoming_message(
     const ossia::value& val)
 {
   bool not_this_protocol = &id.protocol != this;
+  const std::string_view address = ossia::net::osc_address(addr);
   // we know that the value is valid
   // Push to all clients except ours
   auto critical = addr.get_critical();
@@ -275,6 +281,8 @@ bool oscquery_server_protocol::echo_incoming_message(
     for(auto& client_p : m_clients)
     {
       auto& client = *client_p;
+      if(!client.listens_to(address))
+        continue;
       if(not_this_protocol || !is_same(client, id))
       {
         if(client.sender)
@@ -305,6 +313,8 @@ bool oscquery_server_protocol::echo_incoming_message(
     for(auto& client_p : m_clients)
     {
       auto& client = *client_p;
+      if(!client.listens_to(address))
+        continue;
       if(not_this_protocol || !is_same(client, id))
       {
 

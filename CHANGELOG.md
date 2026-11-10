@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Behavior changes
 
 - OSCQuery server: `ACCESS` is applied. What a client writes to a read-only parameter (`GET`) is ignored, over UDP, over the WebSocket, as JSON and through a pattern; `?VALUE` on a write-only parameter (`SET`) answers 204. What stops working: a client that writes over the network to a parameter published as `GET`. A value set locally, by the patch or the script, is not affected.
+- OSCQuery server: `LISTEN` filters and `IGNORE` is applied. A client that has sent at least one `LISTEN` gets only the addresses it listens to, one address each: a `LISTEN` on a container delivers nothing below it. A client that never sent `LISTEN` still gets everything. An address counts from the moment the server has read its `LISTEN`: a client that sends several gets, until the last is read, only those already read. What stops working: a client that listens to part of the tree and relied on receiving the rest, for instance a mirror that follows one parameter and reads another one it does not listen to.
 
 ## [2.1.0+prism.11] - 2026-11-09
 

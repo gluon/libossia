@@ -1691,3 +1691,223 @@ TEST_CASE("C API: WebSocket++ server applies ACCESS", "[network_c]")
   access_is_applied(dev, osc, ws, "ws://127.0.0.1:" + std::to_string(ws));
   ossia_device_free(dev);
 }
+
+namespace
+{
+// The addresses a sink received, each once, in order of arrival
+std::vector<std::string> addresses_of(udp_sink& sink)
+{
+  std::lock_guard lock{sink.mutex};
+  std::vector<std::string> out;
+  for(auto& [address, value] : sink.messages)
+    if(std::find(out.begin(), out.end(), address) == out.end())
+      out.push_back(address);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+void clear(udp_sink& sink)
+{
+  std::lock_guard lock{sink.mutex};
+  sink.messages.clear();
+}
+
+using addresses = std::vector<std::string>;
+
+// A client whose values come over UDP, to a sink of its own
+struct udp_follower
+{
+  udp_sink sink{free_port(false)};
+  uint16_t sender = free_port(false);
+  raw_client client;
+
+  explicit udp_follower(const std::string& url)
+      : client{url}
+  {
+    REQUIRE(client.ws.connected());
+    client.stream_to(sink.port(), sender);
+  }
+  void listen(const char* path)
+  {
+    client.ws.send_message(ossia::oscquery::json_writer::listen(path));
+  }
+  void ignore(const char* path)
+  {
+    client.ws.send_message(ossia::oscquery::json_writer::ignore(path));
+  }
+};
+
+// A client whose values come over the WebSocket
+struct ws_follower
+{
+  udp_sink sink{free_port(false)};
+  ossia::net::websocket_client ws{[this](auto&&, auto op, const std::string& data) {
+    if(op == websocketpp::frame::opcode::binary)
+    {
+      std::lock_guard lock{sink.mutex};
+      sink.decode(data.data(), data.size());
+    }
+  }};
+  std::thread thread;
+
+  explicit ws_follower(const std::string& url)
+  {
+    thread = std::thread([this, url] {
+      try
+      {
+        ws.connect_and_run(url);
+      }
+      catch(...)
+      {
+      }
+    });
+    wait_for([&] { return ws.connected(); }, 2000);
+  }
+  ~ws_follower()
+  {
+    ws.stop();
+    thread.join();
+  }
+  void listen(const char* path)
+  {
+    ws.send_message(ossia::oscquery::json_writer::listen(path));
+  }
+};
+
+struct listen_device
+{
+  ossia_parameter_t a, b, sub;
+  explicit listen_device(ossia_device_t dev)
+  {
+    a = float_parameter(dev, "/a");
+    b = float_parameter(dev, "/b");
+    sub = float_parameter(dev, "/ctn/sub");
+  }
+  void push_all(float f)
+  {
+    ossia_parameter_push_f(a, f);
+    ossia_parameter_push_f(b, f);
+    ossia_parameter_push_f(sub, f);
+  }
+};
+
+void listen_filters(ossia_device_t dev, uint16_t osc, const std::string& url)
+{
+  listen_device d{dev};
+  ossia_device_set_echo(dev, 1);
+  settle();
+  udp_follower never{url}, partial{url}, ignoring{url}, container{url}, writer{url};
+  udp_follower unknown{url}, by_query{url};
+  unknown.listen("/nope");
+  by_query.client.ws.send_message(std::string{"/a?LISTEN=TRUE"});
+  partial.listen("/a");
+  ignoring.listen("/a");
+  ignoring.listen("/b");
+  ignoring.ignore("/b");
+  container.listen("/ctn");
+  writer.listen("/b");
+  settle();
+
+  const addresses all{"/a", "/b", "/ctn/sub"};
+  auto check = [&](const addresses& for_writer) {
+    settle();
+    REQUIRE(addresses_of(never.sink) == all);
+    REQUIRE(addresses_of(partial.sink) == addresses{"/a"});
+    REQUIRE(addresses_of(ignoring.sink) == addresses{"/a"});
+    REQUIRE(addresses_of(container.sink).empty());
+    REQUIRE(addresses_of(unknown.sink).empty());
+    REQUIRE(addresses_of(by_query.sink) == addresses{"/a"});
+    REQUIRE(addresses_of(writer.sink) == for_writer);
+    for(auto s : {&never.sink, &partial.sink, &ignoring.sink, &container.sink, &unknown.sink,
+                  &by_query.sink, &writer.sink})
+      clear(*s);
+  };
+
+  // A value of the server
+  d.push_all(0.5f);
+  check({"/b"});
+
+  // A value of another client, forwarded by the echo
+  for(const char* path : {"/a", "/b", "/ctn/sub"})
+    send_osc_float("127.0.0.1", osc, path, 0.75f);
+  check({"/b"});
+
+  // Over the WebSocket, for a critical parameter
+  ossia_parameter_set_critical(d.a, 1);
+  ossia_parameter_set_critical(d.b, 1);
+  ws_follower ws_partial{url}, ws_never{url};
+  ws_partial.listen("/a");
+  settle();
+  ossia_parameter_push_f(d.a, 0.1f);
+  ossia_parameter_push_f(d.b, 0.1f);
+  settle();
+  REQUIRE(addresses_of(ws_partial.sink) == addresses{"/a"});
+  REQUIRE(addresses_of(ws_never.sink) == addresses{"/a", "/b"});
+  clear(ws_partial.sink);
+  clear(ws_never.sink);
+
+  // A critical value of another client, forwarded by the echo
+  for(const char* path : {"/a", "/b"})
+    send_osc_float("127.0.0.1", osc, path, 0.2f);
+  settle();
+  REQUIRE(addresses_of(ws_partial.sink) == addresses{"/a"});
+  REQUIRE(addresses_of(ws_never.sink) == addresses{"/a", "/b"});
+}
+}
+
+TEST_CASE("C API: asio server filters by LISTEN", "[network_c]")
+{
+  server s{"c_listen_asio", 0, "127.0.0.1"};
+  listen_filters(s.dev, s.osc, s.url());
+}
+
+TEST_CASE("C API: WebSocket++ server filters by LISTEN", "[network_c]")
+{
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_listen_wspp");
+  REQUIRE(dev);
+  listen_filters(dev, osc, "ws://127.0.0.1:" + std::to_string(ws));
+  ossia_device_free(dev);
+}
+
+// A bundle holds several addresses: each client gets those it listens to
+TEST_CASE("C API: a bundle follows what each client listens to", "[network_c]")
+{
+  server s{"c_listen_bundle", 0, "127.0.0.1"};
+  listen_device d{s.dev};
+  settle();
+  udp_follower never{s.url()}, partial{s.url()}, none{s.url()};
+  partial.listen("/a");
+  none.listen("/ctn");
+  settle();
+
+  ossia_parameter_t params[]{d.a, d.b, d.sub};
+  ossia_value_t values[]{ossia_value_create_float(1.f), ossia_value_create_float(2.f),
+                         ossia_value_create_float(3.f)};
+  ossia_device_push_bundle(s.dev, params, values, 3);
+  for(auto v : values)
+    ossia_value_free(v);
+  settle();
+
+  REQUIRE(addresses_of(never.sink) == addresses{"/a", "/b", "/ctn/sub"});
+  REQUIRE(addresses_of(partial.sink) == addresses{"/a"});
+  REQUIRE(addresses_of(none.sink).empty());
+}
+
+// A client that does not listen to an address was sent nothing there: its
+// write cannot have crossed anything, and it gets no answer
+TEST_CASE("C API: no answer to a crossing on an address not listened to", "[network_c]")
+{
+  server s{"c_listen_crossing", 0, "127.0.0.1"};
+  listen_device d{s.dev};
+  settle();
+  udp_follower writer{s.url()};
+  writer.listen("/b");
+  settle();
+
+  ossia_parameter_push_f(d.a, 0.5f);
+  send_osc_float("127.0.0.1", s.osc, "/a", 0.75f, "127.0.0.1", writer.sender);
+  REQUIRE(wait_for([&] { return value_of(d.a) == 0.75f; }, 2000));
+  settle();
+  REQUIRE(addresses_of(writer.sink).empty());
+}

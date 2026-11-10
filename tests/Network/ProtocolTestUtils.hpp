@@ -254,6 +254,9 @@ void test_comm_generic(
       rem.remote_device.get_protocol().observe(*val, true);
     }
   }
+  // An OSCQuery client gets only what it listens to, from the moment the server
+  // has read each LISTEN
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
   push_all_values(local_addr, remote_addr);
 

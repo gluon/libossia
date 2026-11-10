@@ -180,7 +180,9 @@ protected:
   template <typename T>
   bool push_impl(const T& addr, const ossia::value& v);
 
-  bool write_impl(std::string_view data, bool critical);
+  void write_to(oscquery_client& client, std::string_view data, bool critical);
+  template <typename Elements, typename AddressOf, typename Send>
+  bool write_to_listeners(Elements& elements, AddressOf address_of, Send send);
 
   void update_zeroconf();
   // Exceptions here will be catched by the server

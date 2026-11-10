@@ -165,36 +165,48 @@ struct ws_client_socket
   }
 };
 
-bool oscquery_server_protocol_base::write_impl(std::string_view data, bool critical)
+void oscquery_server_protocol_base::write_to(
+    oscquery_client& client, std::string_view data, bool critical)
 {
-  // Push to all clients
-  if(!critical)
-  {
-    lock_t lock(m_clientsMutex);
-    for(auto& client_p : m_clients)
-    {
-      auto& client = *client_p;
-      if(client.osc_socket)
-      {
-        client.osc_socket->write(data.data(), data.size());
-      }
-      else
-      {
-        m_websocketServer->send_binary_message(client.connection, data);
-      }
-    }
-  }
+  if(!critical && client.osc_socket)
+    client.osc_socket->write(data.data(), data.size());
   else
-  {
-    lock_t lock(m_clientsMutex);
-    for(auto& client_p : m_clients)
-    {
-      auto& client = *client_p;
-      m_websocketServer->send_binary_message(client.connection, data);
-    }
-  }
+    m_websocketServer->send_binary_message(client.connection, data);
+}
 
-  return true;
+// A bundle holds several addresses, and each client gets those it listens to:
+// the clients that get them all share one bundle.
+template <typename Elements, typename AddressOf, typename Send>
+bool oscquery_server_protocol_base::write_to_listeners(
+    Elements& elements, AddressOf address_of, Send send)
+{
+  using element = std::decay_t<decltype(*std::begin(elements))>;
+  lock_t lock(m_clientsMutex);
+  bool ok = true;
+  std::vector<oscquery_client*> whole;
+  for(auto& client_p : m_clients)
+  {
+    auto& client = *client_p;
+    std::vector<element> subset;
+    for(auto& e : elements)
+      if(client.listens_to(address_of(e)))
+        subset.push_back(e);
+
+    if(subset.size() == std::size(elements))
+      whole.push_back(&client);
+    else if(!subset.empty())
+      ok &= send(subset, [&](std::string_view data, bool critical) {
+        write_to(client, data, critical);
+        return true;
+      });
+  }
+  if(!whole.empty())
+    ok &= send(elements, [&](std::string_view data, bool critical) {
+      for(auto* client : whole)
+        write_to(*client, data, critical);
+      return true;
+    });
+  return ok;
 }
 
 template <typename T>
@@ -209,8 +221,9 @@ bool oscquery_server_protocol_base::push_impl(const T& addr, const ossia::value&
   auto val = bound_value(addr, v);
   if(val.valid())
   {
-    record_sent(ossia::net::osc_address(addr), val);
-    // Push to all clients
+    const std::string_view address = ossia::net::osc_address(addr);
+    record_sent(std::string{address}, val);
+    // Push to the clients that listen to it
     auto critical = m_forceWS || addr.get_critical();
     if(!critical)
     {
@@ -218,6 +231,8 @@ bool oscquery_server_protocol_base::push_impl(const T& addr, const ossia::value&
       for(auto& client_p : m_clients)
       {
         auto& client = *client_p;
+        if(!client.listens_to(address))
+          continue;
         if(client.osc_socket)
         {
           if(m_logger.outbound_logger)
@@ -247,6 +262,8 @@ bool oscquery_server_protocol_base::push_impl(const T& addr, const ossia::value&
       for(auto& client_p : m_clients)
       {
         auto& client = *client_p;
+        if(!client.listens_to(address))
+          continue;
         if(m_logger.outbound_logger)
         {
           m_logger.outbound_logger->info(
@@ -281,13 +298,15 @@ bool oscquery_server_protocol_base::push_bundle(
 
   for(auto* p : addresses)
     record_sent(ossia::net::osc_address(*p), p->value());
-  if(auto bundle = ossia::net::make_bundle(
-         ossia::net::bundle_client_policy<OscVersion>{}, addresses))
-  {
-    return write_impl(
-        std::string_view{bundle->data.data(), bundle->data.size()}, bundle->critical);
-  }
-  return false;
+  return write_to_listeners(
+      addresses, [](auto* p) -> std::string_view { return ossia::net::osc_address(*p); },
+      [](const auto& list, auto write) {
+    if(auto bundle
+       = ossia::net::make_bundle(ossia::net::bundle_client_policy<OscVersion>{}, list))
+      return write(
+          std::string_view{bundle->data.data(), bundle->data.size()}, bundle->critical);
+    return false;
+      });
 }
 
 bool oscquery_server_protocol_base::push_raw_bundle(
@@ -298,13 +317,15 @@ bool oscquery_server_protocol_base::push_raw_bundle(
 
   for(auto& p : addresses)
     record_sent(ossia::net::osc_address(p), p.value());
-  if(auto bundle = ossia::net::make_bundle(
-         ossia::net::bundle_client_policy<OscVersion>{}, addresses))
-  {
-    return write_impl(
-        std::string_view{bundle->data.data(), bundle->data.size()}, bundle->critical);
-  }
-  return false;
+  return write_to_listeners(
+      addresses, [](auto& p) -> std::string_view { return ossia::net::osc_address(p); },
+      [](const auto& list, auto write) {
+    if(auto bundle
+       = ossia::net::make_bundle(ossia::net::bundle_client_policy<OscVersion>{}, list))
+      return write(
+          std::string_view{bundle->data.data(), bundle->data.size()}, bundle->critical);
+    return false;
+      });
 }
 
 // A bundle of values, each element with its own value (a parameter may come
@@ -348,9 +369,13 @@ bool oscquery_server_protocol_base::push_bundle(std::span<ossia::bundle_element>
   using OscVersion = ossia::net::osc_extended_policy;
   for(auto& [param, value] : elements)
     record_sent(ossia::net::osc_address(*param), value);
-  return push_values_bundle(
-      elements, ossia::net::bundle_server_policy<OscVersion>{},
-      [this](std::string_view data, bool critical) { return write_impl(data, critical); });
+  return write_to_listeners(
+      elements,
+      [](auto& e) -> std::string_view { return ossia::net::osc_address(*e.parameter); },
+      [](auto& list, auto write) {
+    return push_values_bundle(
+        std::span<ossia::bundle_element>(list), ossia::net::bundle_server_policy<OscVersion>{}, write);
+      });
 }
 
 bool oscquery_server_protocol_base::push_bundle_bounded(
@@ -359,9 +384,13 @@ bool oscquery_server_protocol_base::push_bundle_bounded(
   using OscVersion = ossia::net::osc_extended_policy;
   for(auto& [param, value] : elements)
     record_sent(ossia::net::osc_address(*param), value);
-  return push_values_bundle(
-      elements, ossia::net::bundle_bounded_server_policy<OscVersion>{},
-      [this](std::string_view data, bool critical) { return write_impl(data, critical); });
+  return write_to_listeners(
+      elements,
+      [](auto& e) -> std::string_view { return ossia::net::osc_address(*e.parameter); },
+      [](auto& list, auto write) {
+    return push_values_bundle(
+        std::span<ossia::bundle_element>(list), ossia::net::bundle_bounded_server_policy<OscVersion>{}, write);
+      });
 }
 
 bool oscquery_server_protocol_base::echo_incoming_message(
@@ -374,7 +403,8 @@ bool oscquery_server_protocol_base::echo_incoming_message(
       net::parameter_base, osc_extended_policy, socket_writer<udp_send_socket>>;
 
   bool not_this_protocol = &id.protocol != this;
-  record_sent(ossia::net::osc_address(addr), val, not_this_protocol ? 0 : id.identifier);
+  const std::string_view address = ossia::net::osc_address(addr);
+  record_sent(std::string{address}, val, not_this_protocol ? 0 : id.identifier);
   // we know that the value is valid
   // Push to all clients except ours
   auto critical = addr.get_critical();
@@ -385,6 +415,8 @@ bool oscquery_server_protocol_base::echo_incoming_message(
     for(auto& client_p : m_clients)
     {
       auto& client = *client_p;
+      if(!client.listens_to(address))
+        continue;
       if(not_this_protocol || !is_same(client, id))
       {
         if(client.osc_socket)
@@ -417,6 +449,8 @@ bool oscquery_server_protocol_base::echo_incoming_message(
     for(auto& client_p : m_clients)
     {
       auto& client = *client_p;
+      if(!client.listens_to(address))
+        continue;
       if(not_this_protocol || !is_same(client, id))
       {
 
@@ -819,6 +853,9 @@ void oscquery_server_protocol_base::answer_crossing(
     auto& client = *client_p;
     if((uintptr_t)client.connection.lock().get() != origin)
       continue;
+    // It was sent nothing there: its write cannot have crossed anything
+    if(!client.listens_to(address))
+      return;
     if(m_logger.outbound_logger)
       m_logger.outbound_logger->info("Out: {} {}", address, value);
     if(client.osc_socket && !param->get_critical())
