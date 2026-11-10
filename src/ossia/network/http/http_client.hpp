@@ -28,6 +28,7 @@ public:
       , m_socket(ctx)
       , m_fun{std::move(f)}
       , m_err{std::move(err)}
+      , m_target{server + path}
   {
     m_request.reserve(100 + server.size() + path.size());
     m_response.prepare(Fun::reserve_expect);
@@ -51,6 +52,9 @@ public:
 
   void resolve(const std::string& server, const std::string& port)
   {
+    // What an error names: the host as it is resolved, and the request
+    const auto path = m_target.substr(std::min(m_target.find('/'), m_target.size()));
+    m_target = server + ":" + port + path;
     m_resolver.async_resolve(
         server, port,
         [self = this->shared_from_this()](
@@ -79,7 +83,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, err.message());
       m_err(*this);
     }
   }
@@ -98,7 +102,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, err.message());
       m_err(*this);
     }
   }
@@ -116,7 +120,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, err.message());
       m_err(*this);
     }
   }
@@ -135,7 +139,7 @@ private:
       std::getline(response_stream, status_message);
       if(!response_stream || http_version.substr(0, 5) != "HTTP/")
       {
-        ossia::logger().error("HTTP Error: Invalid response");
+        ossia::logger().error("HTTP Error: {}: invalid response", m_target);
         return;
       }
       // No content: the server has nothing to say about what was asked
@@ -144,7 +148,7 @@ private:
       m_status = status_code;
       if(status_code != 200)
       {
-        ossia::logger().error("HTTP Error: status code {}", status_code);
+        ossia::logger().error("HTTP Error: {}: status code {}", m_target, status_code);
         m_err(*this);
         return;
       }
@@ -159,7 +163,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, err.message());
       m_err(*this);
     }
   }
@@ -217,7 +221,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, err.message());
       m_err(*this);
     }
   }
@@ -228,7 +232,7 @@ private:
       finish_read(err, size);
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      ossia::logger().error("HTTP Error: {}: {}", m_target, err.message());
       m_err(*this);
     }
   }
@@ -253,5 +257,6 @@ private:
   Fun m_fun;
   Err m_err;
   unsigned int m_status{};
+  std::string m_target;
 };
 }
