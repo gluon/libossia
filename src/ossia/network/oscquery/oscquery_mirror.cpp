@@ -1246,6 +1246,27 @@ bool oscquery_mirror_protocol::on_BinaryWSMessage(
   return {};
 }
 
+void oscquery_mirror_protocol::refresh_unfollowed(const std::string& address)
+{
+  using namespace std::chrono;
+  const auto now = steady_clock::now();
+  {
+    std::lock_guard lock{m_unfollowedMutex};
+    auto& r = m_unfollowed[address];
+    // An answer that never comes does not hold the address for good
+    const bool in_flight = r.answer.valid()
+                           && r.answer.wait_for(seconds(0)) != std::future_status::ready
+                           && now - r.asked < seconds(1);
+    if(in_flight || now - r.asked < refresh_interval)
+      return;
+    std::promise<void> promise;
+    r.answer = promise.get_future();
+    r.asked = now;
+    m_getWSPromises.enqueue(get_ws_promise{std::move(promise), address});
+  }
+  http_send_message(address + std::string{detail::query_value()});
+}
+
 ossia::value read_followed_value(ossia::net::parameter_base& param)
 {
   auto* mirror = dynamic_cast<oscquery_mirror_protocol*>(
@@ -1254,7 +1275,7 @@ ossia::value read_followed_value(ossia::net::parameter_base& param)
   if(mirror && param.callback_count() == 0
      && param.get_access() != ossia::access_mode::SET
      && !mirror->written_recently(param.get_node().osc_address()))
-    return param.fetch_value();
+    mirror->refresh_unfollowed(param.get_node().osc_address());
   return param.value();
 }
 
