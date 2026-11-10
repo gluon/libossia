@@ -853,7 +853,7 @@ try
   // replaces what was sent
   auto sent = origin ? sent_within_window(m.AddressPattern(), origin) : std::nullopt;
   ossia::net::on_input_message<true>(
-      m.AddressPattern(), ossia::net::osc_message_applier{id, m}, m_listening, *m_device,
+      m.AddressPattern(), ossia::net::osc_client_message_applier{{id, m}}, m_listening, *m_device,
       m_logger);
   if(sent)
     answer_crossing(m.AddressPattern(), origin, *sent);

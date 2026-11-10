@@ -154,6 +154,17 @@ public:
             }
           }
 
+          // The value of a write-only parameter cannot be read
+          if(auto param = node->get_parameter();
+             param && param->get_access() == ossia::access_mode::SET)
+          {
+            attributes.erase(
+                std::remove(
+                    attributes.begin(), attributes.end(),
+                    std::string{detail::attribute_value()}),
+                attributes.end());
+          }
+
           if(!attributes.empty())
           {
             return oscquery::json_writer::query_attributes(*node, attributes);
