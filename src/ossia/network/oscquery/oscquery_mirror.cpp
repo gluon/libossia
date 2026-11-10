@@ -1262,7 +1262,9 @@ void oscquery_mirror_protocol::refresh_unfollowed(const std::string& address)
     std::promise<void> promise;
     r.answer = promise.get_future();
     r.asked = now;
-    m_getWSPromises.enqueue(get_ws_promise{std::move(promise), address});
+    // A callback added while the request is in flight (a Remote that binds
+    // reads the value, then follows it) gets the answer only if it differs
+    m_getWSPromises.enqueue(get_ws_promise{std::move(promise), address, true});
   }
   http_send_message(address + std::string{detail::query_value()});
 }
