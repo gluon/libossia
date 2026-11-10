@@ -11,12 +11,13 @@ every reply prefixed "td".
 
 Commands:
   hello                                   -> ready
-  serve <name> <http> <osc>               COMP probe with a Float Value, published -> served <status>
+  serve <name> <http> <osc>               COMP probe with Floats Value and Other, published -> served <status>
   follow addr <host> <port> <address>     prism_oscquery on ws://host:port
   follow name <name> <address>            prism_oscquery, Discover on, the device of that name
   status                                  -> status <bound 0|1> <Status>
   unfollow
   set <v>                                 the followed leaf, or Value when serving
+  other <v>                               Other of the probe, which no client of the bench follows
   read                                    -> value <v>
   stats                                   -> stats <received> <sent> <echoes>
   quit
@@ -67,7 +68,9 @@ def command(words):
         tell('ready')
     elif w == 'serve':
         probe = root.create(baseCOMP, 'probe')
-        probe.appendCustomPage('Probe').appendFloat('Value')
+        page = probe.appendCustomPage('Probe')
+        page.appendFloat('Value')
+        page.appendFloat('Other')
         server = root.loadTox(project.folder + '/prism_oscquery_server.tox')
         server.name = 'cross_server'
         server.par.Target = probe
@@ -107,6 +110,9 @@ def command(words):
         p = leaf()
         if p is not None:
             p.val = float(words[1])
+    elif w == 'other':
+        if state['probe'] is not None:
+            state['probe'].par.Other = float(words[1])
     elif w == 'read':
         p = leaf()
         tell('value ' + ('-' if p is None else '%g' % p.eval()))
