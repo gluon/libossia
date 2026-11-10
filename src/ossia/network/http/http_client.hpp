@@ -62,6 +62,9 @@ public:
 
   void close() { m_socket.close(); }
 
+  //! The status of the answer, once it came
+  unsigned int status() const noexcept { return m_status; }
+
 private:
   void handle_resolve(
       const boost::system::error_code& err, const tcp::resolver::results_type& endpoints)
@@ -138,9 +141,11 @@ private:
       // No content: the server has nothing to say about what was asked
       if(status_code == 204)
         return;
+      m_status = status_code;
       if(status_code != 200)
       {
         ossia::logger().error("HTTP Error: status code {}", status_code);
+        m_err(*this);
         return;
       }
 
@@ -247,5 +252,6 @@ private:
   int m_contentLength{-1};
   Fun m_fun;
   Err m_err;
+  unsigned int m_status{};
 };
 }

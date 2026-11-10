@@ -44,6 +44,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -2096,6 +2097,8 @@ struct fake_device
   std::vector<std::string> commands;
   std::atomic<float> value{1.f};
   std::atomic_int value_requests{0};
+  std::map<std::string, std::string> extra; // path -> JSON of the node
+  ossia::net::websocket_server::connection_handler client;
   ossia::net::websocket_server ws;
   std::thread thread;
 
@@ -2103,7 +2106,10 @@ struct fake_device
   {
     host_info = "{\"NAME\":\"fake\",\"OSC_PORT\":" + std::to_string(free_port(false))
                 + ",\"OSC_TRANSPORT\":\"UDP\",\"EXTENSIONS\":{" + extensions + "}}";
-    ws.set_open_handler([](auto) {});
+    ws.set_open_handler([this](auto hdl) {
+      std::lock_guard lock{mutex};
+      client = hdl;
+    });
     ws.set_close_handler([](auto) {});
     ws.set_message_handler([this](auto, auto, const std::string& text) {
       ossia::net::server_reply reply;
@@ -2115,6 +2121,11 @@ struct fake_device
         value_requests++;
         reply.data = "{\"VALUE\":" + std::to_string(value.load()) + "}";
       }
+      else if(auto node = extra_node(text); !node.empty())
+        reply.data = node;
+      else if(text.size() > 1 && text[0] == '/' && text.find('?') == std::string::npos
+              && text != "/f" && text != "/so")
+        throw ossia::node_not_found_error{text};
       else if(!text.empty() && text[0] == '/')
         reply.data = "{\"FULL_PATH\":\"/\",\"ACCESS\":0,\"CONTENTS\":{"
                      "\"f\":{\"FULL_PATH\":\"/f\",\"TYPE\":\"f\",\"ACCESS\":3,\"VALUE\":1.0},"
@@ -2135,6 +2146,27 @@ struct fake_device
     thread.join();
   }
   std::string url() const { return "ws://127.0.0.1:" + std::to_string(port); }
+  std::string extra_node(const std::string& path)
+  {
+    std::lock_guard lock{mutex};
+    auto it = extra.find(path);
+    return it == extra.end() ? std::string{} : it->second;
+  }
+  void set_node(const std::string& path, const std::string& json)
+  {
+    std::lock_guard lock{mutex};
+    extra[path] = json;
+  }
+  void remove_node(const std::string& path)
+  {
+    std::lock_guard lock{mutex};
+    extra.erase(path);
+  }
+  void send(const std::string& text) { ws.send_message(client, text); }
+  void path_changed(const std::string& path)
+  {
+    send("{\"COMMAND\":\"PATH_CHANGED\",\"DATA\":\"" + path + "\"}");
+  }
   int count(const std::string& what)
   {
     std::lock_guard lock{mutex};
@@ -2243,4 +2275,58 @@ TEST_CASE("C API: a mirror listens again after a reconnection", "[network_c]")
   mirror again{s->url(), "c_relisten_m"};
   ossia_parameter_add_callback(find_parameter(again.dev, "/a"), noop, nullptr);
   REQUIRE(listened() == std::vector<std::string>{"/a"});
+}
+
+// The proposal: PATH_CHANGED says a method changed, and the client asks for
+// its structure
+TEST_CASE("C API: a mirror reads again the address of a PATH_CHANGED", "[network_c]")
+{
+  fake_device d{"\"LISTEN\":true"};
+  settle();
+  mirror m{d.url(), "c_path_changed"};
+  auto root = ossia_device_get_root_node(m.dev);
+  auto apply_until = [&](const std::function<bool()>& done) {
+    return wait_for([&] {
+      ossia_device_run_commands(m.dev);
+      return done();
+    }, 3000);
+  };
+  auto node_json = [](const char* value) {
+    return std::string{"{\"FULL_PATH\":\"/new\",\"TYPE\":\"f\",\"ACCESS\":3,\"VALUE\":"} + value + "}";
+  };
+
+  // A method that appears
+  d.set_node("/new", node_json("1.5"));
+  d.path_changed("/new");
+  REQUIRE(apply_until([&] { return find_parameter(m.dev, "/new") != nullptr; }));
+  auto noop = [](void*, ossia_value_t) {};
+  auto p = find_parameter(m.dev, "/new");
+  ossia_parameter_add_callback(p, noop, nullptr); // read the local value
+  REQUIRE(value_of(p) == 1.5f);
+
+  // A method that changes
+  d.set_node("/new", node_json("2.5"));
+  d.path_changed("/new");
+  REQUIRE(apply_until([&] { return value_of(p) == 2.5f; }));
+
+  // A method that goes: the server answers 404
+  d.remove_node("/new");
+  d.path_changed("/new");
+  auto zombie = [&] {
+    auto node = static_cast<ossia::net::node_base*>(ossia_node_find(root, "/new"));
+    return !node || bool(ossia::net::get_zombie(node->get_extended_attributes()));
+  };
+  REQUIRE(apply_until(zombie));
+
+  // The whole tree
+  d.path_changed("/");
+  settle();
+  ossia_device_run_commands(m.dev);
+  REQUIRE(find_parameter(m.dev, "/f"));
+
+  // What is not a path is ignored
+  d.send("{\"COMMAND\":\"PATH_CHANGED\",\"DATA\":12}");
+  settle();
+  ossia_device_run_commands(m.dev);
+  REQUIRE(find_parameter(m.dev, "/f"));
 }
