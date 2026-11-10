@@ -128,10 +128,8 @@
           "id": "cl",
           "maxclass": "newobj",
           "numinlets": 1,
-          "numoutlets": 3,
+          "numoutlets": 1,
           "outlettype": [
-            "",
-            "",
             ""
           ],
           "patching_rect": [
@@ -337,18 +335,6 @@
           ],
           "destination": [
             "tx",
-            0
-          ]
-        }
-      },
-      {
-        "patchline": {
-          "source": [
-            "cl",
-            2
-          ],
-          "destination": [
-            "pc",
             0
           ]
         }
