@@ -129,6 +129,10 @@ public:
   //! that is none of the clients, the last 256 to send: IP, PORT, PACKETS,
   //! LAST_MS (since its last packet).
   std::string query_connections();
+  //! The answer to ?PEERS, the same under a neutral name: what the server cannot
+  //! fill is omitted, and the senders come most recent first, without those
+  //! a client has since declared
+  std::string query_peers();
 
   Nano::Signal<void(const std::string&)> onClientConnected;
   Nano::Signal<void(const std::string&)> onClientDisconnected;
@@ -148,7 +152,8 @@ protected:
   void record_sender(const std::string& ip, uint16_t port);
   // PRISM_NAME, a text command a client sends on the WebSocket to give its
   // name; true if the message was one
-  bool on_prism_name(const connection_handler& hdl, const rapidjson::Document& doc);
+  bool on_client_name(const connection_handler& hdl, const rapidjson::Document& doc);
+  std::string write_connections(bool peers);
 
   // A value the server sent on its own (a local change, another client's
   // value it forwards), to every client but skipped
