@@ -262,14 +262,17 @@ bool announced(const std::string& name, int ms)
 struct server
 {
   uint16_t osc;
-  uint16_t ws = free_port(true);
+  uint16_t ws;
   ossia_network_context_t ctx = ossia_network_context_create();
   ossia_device_t dev{};
   std::atomic_bool polling{true};
   std::thread poller;
 
-  explicit server(const char* name, uint16_t osc_port = 0, const char* bind = nullptr)
+  explicit server(
+      const char* name, uint16_t osc_port = 0, const char* bind = nullptr,
+      uint16_t ws_port = 0)
       : osc{osc_port ? osc_port : free_port(false)}
+      , ws{ws_port ? ws_port : free_port(true)}
   {
     auto multiplex = ossia_protocol_multiplex_create();
     dev = ossia_device_create(multiplex, name);
@@ -2023,20 +2026,35 @@ TEST_CASE("C API: ?PEERS lists the clients and the senders", "[network_c]")
   REQUIRE(doc["SENDERS"][1]["PORT"].GetInt() == first);
   REQUIRE(doc["SENDERS"][0]["LAST_MS"].IsInt64());
 
+  // Whatever the order of the table the server keeps them in
+  std::vector<uint16_t> sources;
+  for(int i = 0; i < 12; i++)
+  {
+    sources.push_back(free_port(false));
+    send_osc_float("127.0.0.1", s.osc, "/level", 0.25f, "127.0.0.1", sources.back());
+    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+  }
+  settle();
+  auto ordered = json_at(s.ws, "/?PEERS");
+  REQUIRE(ordered["SENDERS"].Size() == 14);
+  for(int i = 0; i < 12; i++)
+    REQUIRE(ordered["SENDERS"][i]["PORT"].GetInt() == sources[11 - i]);
+
   // A source that a client has since declared is that client
   udp_sink sink{free_port(false)};
   client.stream_to(sink.port(), first);
   settle();
   auto after = json_at(s.ws, "/?PEERS");
-  REQUIRE(after["SENDERS"].Size() == 1);
-  REQUIRE(after["SENDERS"][0]["PORT"].GetInt() == second);
+  REQUIRE(after["SENDERS"].Size() == 13);
+  for(auto& sender : after["SENDERS"].GetArray())
+    REQUIRE(sender["PORT"].GetInt() != first);
   REQUIRE(after["CLIENTS"][0]["OSC_PORT"].GetInt() == sink.port());
   REQUIRE(after["CLIENTS"][0]["SENDER_PORT"].GetInt() == first);
 
   // ?PRISM_CONNECTIONS does not change
   auto old = json_at(s.ws, "/level?PRISM_CONNECTIONS");
   REQUIRE(!old.HasParseError());
-  REQUIRE(old["SENDERS"].Size() == 2);
+  REQUIRE(old["SENDERS"].Size() == 14);
 
   // At the root only: elsewhere it is an unknown attribute
   REQUIRE(http_status(s.ws, "/level?PEERS") == 204);
@@ -2077,6 +2095,8 @@ struct fake_device
   std::string host_info;
   std::mutex mutex;
   std::vector<std::string> commands;
+  std::atomic<float> value{1.f};
+  std::atomic_int value_requests{0};
   ossia::net::websocket_server ws;
   std::thread thread;
 
@@ -2091,8 +2111,15 @@ struct fake_device
       reply.type = ossia::net::server_reply::data_type::json;
       if(text.find("HOST_INFO") != std::string::npos)
         reply.data = host_info;
+      else if(text.find("?VALUE") != std::string::npos)
+      {
+        value_requests++;
+        reply.data = "{\"VALUE\":" + std::to_string(value.load()) + "}";
+      }
       else if(!text.empty() && text[0] == '/')
-        reply.data = "{\"FULL_PATH\":\"/\",\"CONTENTS\":{}}";
+        reply.data = "{\"FULL_PATH\":\"/\",\"ACCESS\":0,\"CONTENTS\":{"
+                     "\"f\":{\"FULL_PATH\":\"/f\",\"TYPE\":\"f\",\"ACCESS\":3,\"VALUE\":1.0},"
+                     "\"so\":{\"FULL_PATH\":\"/so\",\"TYPE\":\"f\",\"ACCESS\":2,\"VALUE\":1.0}}}";
       else
       {
         std::lock_guard lock{mutex};
