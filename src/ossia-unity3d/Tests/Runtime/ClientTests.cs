@@ -347,6 +347,37 @@ namespace Ossia.Tests
       StringAssert.DoesNotContain ("max_client_" + System.Diagnostics.Process.GetCurrentProcess ().Id, connections);
     }
 
+    // A client gets only what it listens to: the Remote of /level listens to
+    // /level, and a value of /p0, which no Remote follows, does not come.
+    // Read once, after, /p0 still holds the value read with the tree.
+    [UnityTest]
+    public IEnumerator ClientGetsOnlyWhatItsRemotesListenTo ()
+    {
+      yield return Connect (null, 7);
+      yield return Until (() => fields.level == 0.3f, 2);
+      var name = "\"NAME\":\"unity_client_" + client.GetInstanceID () + "_1\"";
+      string entry = "";
+      float end = Time.realtimeSinceStartup + 3;
+      while (!entry.Contains ("\"LISTEN\":[\"/level\"]") && Time.realtimeSinceStartup < end) {
+        string connections;
+        using (var web = new WebClient ())
+          connections = web.DownloadString ("http://127.0.0.1:" + server.WsPort + "/?PRISM_CONNECTIONS");
+        var at = connections.IndexOf (name, StringComparison.Ordinal);
+        entry = at < 0 ? "" : connections.Substring (at, connections.IndexOf ('}', at) - at);
+        yield return new WaitForSecondsRealtime (0.1f);
+      }
+      Debug.Log ("CLIENT listens: " + entry);
+      StringAssert.Contains ("\"LISTEN\":[\"/level\"]", entry, "the client listens to /level only");
+
+      server.P[0].PushValue (0.5f);
+      server.Level.PushValue (0.8f);
+      yield return Until (() => fields.level == 0.8f, 2);
+      Assert.AreEqual (0.8f, fields.level, "the value listened to");
+      yield return new WaitForSecondsRealtime (0.3f);
+      var p0 = Node.FindNode (client.Device.GetRootNode (), "/p0").GetParameter ();
+      Assert.AreEqual (0f, p0.GetValue ().GetFloat (), "a value no Remote follows does not come");
+    }
+
     [UnityTest]
     public IEnumerator ReconnectsWhenTheServerComesBack ()
     {
