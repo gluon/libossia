@@ -11,8 +11,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - OSCQuery server: `ACCESS` is applied. What a client writes to a read-only parameter (`GET`) is ignored, over UDP, over the WebSocket, as JSON and through a pattern; `?VALUE` on a write-only parameter (`SET`) answers 204. What stops working: a client that writes over the network to a parameter published as `GET`. A value set locally, by the patch or the script, is not affected.
 - OSCQuery server: as in the proposal, a client gets only the addresses it sent `LISTEN` for, one address each, and `IGNORE` stops one: a `LISTEN` on a container delivers nothing below it, and a client that never sent `LISTEN` gets no value. An address counts from the moment the server has read its `LISTEN`. The libossia mirror sends `LISTEN` for every parameter that has a callback (`ossia.remote`, `bind` of `ossia.v8connector`, `Ossia.Remote`), and reading a parameter without one asks the server for its value, without waiting: the read returns the last value known, and asks at most every 100 ms for an address (one request in flight, given up after 1 s). Read every frame (an `Update` of Unity, a `metro` on `namespace` in Max), it took 0.5 to 1.2 ms and sent 60 requests per second when it waited for the answer; it now takes 0.01 to 0.03 ms and sends 9 to 10 per second; 50 parameters read in one frame took 67 ms, now 2 to 6 ms. A callback (`ossia.remote`, `Ossia.Remote`) is the way to follow a value. What stops working: a client that relied on receiving values without sending `LISTEN` for them, or on receiving the addresses it did not listen to.
 
+### Added
+
+- OSCQuery server: `?PEERS` and `CLIENT_NAME`, declared in the `EXTENSIONS` of `HOST_INFO` (specification: `propositions/oscquery-peers-extension.md` of PRISM). `?PEERS` answers at the root only: the clients (address, port, the name a client gave, its OSC port, the addresses it listens to, its packet count) and the senders of OSC that are not clients, most recent first; what the server cannot fill is left out. `CLIENT_NAME` names the client that sends it. Tests `C API: ?PEERS ...`.
+- OSCQuery client: the mirror gives its name with `CLIENT_NAME` to a server that declares it, else with `PRISM_NAME` to a server that declares `PRISM_CONNECTIONS`.
+- OSCQuery client: a `PATH_CHANGED` makes the mirror read the address again, as the proposal says: the node is created or reloaded, a 404 removes it as `PATH_REMOVED` does; on the root, the whole tree is read again.
+- `tools/prism-map` reads `?PEERS` when a server declares it, else `?PRISM_CONNECTIONS`.
+
+### Deprecated
+
+- `?PRISM_CONNECTIONS` and `PRISM_NAME`, kept unchanged during the transition to `?PEERS` and `CLIENT_NAME`, are to be removed in a later version.
+
 ### Fixed
 
+- OSCQuery server: `LISTEN` and `IGNORE` with a `DATA` that is not a string are ignored. `{"COMMAND":"LISTEN","DATA":12}` from any peer of the network took the server down.
+- OSCQuery server: a node not found answers 404 and a bad request 400; both ended as 500. A 204 is no longer logged as an error by the HTTP client.
+- OSCQuery server: a number that is not finite and a map are written as `null`: one such parameter made the whole tree unreadable for a strict JSON parser.
+- OSCQuery server: `HOST_INFO` declares `ECHO` as the device has it (it said true with the echo off, the default), and declares `EXTENDED_TYPE`, which it writes.
+- OSCQuery server: a UDP sender is known by its address and its port: two clients on two machines with the same source port were taken for one.
+- OSCQuery server: one `ATTRIBUTES_CHANGED` for a new parameter (there were two), and none after `PATH_REMOVED` for the parameter of the removed node.
+- OSCQuery server: an attribute query agrees with the tree: an attribute a node does not have is `{}`, an attribute the server does not know is 204 (it gave `null`, `"none"` or another value).
+- OSCQuery server: the fragment of a URL is disregarded, as the proposal says.
+- OSCQuery client: the value of a parameter the server adds comes once, however late the second change of the parameter, and when a Remote reads it before following it (it came twice: `ClientTests.AddressAddedLaterGetsItsValueOnce`, `C API: an added parameter read then followed gets its value once`).
+- Max: the listener of `_oscjson._tcp` keeps the connection it is building to a device that withdraws and makes its announcement again: a server that restarted got two connections of the package, the first dropped. Measured with the bench of TouchDesigner 0.3.5: 4 to 5 connections of the package per run, 1 to 2 times two at once, in 5 runs with `2.1.0+prism.11`; 3 per run, one after each restart of the server, never two at once, in 2 runs.
+- Tests: the tests of UDP senders are reported as skipped on a machine with no interface other than the loopback; they counted as passed.
 - OSCQuery client: an HTTP error names the host, the port and the request (`HTTP Error: <host>:<port><request>: <error>`). The line `HTTP Error: Host not found (authoritative)` seen in Max's console named neither: on macOS, a device found by name is reached at the host name of its announcement, which each request of the client resolves again, and a name that does not resolve at that moment gave that line with nothing to tell which device. Test `C API: an HTTP error names the host and the request`.
 
 ## [2.1.0+prism.11] - 2026-11-09
