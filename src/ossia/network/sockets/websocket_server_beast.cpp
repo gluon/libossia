@@ -539,6 +539,16 @@ void websocket_server_beast::on_accept(
     // must not kill the listener — keep accepting.
     if(ec == boost::asio::error::operation_aborted)
       return;
+    // A client that left before it was accepted (a mirror stopped as it
+    // connects, a port scan) is no error: on macOS its reset shows as
+    // EINVAL, when the accepted socket is set up
+    if(ec == boost::asio::error::connection_aborted
+       || ec == boost::asio::error::connection_reset
+       || ec == boost::asio::error::invalid_argument)
+    {
+      do_accept();
+      return;
+    }
     ossia::logger().error("WS accept error: {}", ec.message());
     do_accept();
     return;
