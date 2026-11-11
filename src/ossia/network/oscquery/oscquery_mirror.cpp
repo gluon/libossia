@@ -888,6 +888,14 @@ void oscquery_mirror_protocol::record_sent(
       address, crossing_state::sent_value{std::chrono::steady_clock::now(), v});
 }
 
+bool oscquery_mirror_protocol::written_since(
+    const std::string& address, std::chrono::steady_clock::time_point t)
+{
+  std::lock_guard lock{m_crossing->mutex};
+  auto it = m_crossing->sent.find(address);
+  return it != m_crossing->sent.end() && it->second.time > t;
+}
+
 bool oscquery_mirror_protocol::written_recently(const std::string& address)
 {
   std::lock_guard lock{m_crossing->mutex};
@@ -1075,7 +1083,12 @@ bool oscquery_mirror_protocol::on_WSMessage(
               auto addr = node->get_parameter();
               if(addr)
               {
-                if(!p.only_if_changed || json_parser::value_differs(*addr, *obj_value))
+                // An answer older than a write of this client would bring
+                // back the value the write replaced
+                const bool stale = p.asked != std::chrono::steady_clock::time_point{}
+                                   && written_since(p.address, p.asked);
+                if(!stale
+                   && (!p.only_if_changed || json_parser::value_differs(*addr, *obj_value)))
                 {
                   json_parser::parse_value(*addr, *obj_value);
                   m_device->on_message(*addr);
