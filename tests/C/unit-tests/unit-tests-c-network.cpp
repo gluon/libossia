@@ -26,6 +26,8 @@
 #include <oscpack/osc/OscReceivedElements.h>
 #include <rapidjson/document.h>
 #include <spdlog/sinks/ostream_sink.h>
+#include <websocketpp/base64/base64.hpp>
+#include <websocketpp/sha1/sha1.hpp>
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -2233,6 +2235,100 @@ TEST_CASE("C API: WebSocket++ server: a client that leaves as it connects is no 
   ossia::logger().sinks().pop_back();
   INFO(log.str());
   REQUIRE(log.str().find("on_connectionOpen") == std::string::npos);
+}
+
+namespace
+{
+// A WebSocket server of the test: it accepts one client, then sends it a
+// close frame and keeps the connection, as a server that is slow to end it
+struct closing_server
+{
+  int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+  int client = -1;
+  uint16_t port{};
+  std::atomic_bool done{false};
+  std::thread thread;
+
+  closing_server()
+  {
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    REQUIRE(::bind(listener, (sockaddr*)&addr, sizeof(addr)) == 0);
+    socklen_t len = sizeof(addr);
+    ::getsockname(listener, (sockaddr*)&addr, &len);
+    port = ntohs(addr.sin_port);
+    REQUIRE(::listen(listener, 4) == 0);
+    thread = std::thread([this] {
+      client = ::accept(listener, nullptr, nullptr);
+      if(client < 0)
+        return;
+      std::string request;
+      char buf[1024];
+      while(request.find("\r\n\r\n") == std::string::npos)
+      {
+        auto n = ::recv(client, buf, sizeof(buf), 0);
+        if(n <= 0)
+          return;
+        request.append(buf, n);
+      }
+      const std::string field = "Sec-WebSocket-Key: ";
+      auto k = request.find(field) + field.size();
+      auto key = request.substr(k, request.find("\r\n", k) - k);
+      const auto salted = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+      unsigned char hash[20];
+      websocketpp::sha1::calc(salted.data(), salted.size(), hash);
+      const auto accept = websocketpp::base64_encode(hash, sizeof(hash));
+      const std::string answer = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                 "Connection: Upgrade\r\nSec-WebSocket-Accept: "
+                                 + accept + "\r\n\r\n";
+      ::send(client, answer.data(), answer.size(), 0);
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      // Close, 1001: going away
+      const unsigned char close_frame[] = {0x88, 0x02, 0x03, 0xE9};
+      ::send(client, close_frame, sizeof(close_frame), 0);
+      while(!done)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    });
+  }
+  ~closing_server()
+  {
+    done = true;
+    ::shutdown(listener, SHUT_RDWR);
+    ::close(listener);
+    thread.join();
+    if(client >= 0)
+      ::close(client);
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(port); }
+};
+}
+
+// A mirror stopped while its server closes the connection (a device of
+// TouchDesigner or of Max stopped, then its client in Max) put "Error when
+// stopping WS server" in red in the console of Max
+TEST_CASE("C API: a mirror stopped as its server closes is no error", "[network_c]")
+{
+  std::ostringstream log;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(log);
+  ossia::logger().sinks().push_back(sink);
+  std::chrono::milliseconds stopping{};
+  {
+    closing_server s;
+    auto dev = ossia_device_create(ossia_protocol_oscquery_mirror_create(s.url().c_str()), "c_closing_mirror");
+    REQUIRE(dev);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    const auto t0 = std::chrono::steady_clock::now();
+    ossia_device_free(dev);
+    stopping = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
+  }
+  ossia::logger().sinks().pop_back();
+  INFO(log.str());
+  REQUIRE(log.str().find("Error when stopping WS server") == std::string::npos);
+  // Nor does it wait for the server to end the connection
+  INFO(stopping.count() << " ms");
+  REQUIRE(stopping < std::chrono::milliseconds(1000));
 }
 
 namespace
