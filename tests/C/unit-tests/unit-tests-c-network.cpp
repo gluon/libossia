@@ -2144,6 +2144,99 @@ TEST_CASE("C API: CLIENT_NAME names a client", "[network_c]")
 
 namespace
 {
+// A WebSocket client that opens its connection and resets it at once: with
+// read_answer, once the server has answered the handshake
+void open_and_reset(uint16_t port, bool read_answer)
+{
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  REQUIRE(fd >= 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  REQUIRE(::connect(fd, (sockaddr*)&addr, sizeof(addr)) == 0);
+  const std::string handshake
+      = "GET / HTTP/1.1\r\nHost: 127.0.0.1:" + std::to_string(port)
+        + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n";
+  REQUIRE(::send(fd, handshake.data(), handshake.size(), 0) == (ssize_t)handshake.size());
+  if(read_answer)
+  {
+    std::string answer;
+    char buf[512];
+    while(answer.find("\r\n\r\n") == std::string::npos)
+    {
+      auto n = ::recv(fd, buf, sizeof(buf), 0);
+      if(n <= 0)
+        break;
+      answer.append(buf, n);
+    }
+    REQUIRE(answer.find(" 101 ") != std::string::npos);
+  }
+  linger l{1, 0};
+  ::setsockopt(fd, SOL_SOCKET, SO_LINGER, &l, sizeof(l));
+  ::close(fd);
+}
+}
+
+// A client that leaves as soon as it is connected (a mirror stopped as it
+// connects, a port scan) put "on_connectionOpen: remote_endpoint: Invalid
+// argument" in red in the console of Max
+TEST_CASE("C API: asio server: a client that leaves as it connects is no error", "[network_c]")
+{
+  std::ostringstream log;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(log);
+  ossia::logger().sinks().push_back(sink);
+  {
+    server s{"c_leaves_at_once", 0, "127.0.0.1"};
+    settle();
+    for(int i = 0; i < 200; i++)
+      open_and_reset(s.ws, i % 2 == 0);
+    settle();
+    auto doc = json_at(s.ws, "/?PEERS");
+    REQUIRE(doc["CLIENTS"].Size() == 0);
+
+    // The clients that stay are known by their address and port
+    raw_client client{s.url()};
+    REQUIRE(client.ws.connected());
+    settle();
+    auto after = json_at(s.ws, "/?PEERS");
+    REQUIRE(after["CLIENTS"].Size() == 1);
+    REQUIRE(std::string{after["CLIENTS"][0]["IP"].GetString()} == "127.0.0.1");
+    REQUIRE(after["CLIENTS"][0]["PORT"].GetInt() > 0);
+  }
+  ossia::logger().sinks().pop_back();
+  INFO(log.str());
+  REQUIRE(log.str().find("on_connectionOpen") == std::string::npos);
+  REQUIRE(log.str().find("[error]") == std::string::npos);
+}
+
+TEST_CASE("C API: WebSocket++ server: a client that leaves as it connects is no error", "[network_c]")
+{
+  std::ostringstream log;
+  auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(log);
+  ossia::logger().sinks().push_back(sink);
+  {
+    const uint16_t osc = free_port(false), ws = free_port(true);
+    auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_leaves_wspp");
+    REQUIRE(dev);
+    settle();
+    for(int i = 0; i < 200; i++)
+      open_and_reset(ws, i % 2 == 0);
+    settle();
+    {
+      raw_client client{"ws://127.0.0.1:" + std::to_string(ws)};
+      REQUIRE(client.ws.connected());
+    }
+    ossia_device_free(dev);
+  }
+  ossia::logger().sinks().pop_back();
+  INFO(log.str());
+  REQUIRE(log.str().find("on_connectionOpen") == std::string::npos);
+}
+
+namespace
+{
 // A server of the test: it declares these extensions, has an empty tree and
 // keeps the commands it receives
 struct fake_device
