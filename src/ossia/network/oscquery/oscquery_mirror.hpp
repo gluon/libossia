@@ -123,6 +123,8 @@ public:
    */
   //! Whether this client wrote that address within the last moments
   bool written_recently(const std::string& address);
+  bool written_since(
+      const std::string& address, std::chrono::steady_clock::time_point t);
 
   //! Asks the server for the value of a parameter nothing follows, without
   //! waiting for it: at most one request in flight for an address, and one
@@ -222,12 +224,17 @@ private:
         : promise{std::move(p)}
         , address{addr}
         , only_if_changed{only_changes}
+        , asked{only_changes ? std::chrono::steady_clock::now()
+                             : std::chrono::steady_clock::time_point{}}
     {
     }
     std::promise<void> promise;
     std::string address{};
     // Read again after a crossing: the same value is not a new one
     bool only_if_changed{};
+    // When a read of our own was asked: a value this client writes after
+    // is newer than the answer
+    std::chrono::steady_clock::time_point asked{};
   };
 
   ossia::spsc_queue<get_ws_promise> m_getWSPromises;

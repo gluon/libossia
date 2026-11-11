@@ -2548,6 +2548,33 @@ TEST_CASE("C API: reading a mirrored parameter nothing follows asks the server",
   REQUIRE(wait_for([&] { return value_of(f) == 5.f; }, 3000));
 }
 
+// A Remote of Unity reads the value as it binds, then follows it, and its
+// script writes the field before the answer to that read comes: the answer,
+// older than the write, must not bring the old value back
+// (ClientTests.RemoteRaisesReceivedForTheValuesOfTheDevice got it twice)
+TEST_CASE("C API: an answer older than a write of this client does not undo it", "[network_c]")
+{
+  fake_device d{"\"LISTEN\":true"};
+  settle();
+  mirror m{d.url(), "c_stale_read"};
+  auto f = find_parameter(m.dev, "/f");
+  REQUIRE(f);
+  settle();
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+  d.value = 0.3f;
+  d.value_delay_ms = 300;
+  const int before = d.value_requests;
+  value_of(f);
+  m.listen("/f");
+  REQUIRE(wait_for([&] { return d.value_requests == before + 1; }, 1000));
+  ossia_parameter_push_f(f, 0.5f);
+  std::this_thread::sleep_for(std::chrono::milliseconds(700));
+  INFO("received " << m.values().size());
+  REQUIRE(m.values().empty());
+  REQUIRE(value_of(f) == 0.5f);
+}
+
 // The mirror does not reopen its WebSocket: after a reconnection the host makes
 // a new one and binds again, and that one must listen to what is followed
 TEST_CASE("C API: a mirror listens again after a reconnection", "[network_c]")
