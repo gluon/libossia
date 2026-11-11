@@ -375,9 +375,13 @@ In the editor, a Play started less than two seconds after the previous one waits
 
 ## Tests
 
-The package carries Edit Mode and Play Mode tests (`Tests/`). To run them, list the package in the `testables` of the project's `Packages/manifest.json`:
+The package carries Edit Mode and Play Mode tests (`Tests/`). A new project cannot run them as it is: in its `Packages/manifest.json`, add the Test Framework to the `dependencies` and list the package in the `testables`:
 
 ```
+"dependencies": {
+  ...
+  "com.unity.test-framework": "1.6.0"
+},
 "testables": [ "io.ossia.ossia-unity" ]
 ```
 
