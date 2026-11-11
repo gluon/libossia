@@ -1,4 +1,4 @@
-ossia-prism 2.1.0+prism.11
+ossia-prism 2.1.0+prism.12
 Max package ossia (libossia 2.1.0) with the object ossia.v8connector,
 which lets a v8 or v8ui script declare its own parameters.
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/

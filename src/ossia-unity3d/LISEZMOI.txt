@@ -1,5 +1,5 @@
-ossia (PRISM) for Unity
-=======================
+ossia (PRISM) for Unity 2.1.0+prism.12
+======================================
 
 Exposes the objects of a Unity scene, and the fields of your own scripts,
 over OSCQuery, for Max (ossia-prism), TouchDesigner or any OSCQuery client;

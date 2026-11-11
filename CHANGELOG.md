@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0+prism.12] - 2026-11-11
+
+A client gets only the addresses it listens to, and the server applies `ACCESS`; `?PEERS` and `CLIENT_NAME` say who follows what under neutral names; a read of a parameter nothing follows no longer waits for the server; the server follows the OSCQuery proposal where it did not; Max makes one connection to a device announced again, and its console no longer shows red lines for clients that leave as they connect or servers that close as a client stops.
+
 ### Behavior changes
 
 - OSCQuery server: `ACCESS` is applied. What a client writes to a read-only parameter (`GET`) is ignored, over UDP, over the WebSocket, as JSON and through a pattern; `?VALUE` on a write-only parameter (`SET`) answers 204. What stops working: a client that writes over the network to a parameter published as `GET`. A value set locally, by the patch or the script, is not affected.

@@ -7,8 +7,8 @@ Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
 | Package | Latest version | Documentation | Changes | Binaries |
 |---|---|---|---|---|
-| ossia-prism (Max) | `2.1.0+prism.11` | [this README](#ossia-prism-for-max) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.11`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.11) |
-| ossia (PRISM), `io.ossia.ossia-unity` (Unity) | `2.1.0+prism.11` | [README](src/ossia-unity3d/README.md) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.11`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.11) |
+| ossia-prism (Max) | `2.1.0+prism.12` | [this README](#ossia-prism-for-max) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.12`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.12) |
+| ossia (PRISM), `io.ossia.ossia-unity` (Unity) | `2.1.0+prism.12` | [README](src/ossia-unity3d/README.md) | [CHANGELOG](CHANGELOG.md) | [Release `v2.1.0+prism.12`](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases/v2.1.0%2Bprism.12) |
 
 Both are published for macOS universal (Apple Silicon and Intel); Windows x64 to come, same version, added to the Release later. Every version is on the [Releases](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/releases) page. Questions and defects: the [issues](https://gitlab.prism.cnrs.fr/labo/outils/libossia/-/issues) of this repository.
 
@@ -240,7 +240,7 @@ The help patcher (right click on the object, Open Help) has three tabs: Basic, S
 
 ### What PRISM adds to ossia 2.1.0
 
-Everything `2.1.0+prism.1` to `2.1.0+prism.11` add to ossia 2.1.0, one line per function: the fixes are here too, since a function that now works is what they add. **Since** is the version that brought it, from the [CHANGELOG](CHANGELOG.md) (`.N` for `2.1.0+prism.N`). `.12 (unreleased)` marks what the sources hold and no Release has yet; its section of the CHANGELOG is `[Unreleased]`. **Documentation**: a section of this README or of the [Unity README](src/ossia-unity3d/README.md), or the help or the reference page of the object in Max (`src/ossia-max/help`, `src/ossia-max/docs/refpages`). **Proven by**: a test of this repository: a name in `tests/C/unit-tests/unit-tests-c-network.cpp` (`C API: ...`), `tests/Network/V8ConnectorTest.cpp`, `tests/Network/OSCQueryTest.cpp` or `tests/Network/OSCQueryColorTest.cpp`, a line of `tests/Max/check_max.py`, or `Class.Method` under `src/ossia-unity3d/Tests`. "No automated test" says so where a function has none.
+Everything `2.1.0+prism.1` to `2.1.0+prism.12` add to ossia 2.1.0, one line per function: the fixes are here too, since a function that now works is what they add. **Since** is the version that brought it, from the [CHANGELOG](CHANGELOG.md) (`.N` for `2.1.0+prism.N`). `.N (unreleased)` marks what the sources hold and no Release has yet; its section of the CHANGELOG is `[Unreleased]`. **Documentation**: a section of this README or of the [Unity README](src/ossia-unity3d/README.md), or the help or the reference page of the object in Max (`src/ossia-max/help`, `src/ossia-max/docs/refpages`). **Proven by**: a test of this repository: a name in `tests/C/unit-tests/unit-tests-c-network.cpp` (`C API: ...`), `tests/Network/V8ConnectorTest.cpp`, `tests/Network/OSCQueryTest.cpp` or `tests/Network/OSCQueryColorTest.cpp`, a line of `tests/Max/check_max.py`, or `Class.Method` under `src/ossia-unity3d/Tests`. "No automated test" says so where a function has none.
 
 #### Max package
 
@@ -294,11 +294,11 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.11` add to ossia 2.1.0, one line per 
 | The connections the package opens to announced devices name the package (`max_client_<process>`), not the device | the listener of `_oscjson._tcp`, `client_mirror.cpp`, `oscquery_mirror.cpp` | .11 | [Differences from ossia 2.1.0](#differences-from-ossia-210); [Discovery by name](#discovery-by-name); [`tools/prism-map/README.md`](tools/prism-map/README.md) | `oscquery_directory_names_its_client` |
 | An `ossia.remote` gets the value of a node the server adds once | `ossia.remote`, `ossia.client`, `oscquery_mirror.cpp` | .11 | [Differences from ossia 2.1.0](#differences-from-ossia-210) | `oscquery_mirror_added_node_value_once`, `tests/Max/check_remote.py` |
 | A value written to the inlet while the object outputs a value of the network is not lost | `ossia.parameter`, `object_base.cpp`, `matcher.cpp` | .11 | [Differences from ossia 2.1.0](#differences-from-ossia-210) | `tests/Max/check_outlet.py` |
-| A client of Max gets only the addresses its `ossia.remote` listen to | `ossia.client`, `ossia.remote`, `oscquery_mirror.cpp` | .12 (unreleased) | CHANGELOG, Behavior changes | `tests/Max/check_remote.py` (`... listens to /bench/late only`, `a value no remote follows is not sent`) |
-| One connection of the package to a device announced again at its address | the listener of `_oscjson._tcp`, `client_mirror.cpp` | .12 (unreleased) | CHANGELOG, `[Unreleased]` | `oscquery_directory_keeps_its_build`; bench of TouchDesigner 0.3.5, 2 runs |
-| `namespace` and the explorer read the value of a parameter nothing follows from the server, without waiting | `node_base.cpp`, `search_filter.cpp`, `read_followed_value` | .12 (unreleased) | CHANGELOG, Behavior changes | `C API: reading a mirrored parameter nothing follows asks the server` |
-| A client that leaves as soon as it connects to an `ossia.device` puts no red line in the console | `ossia.device`, `expose oscquery`, `oscquery_server_asio.cpp` | .12 (unreleased) | CHANGELOG, `[Unreleased]` | `C API: asio server: a client that leaves as it connects is no error`, `tests/Max/check_console.py` |
-| An `ossia.client` whose server is closing the connection disconnects at once, with no red line | `ossia.client`, `disconnect`, `websocket_client.hpp` | .12 (unreleased) | CHANGELOG, `[Unreleased]` | `C API: a mirror stopped as its server closes is no error`, `tests/Max/check_console.py` |
+| A client of Max gets only the addresses its `ossia.remote` listen to | `ossia.client`, `ossia.remote`, `oscquery_mirror.cpp` | .12 | CHANGELOG, Behavior changes | `tests/Max/check_remote.py` (`... listens to /bench/late only`, `a value no remote follows is not sent`) |
+| One connection of the package to a device announced again at its address | the listener of `_oscjson._tcp`, `client_mirror.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `oscquery_directory_keeps_its_build`; bench of TouchDesigner 0.3.5, 2 runs |
+| `namespace` and the explorer read the value of a parameter nothing follows from the server, without waiting | `node_base.cpp`, `search_filter.cpp`, `read_followed_value` | .12 | CHANGELOG, Behavior changes | `C API: reading a mirrored parameter nothing follows asks the server` |
+| A client that leaves as soon as it connects to an `ossia.device` puts no red line in the console | `ossia.device`, `expose oscquery`, `oscquery_server_asio.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: asio server: a client that leaves as it connects is no error`, `tests/Max/check_console.py` |
+| An `ossia.client` whose server is closing the connection disconnects at once, with no red line | `ossia.client`, `disconnect`, `websocket_client.hpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: a mirror stopped as its server closes is no error`, `tests/Max/check_console.py` |
 
 #### Unity package
 
@@ -335,8 +335,8 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.11` add to ossia 2.1.0, one line per 
 | Leaving Play with a Client connected no longer crashes Unity | `Controller`, `Client` | .10 | [Unity README, Ossia.Client](src/ossia-unity3d/README.md#ossiaclient) | `PlayCycleTests.StopWithAClientConnected` |
 | The Controller applies the value each message carries, unless a later one replaced it | `Controller`, `unity3d/impl/ParameterBindings.cs` | .10 | CHANGELOG, `2.1.0+prism.10` | `ExposeOptionsTests.AValueReplacedInTheSameFrameIsNotApplied` |
 | A Remote gets the value of a node the device adds once, then once for each change | `Ossia.Remote`, `oscquery_mirror.cpp` | .11 | [Unity README, Following a device](src/ossia-unity3d/README.md#following-a-device); [Known defects](#differences-from-ossia-210) | `ClientTests.AddressAddedLaterGetsItsValueOnce` |
-| A Client gets only the addresses its Remotes listen to | `Ossia.Client`, `Ossia.Remote` | .12 (unreleased) | [Unity README, What happens](src/ossia-unity3d/README.md#what-happens) | `ClientTests.ClientGetsOnlyWhatItsRemotesListenTo`; `tests/Unity/cross/cross_run.py` (TouchDesigner server) |
-| `Parameter.GetValue()` of a parameter no Remote follows does not wait for the device | `Ossia.Parameter`, `ossia_parameter_get_value` | .12 (unreleased) | [Unity README, What happens](src/ossia-unity3d/README.md#what-happens) | `C API: reading a mirrored parameter nothing follows asks the server` |
+| A Client gets only the addresses its Remotes listen to | `Ossia.Client`, `Ossia.Remote` | .12 | [Unity README, What happens](src/ossia-unity3d/README.md#what-happens) | `ClientTests.ClientGetsOnlyWhatItsRemotesListenTo`; `tests/Unity/cross/cross_run.py` (TouchDesigner server) |
+| `Parameter.GetValue()` of a parameter no Remote follows does not wait for the device | `Ossia.Parameter`, `ossia_parameter_get_value` | .12 | [Unity README, What happens](src/ossia-unity3d/README.md#what-happens) | `C API: reading a mirrored parameter nothing follows asks the server` |
 
 #### The core, the C API and the tools
 
@@ -366,18 +366,27 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.11` add to ossia 2.1.0, one line per 
 | Draws the map of the devices of a network | `tools/prism-map/prism_map.py` | .10 | [`tools/prism-map/README.md`](tools/prism-map/README.md) | `tools/prism-map/test_prism_map.py` |
 | The binaries hold no path of the machine that built them | `-ffile-prefix-map` | .10 | [Differences from ossia 2.1.0](#differences-from-ossia-210) | `tests/binary_paths.py` |
 | The fixes of Max checked in a running Max, with no click | `tests/Max/check_max.py` | .10 | its own header | `tests/Max/check_max.py` |
-| Who follows, under neutral names: the clients, what they listen to, the other senders | `?PEERS` and `CLIENT_NAME`, declared in the `EXTENSIONS` of `HOST_INFO`; `?PRISM_CONNECTIONS` and `PRISM_NAME` kept for the transition, to be removed later | .12 (unreleased) | CHANGELOG, `[Unreleased]`; `propositions/oscquery-peers-extension.md` of PRISM | `C API: PEERS and CLIENT_NAME are declared`, `C API: ?PEERS lists the clients and the senders`, `C API: CLIENT_NAME names a client`, `tools/prism-map/test_prism_map.py` |
-| A client gets only the addresses it sent `LISTEN` for; `IGNORE` is applied | `oscquery_server_asio.cpp`, `oscquery_server.cpp`, `listens_to` | .12 (unreleased) | CHANGELOG, Behavior changes | `C API: asio server filters by LISTEN`, `C API: WebSocket++ server filters by LISTEN`, `C API: a bundle follows what each client listens to`, `C API: a mirror listens again after a reconnection` |
-| The server applies `ACCESS`: no network write to `GET`, 204 to `?VALUE` of `SET` | `osc_client_message_applier`, `get_query_parser.hpp` | .12 (unreleased) | CHANGELOG, Behavior changes | `C API: asio server applies ACCESS`, `C API: WebSocket++ server applies ACCESS` |
-| A read of a mirrored parameter nothing follows asks the server, without waiting, at most every 100 ms | `read_followed_value`, `refresh_unfollowed` | .12 (unreleased) | `ossia_parameter_get_value` in `src/ossia-c/ossia-c.h`; CHANGELOG | `C API: reading a mirrored parameter nothing follows asks the server`, `C API: an added parameter read then followed gets its value once` |
-| The mirror reads the address of a `PATH_CHANGED` again | `oscquery_mirror.cpp` | .12 (unreleased) | CHANGELOG, `[Unreleased]` | `C API: a mirror reads again the address of a PATH_CHANGED` |
-| The server follows the proposal where it did not: `DATA` of `LISTEN`, 404 and 400, valid JSON, `ECHO` and `EXTENDED_TYPE` declared, UDP senders by address and port, one `ATTRIBUTES_CHANGED` per new parameter, attribute queries, URL fragments | `json_query_parser.hpp`, `websocket_server.hpp`, `json.hpp`, `json_writer_detail.cpp`, `get_query_parser.hpp`, `node.cpp` | .12 (unreleased) | CHANGELOG, `[Unreleased]` | the tests named in each commit of `prism/consolidation-12` |
-| An HTTP error names the host, the port and the request | `http_client.hpp` | .12 (unreleased) | CHANGELOG, `[Unreleased]` | `C API: an HTTP error names the host and the request` |
+| Who follows, under neutral names: the clients, what they listen to, the other senders | `?PEERS` and `CLIENT_NAME`, declared in the `EXTENSIONS` of `HOST_INFO`; `?PRISM_CONNECTIONS` and `PRISM_NAME` kept for the transition, to be removed later | .12 | CHANGELOG, `[2.1.0+prism.12]`; `propositions/oscquery-peers-extension.md` of PRISM | `C API: PEERS and CLIENT_NAME are declared`, `C API: ?PEERS lists the clients and the senders`, `C API: CLIENT_NAME names a client`, `tools/prism-map/test_prism_map.py` |
+| A client gets only the addresses it sent `LISTEN` for; `IGNORE` is applied | `oscquery_server_asio.cpp`, `oscquery_server.cpp`, `listens_to` | .12 | CHANGELOG, Behavior changes | `C API: asio server filters by LISTEN`, `C API: WebSocket++ server filters by LISTEN`, `C API: a bundle follows what each client listens to`, `C API: a mirror listens again after a reconnection` |
+| The server applies `ACCESS`: no network write to `GET`, 204 to `?VALUE` of `SET` | `osc_client_message_applier`, `get_query_parser.hpp` | .12 | CHANGELOG, Behavior changes | `C API: asio server applies ACCESS`, `C API: WebSocket++ server applies ACCESS` |
+| A read of a mirrored parameter nothing follows asks the server, without waiting, at most every 100 ms | `read_followed_value`, `refresh_unfollowed` | .12 | `ossia_parameter_get_value` in `src/ossia-c/ossia-c.h`; CHANGELOG | `C API: reading a mirrored parameter nothing follows asks the server`, `C API: an added parameter read then followed gets its value once` |
+| The mirror reads the address of a `PATH_CHANGED` again | `oscquery_mirror.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: a mirror reads again the address of a PATH_CHANGED` |
+| The server follows the proposal where it did not: `DATA` of `LISTEN`, 404 and 400, valid JSON, `ECHO` and `EXTENDED_TYPE` declared, UDP senders by address and port, one `ATTRIBUTES_CHANGED` per new parameter, attribute queries, URL fragments | `json_query_parser.hpp`, `websocket_server.hpp`, `json.hpp`, `json_writer_detail.cpp`, `get_query_parser.hpp`, `node.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | the tests named in each commit of `prism/consolidation-12` |
+| An HTTP error names the host, the port and the request | `http_client.hpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: an HTTP error names the host and the request` |
 
 
 ### Differences from ossia 2.1.0
 
-State on 2026-11-07, `2.1.0+prism.11`; the changes of the Unity package and of the C API are in the [CHANGELOG](CHANGELOG.md). "Fixed" means fixed in ossia-prism, not in ossia.
+State on 2026-11-11, `2.1.0+prism.12`; the changes of the Unity package and of the C API are in the [CHANGELOG](CHANGELOG.md). "Fixed" means fixed in ossia-prism, not in ossia.
+
+Changed in `2.1.0+prism.12` (details, measures and what stops working: the CHANGELOG, `[2.1.0+prism.12]`; tests: the table above):
+
+- **A client gets only the addresses it listens to** (`oscquery_server_asio.cpp`, `oscquery_server.cpp`). An `ossia.device` sends a client only the addresses it sent `LISTEN` for, as the OSCQuery proposal says; an `ossia.client` listens to what its `ossia.remote` follow. A client that never sends `LISTEN` gets no value.
+- **An `ossia.device` applies `ACCESS`**: a value written over the network to a parameter published as `GET` is ignored.
+- **`?PEERS` and `CLIENT_NAME`**: a device lists its clients, what each listens to and the other senders, under neutral names; `?PRISM_CONNECTIONS` and `PRISM_NAME` stay during the transition.
+- **Reading a parameter nothing follows no longer waits for the server** (`namespace`, the explorer): the read returns the last value known and asks the server again, at most every 100 ms. An `ossia.remote` is the way to follow a value.
+- **One connection of the package to a device announced again at its address** (`client_mirror.cpp`): a server that restarted got two.
+- **No red line in the console for a client that leaves as soon as it connects, nor for an `ossia.client` stopped while its server closes the connection**; that `disconnect` held Max up to 5 s, it now returns at once. An HTTP error names the host, the port and the request.
 
 Changed in `2.1.0+prism.11`:
 
