@@ -12,6 +12,13 @@ public class FollowADevice : MonoBehaviour
 
   Renderer shape;
 
+  void Awake ()
+  {
+    // Keep playing when Unity loses the focus, as when Max is clicked: the
+    // scene has no Controller, which does it otherwise
+    Application.runInBackground = true;
+  }
+
   void Start ()
   {
     shape = GetComponent<Renderer> ();
