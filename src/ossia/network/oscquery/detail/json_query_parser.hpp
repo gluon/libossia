@@ -136,7 +136,7 @@ struct json_query_answerer
       throw bad_request_error{"Client not found"};
 
     auto m = doc.FindMember("DATA");
-    if(m == doc.MemberEnd())
+    if(m == doc.MemberEnd() || !m->value.IsString())
       return {};
 
     auto nodes = ossia::net::find_nodes(
@@ -160,7 +160,7 @@ struct json_query_answerer
       throw bad_request_error{"Client not found"};
 
     auto m = doc.FindMember("DATA");
-    if(m == doc.MemberEnd())
+    if(m == doc.MemberEnd() || !m->value.IsString())
       return {};
 
     auto nodes = ossia::net::find_nodes(

@@ -156,6 +156,8 @@ if(OSSIA_PROTOCOL_OSCQUERY)
     # Announces on the local network for a few seconds
     ossia_add_test(ReproMdnsTest "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproMdnsTest.cpp")
   endif()
+  # A LISTEN or IGNORE whose DATA is not a string, from any peer
+  ossia_add_test(ReproListenDataTest "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproListenDataTest.cpp")
 endif()
 
 if(OSSIA_PROTOCOL_MIDI)
