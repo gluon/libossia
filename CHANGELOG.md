@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Tools: `tools/check_unity_package.sh` checks a Unity package before a Release: a `.meta` for every file and folder Unity imports, and a version Unity accepts (semver, no leading `v`).
 - Tools: `tools/check_unity_scripts.sh` compiles the scripts of the Unity package (its `.tgz`, or the sources the install takes) with the C# compiler and the UnityEngine assemblies of a Unity editor, without opening it.
 
+### Fixed
+
+- Max: `get protocols` of an `ossia.device` lists its OSCQuery server, and `get oscquery_clients` its clients. Both looked for the server of the C API, which `ossia.device` does not build: after `expose oscquery`, `get protocols` gave a `protocol` message without arguments, and `get oscquery_clients` gave `oscquery_clients_size 0` with clients connected. What they report is now built in `device_protocols.cpp`, without Max, and tested there (`tests/Network/DeviceProtocolsTest.cpp`): before, the server of `ossia.device` not listed and none of its 2 clients; after, the server with its OSC and WebSocket ports, and both clients, with the UDP port they stream to, or -1 for the one that receives over the WebSocket. Not run in Max. Same code in ossia 2.1.0.
+
 ### Changed
 
 - Unity: the example `CustomDevice.cs` serves its device with the OSCQuery server the Controller uses, on a network context of its own, which `OnApplicationQuit` frees before the reset of the library: the server that does not send a client's own values back to it and arbitrates crossing writes (`ReproWebSocketTest`). It used `new Ossia.OSCQuery (osc, ws)`, the other server, which does neither. Its scripts compile (`tools/check_unity_scripts.sh`); `PlayCycleTests.StopWithCustomDeviceAndAClient` has not yet run with it.

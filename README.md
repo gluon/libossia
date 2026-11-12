@@ -299,6 +299,7 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.12` add to ossia 2.1.0, one line per 
 | `namespace` and the explorer read the value of a parameter nothing follows from the server, without waiting | `node_base.cpp`, `search_filter.cpp`, `read_followed_value` | .12 | CHANGELOG, Behavior changes | `C API: reading a mirrored parameter nothing follows asks the server` |
 | A client that leaves as soon as it connects to an `ossia.device` puts no red line in the console | `ossia.device`, `expose oscquery`, `oscquery_server_asio.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: asio server: a client that leaves as it connects is no error`, `tests/Max/check_console.py` |
 | An `ossia.client` whose server is closing the connection disconnects at once, with no red line | `ossia.client`, `disconnect`, `websocket_client.hpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: a mirror stopped as its server closes is no error`, `tests/Max/check_console.py` |
+| `get protocols` lists the OSCQuery server of an `ossia.device`, and `get oscquery_clients` its clients | `ossia.device`, `device_protocols.cpp` | .13 (unreleased) | CHANGELOG, `[Unreleased]` | `tests/Network/DeviceProtocolsTest.cpp`; not run in Max |
 
 #### Unity package
 

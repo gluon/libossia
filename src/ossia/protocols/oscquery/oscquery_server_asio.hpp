@@ -89,6 +89,17 @@ public:
   ossia::net::device_base& get_device() const noexcept { return *m_device; }
 
   int get_ws_port() const noexcept { return m_wsPort; }
+
+  //! Calls f with each client connected, under the lock of the clients, as
+  //! ossia::oscquery::oscquery_server_protocol::for_each_client does
+  template <typename F>
+  void for_each_client(F&& f)
+  {
+    lock_t lock(m_clientsMutex);
+    for(const auto& c : m_clients)
+      f(static_cast<const oscquery_client&>(*c));
+  }
+
   //! The address the server listens on, "0.0.0.0" for every interface
   const std::string& get_bind() const noexcept { return m_bind; }
   bool bound_to_every_interface() const noexcept

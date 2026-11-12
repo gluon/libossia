@@ -1,6 +1,7 @@
 // This is an open source non-commercial project. Dear PVS-Studio, please check it.
 // PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
 #include "device_network.hpp"
+#include "device_protocols.hpp"
 #include "device.hpp"
 
 #include "model.hpp"
@@ -592,33 +593,23 @@ void device::get_protocols(device* x)
   for(auto& p : protocols)
   {
     std::vector<t_atom> vec;
-    if(auto osc = dynamic_cast<const ossia::net::osc_protocol*>(p.get()))
-    {
-      vec.resize(5);
-      A_SETLONG(&vec[0], index++);
-      A_SETSYM(&vec[1], gensym("osc"));
-      A_SETSYM(&vec[2], gensym(osc->get_ip().c_str()));
-      A_SETLONG(&vec[3], osc->get_remote_port());
-      A_SETLONG(&vec[4], osc->get_local_port());
-    }
-    else if(
-        auto oscq
-        = dynamic_cast<const ossia::oscquery::oscquery_server_protocol*>(p.get()))
+    const auto e = describe_protocol(*p);
+    if(e.kind == "oscquery")
     {
       vec.resize(4);
       A_SETLONG(&vec[0], index++);
       A_SETSYM(&vec[1], gensym("oscquery"));
-      A_SETLONG(&vec[2], oscq->get_osc_port());
-      A_SETLONG(&vec[3], oscq->get_ws_port());
+      A_SETLONG(&vec[2], e.first_port);
+      A_SETLONG(&vec[3], e.second_port);
     }
-    else if(auto minuit = dynamic_cast<const ossia::net::minuit_protocol*>(p.get()))
+    else if(!e.kind.empty())
     {
       vec.resize(5);
       A_SETLONG(&vec[0], index++);
-      A_SETSYM(&vec[1], gensym("minuit"));
-      A_SETSYM(&vec[2], gensym(minuit->get_ip().c_str()));
-      A_SETLONG(&vec[3], minuit->get_remote_port());
-      A_SETLONG(&vec[4], minuit->get_local_port());
+      A_SETSYM(&vec[1], gensym(e.kind.c_str()));
+      A_SETSYM(&vec[2], gensym(e.ip.c_str()));
+      A_SETLONG(&vec[3], e.first_port);
+      A_SETLONG(&vec[4], e.second_port);
     }
 
     outlet_anything(x->m_dumpout, gensym("protocol"), vec.size(), vec.data());
@@ -627,32 +618,16 @@ void device::get_protocols(device* x)
 
 void device::get_oscq_clients(device* x)
 {
-  auto& protocols
-      = static_cast<ossia::net::multiplex_protocol&>(x->m_device->get_protocol())
-            .get_protocols();
+  auto& multiplex
+      = static_cast<ossia::net::multiplex_protocol&>(x->m_device->get_protocol());
 
   std::vector<std::array<t_atom, 2>> res;
-
-  for(auto& p : protocols)
+  for(const auto& c : oscquery_clients(multiplex))
   {
-    if(auto oscq
-       = dynamic_cast<const ossia::oscquery::oscquery_server_protocol*>(p.get()))
-    {
-      oscq->for_each_client([&](auto& c) {
-        std::array<t_atom, 2> atoms;
-        A_SETSYM(&atoms[0], gensym(c.client_ip.c_str()));
-        if(c.sender)
-        {
-          A_SETLONG(&atoms[1], c.sender->port());
-        }
-        else
-        {
-          A_SETLONG(&atoms[1], -1);
-        }
-
-        res.push_back(atoms);
-      });
-    }
+    std::array<t_atom, 2> atoms;
+    A_SETSYM(&atoms[0], gensym(c.ip.c_str()));
+    A_SETLONG(&atoms[1], c.osc_port);
+    res.push_back(atoms);
   }
 
   t_atom a;

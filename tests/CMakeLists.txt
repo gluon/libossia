@@ -156,6 +156,10 @@ if(OSSIA_PROTOCOL_OSCQUERY)
   ossia_add_test(ReproWebSocketTest  "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproWebSocketTest.cpp")
   ossia_add_test(ReproBundlesTest    "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproBundlesTest.cpp")
   ossia_add_test(ReproServerStopTest "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproServerStopTest.cpp")
+  # Max-independent part of the getprotocols and getoscqclients of ossia.device
+  ossia_add_test(DeviceProtocolsTest
+      "${CMAKE_CURRENT_SOURCE_DIR}/Network/DeviceProtocolsTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/device_protocols.cpp")
+  target_include_directories(ossia_DeviceProtocolsTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
   if(OSSIA_DNSSD AND OSSIA_PROTOCOL_MINUIT)
     # Announces on the local network for a few seconds
     ossia_add_test(ReproMdnsTest
