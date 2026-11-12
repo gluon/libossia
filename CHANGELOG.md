@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Unity: the example `CustomDevice.cs` serves its device with the OSCQuery server the Controller uses, on a network context of its own, which `OnApplicationQuit` frees before the reset of the library: the server that does not send a client's own values back to it and arbitrates crossing writes (`ReproWebSocketTest`). It used `new Ossia.OSCQuery (osc, ws)`, the other server, which does neither. Its scripts compile (`tools/check_unity_scripts.sh`); `PlayCycleTests.StopWithCustomDeviceAndAClient` has not yet run with it.
+- Unity: the example `CustomDevice.cs` serves its device with the OSCQuery server the Controller uses, on a network context of its own, which `OnApplicationQuit` frees before the reset of the library: the server that does not send a client's own values back to it and arbitrates crossing writes (`ReproWebSocketTest`). It used `new Ossia.OSCQuery (osc, ws)`, the other server, which does neither. Its scripts compile (`tools/check_unity_scripts.sh`), and `PlayCycleTests.StopWithCustomDeviceAndAClient` passes with it (a new project, Unity 6000.3, batchmode: EditMode 26 of 26, PlayMode 37 of 37).
 
 ## [2.1.0+prism.12] - 2026-11-11
 
