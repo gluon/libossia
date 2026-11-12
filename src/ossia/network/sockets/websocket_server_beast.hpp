@@ -21,6 +21,21 @@ namespace ossia::net
 
 class websocket_server_beast;
 
+namespace detail
+{
+// The server as its connections and its acceptor see it. They outlive it:
+// their pending operations hold them, and a connection whose closing
+// completes after stop() still calls back. stop() and the destructor set
+// server to null under the mutex; a callback that comes later reaches no
+// server and runs no handler, and stop() waits for a handler running on
+// another thread. Recursive, since a handler may stop the server.
+struct beast_server_life
+{
+  std::recursive_mutex mutex;
+  websocket_server_beast* server{};
+};
+}
+
 /// A single WebSocket connection managed by the beast server.
 class beast_ws_connection : public std::enable_shared_from_this<beast_ws_connection>
 {
@@ -28,7 +43,8 @@ class beast_ws_connection : public std::enable_shared_from_this<beast_ws_connect
 
 public:
   explicit beast_ws_connection(
-      boost::asio::ip::tcp::socket&& socket, websocket_server_beast& server);
+      boost::asio::ip::tcp::socket&& socket,
+      std::shared_ptr<detail::beast_server_life> life);
 
   ~beast_ws_connection();
 
@@ -56,7 +72,7 @@ private:
   boost::beast::websocket::stream<boost::beast::tcp_stream> m_ws;
   boost::beast::flat_buffer m_buffer;
   boost::beast::http::request<boost::beast::http::string_body> m_http_req;
-  websocket_server_beast& m_server;
+  std::shared_ptr<detail::beast_server_life> m_life;
   bool m_is_websocket{false};
 
   // Outbound queue, only touched on the strand. {is_text, payload}.
@@ -100,6 +116,7 @@ private:
   std::shared_ptr<beast_ws_connection> find_connection(const ws_connection_handle& hdl);
 
   ossia::net::network_context_ptr m_context;
+  std::shared_ptr<detail::beast_server_life> m_life;
   boost::asio::ip::tcp::acceptor m_acceptor;
   std::set<std::shared_ptr<beast_ws_connection>> m_connections;
   std::mutex m_connections_mutex;

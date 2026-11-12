@@ -12,9 +12,10 @@ namespace ossia::net
 /// beast_ws_connection implementation
 
 beast_ws_connection::beast_ws_connection(
-    boost::asio::ip::tcp::socket&& socket, websocket_server_beast& server)
+    boost::asio::ip::tcp::socket&& socket,
+    std::shared_ptr<detail::beast_server_life> life)
     : m_ws{std::move(socket)}
-    , m_server{server}
+    , m_life{std::move(life)}
 {
   auto& tcp = boost::beast::get_lowest_layer(m_ws);
   tcp.expires_never();
@@ -84,7 +85,9 @@ void beast_ws_connection::on_write(boost::beast::error_code ec, std::size_t)
 {
   if(ec)
   {
-    m_server.remove_connection(shared_from_this());
+    std::lock_guard lock{m_life->mutex};
+    if(auto* server = m_life->server)
+      server->remove_connection(shared_from_this());
     return;
   }
 
@@ -139,12 +142,14 @@ void beast_ws_connection::on_read_http(boost::beast::error_code ec, std::size_t)
 
   // Plain HTTP request — handle it like websocketpp did:
   // treat as a TEXT message with the URI as payload, send back the reply.
-  if(m_server.m_on_message)
+  std::unique_lock lock{m_life->mutex};
+  auto* server = m_life->server;
+  if(server && server->m_on_message)
   {
     try
     {
       auto resource = std::string(m_http_req.target());
-      auto reply = m_server.m_on_message(
+      auto reply = server->m_on_message(
           shared_from_this(), ws_opcode::text, resource);
 
       namespace http = boost::beast::http;
@@ -184,6 +189,7 @@ void beast_ws_connection::on_read_http(boost::beast::error_code ec, std::size_t)
       http::write(boost::beast::get_lowest_layer(m_ws), res, write_ec);
     }
   }
+  lock.unlock();
 
   // HTTP connection: close after response (no keep-alive for OSCQuery)
   boost::beast::error_code close_ec;
@@ -209,8 +215,14 @@ void beast_ws_connection::on_accept_ws(boost::beast::error_code ec)
   if(ec)
     return;
 
-  // Notify server of new connection
-  m_server.add_connection(shared_from_this());
+  // Notify server of new connection; a stopped server takes no connection
+  {
+    std::lock_guard lock{m_life->mutex};
+    auto* server = m_life->server;
+    if(!server)
+      return;
+    server->add_connection(shared_from_this());
+  }
 
   // Start reading messages
   do_read_ws();
@@ -228,21 +240,24 @@ void beast_ws_connection::do_read_ws()
 
 void beast_ws_connection::on_read_ws(boost::beast::error_code ec, std::size_t)
 {
+  std::unique_lock lock{m_life->mutex};
+  auto* server = m_life->server;
   if(ec)
   {
     // Connection closed or error
-    m_server.remove_connection(shared_from_this());
+    if(server)
+      server->remove_connection(shared_from_this());
     return;
   }
 
-  if(m_server.m_on_message)
+  if(server && server->m_on_message)
   {
     auto opcode = m_ws.got_text() ? ws_opcode::text : ws_opcode::binary;
     auto data = boost::beast::buffers_to_string(m_buffer.data());
 
     try
     {
-      auto reply = m_server.m_on_message(shared_from_this(), opcode, data);
+      auto reply = server->m_on_message(shared_from_this(), opcode, data);
 
       if(!reply.data.empty())
       {
@@ -267,6 +282,10 @@ void beast_ws_connection::on_read_ws(boost::beast::error_code ec, std::size_t)
       ossia::logger().error("Error in WS message handling");
     }
   }
+  lock.unlock();
+  // A stopped server reads nothing more on its connections
+  if(!server)
+    return;
 
   // Continue reading
   do_read_ws();
@@ -276,8 +295,10 @@ void beast_ws_connection::on_read_ws(boost::beast::error_code ec, std::size_t)
 
 websocket_server_beast::websocket_server_beast(ossia::net::network_context_ptr ctx)
     : m_context{std::move(ctx)}
+    , m_life{std::make_shared<detail::beast_server_life>()}
     , m_acceptor{boost::asio::make_strand(m_context->context)}
 {
+  m_life->server = this;
 }
 
 websocket_server_beast::~websocket_server_beast()
@@ -332,6 +353,13 @@ void websocket_server_beast::run()
 
 void websocket_server_beast::stop()
 {
+  // From now on, the callbacks of the connections and of the acceptor reach
+  // no server; this waits for one running on another thread
+  {
+    std::lock_guard life{m_life->mutex};
+    m_life->server = nullptr;
+  }
+
   boost::beast::error_code ec;
   if(m_acceptor.is_open())
     m_acceptor.close(ec);
@@ -452,8 +480,10 @@ void websocket_server_beast::do_accept()
 {
   m_acceptor.async_accept(
       boost::asio::make_strand(m_context->context),
-      [this](boost::beast::error_code ec, boost::asio::ip::tcp::socket socket) {
-    on_accept(ec, std::move(socket));
+      [life = m_life](boost::beast::error_code ec, boost::asio::ip::tcp::socket socket) {
+    std::lock_guard lock{life->mutex};
+    if(auto* server = life->server)
+      server->on_accept(ec, std::move(socket));
   });
 }
 
@@ -472,7 +502,7 @@ void websocket_server_beast::on_accept(
   }
 
   // Create connection and start reading
-  auto conn = std::make_shared<beast_ws_connection>(std::move(socket), *this);
+  auto conn = std::make_shared<beast_ws_connection>(std::move(socket), m_life);
   conn->run();
 
   // Accept next connection

@@ -91,6 +91,60 @@ TEST_CASE("Server stop: no exception out of the poll afterwards", "[stop-polled]
   CHECK(error.empty());
 }
 
+// stop() alone, the server kept alive in the multiplex: the client's
+// connection, closed by the stop or by the client leaving afterwards, must not
+// call back into the stopped server. The stop runs on the polling thread, as
+// in Max, where the scheduler both polls and stops.
+TEST_CASE("Server stop: a stopped server kept alive, a client that leaves", "[stop-kept]")
+{
+  auto ctx = ossia::net::create_network_context();
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), "stop_kept"};
+  add_float(dev.get_root_node(), "/foo/bar", 0.f);
+  auto& multiplex = static_cast<ossia::net::multiplex_protocol&>(dev.get_protocol());
+  const uint16_t ws = free_port(true);
+  auto server = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(ctx, free_port(false), ws, false);
+  auto* exposed = server.get();
+  multiplex.expose_to(std::move(server));
+
+  std::atomic_bool stop{false};
+  std::mutex error_mutex;
+  std::string error;
+  std::thread scheduler([&] {
+    while(!stop)
+    {
+      try
+      {
+        ctx->context.restart();
+        ctx->context.poll();
+      }
+      catch(const std::exception& e)
+      {
+        std::lock_guard lock{error_mutex};
+        if(error.empty())
+          error = e.what();
+      }
+      std::this_thread::sleep_for(10ms);
+    }
+  });
+
+  std::optional<ws_client> raw;
+  raw.emplace(ws);
+  REQUIRE(raw->connected());
+  std::this_thread::sleep_for(300ms);
+
+  boost::asio::post(ctx->context, [exposed] { exposed->stop(); });
+  std::this_thread::sleep_for(500ms);
+  raw.reset();
+  std::this_thread::sleep_for(1000ms);
+  stop = true;
+  scheduler.join();
+
+  std::lock_guard lock{error_mutex};
+  std::printf("stop-kept: exception out of the poll after stop() and the client's leaving: \"%s\"\n",
+              error.c_str());
+  CHECK(error.empty());
+}
+
 // After a server is removed from a running network context, a server exposed
 // again on that context, on the same ports or others, must answer HTTP.
 TEST_CASE("Server stop: a server exposed again answers HTTP", "[reexpose]")
