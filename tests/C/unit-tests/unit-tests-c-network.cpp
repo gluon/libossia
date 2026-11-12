@@ -156,6 +156,83 @@ std::string other_ipv4()
   return found;
 }
 
+// How long the warm-up waits for its datagram
+constexpr int warm_up_ms = 10000;
+
+// The warm-up of a test that receives datagrams from another address than the
+// loopback: a throwaway datagram from `other` to a socket of this process,
+// sent again every 200 ms, without libossia, until one arrives or timeout_ms
+// passes. The application firewall of macOS, when it is on, holds the first
+// flow from another address that a binary it does not know yet receives,
+// while it decides on that binary: 1.5 to 3.5 s seen, once 48 s. Right after
+// a build, the datagram of the test then came after its 2 s window. Once the
+// warm-up has arrived, the binary is known and the test's own datagram is
+// not held. Returns whether the warm-up arrived.
+bool warm_up_from(const std::string& other, int timeout_ms)
+{
+  int in = ::socket(AF_INET, SOCK_DGRAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  socklen_t len = sizeof(addr);
+  if(::bind(in, (sockaddr*)&addr, sizeof(addr)) != 0
+     || ::getsockname(in, (sockaddr*)&addr, &len) != 0)
+  {
+    ::close(in);
+    return false;
+  }
+  ::fcntl(in, F_SETFL, O_NONBLOCK);
+  sockaddr_in to{}, from{};
+  to.sin_family = from.sin_family = AF_INET;
+  to.sin_port = addr.sin_port;
+  ::inet_pton(AF_INET, other.c_str(), &to.sin_addr);
+  ::inet_pton(AF_INET, other.c_str(), &from.sin_addr);
+  bool received = false;
+  const auto start = std::chrono::steady_clock::now();
+  while(!received
+        && std::chrono::steady_clock::now() - start < std::chrono::milliseconds(timeout_ms))
+  {
+    int out = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if(::bind(out, (sockaddr*)&from, sizeof(from)) == 0)
+      ::sendto(out, "warm-up", 7, 0, (sockaddr*)&to, sizeof(to));
+    ::close(out);
+    for(int i = 0; i < 20 && !received; i++)
+    {
+      char buf[64];
+      received = ::recv(in, buf, sizeof(buf), 0) > 0;
+      if(!received)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  }
+  ::close(in);
+  return received;
+}
+
+// The interface that holds this IPv4 address now, with its state, for the
+// message of a failed test
+std::string interface_of(const std::string& ip)
+{
+  std::string found = "no interface";
+  ifaddrs* addrs{};
+  if(::getifaddrs(&addrs) != 0)
+    return found;
+  for(auto a = addrs; a; a = a->ifa_next)
+  {
+    if(!a->ifa_addr || a->ifa_addr->sa_family != AF_INET)
+      continue;
+    char buf[INET_ADDRSTRLEN];
+    ::inet_ntop(AF_INET, &reinterpret_cast<sockaddr_in*>(a->ifa_addr)->sin_addr, buf, sizeof(buf));
+    if(ip == buf)
+    {
+      found = std::string(a->ifa_name) + ((a->ifa_flags & IFF_UP) ? " up" : " down")
+              + ((a->ifa_flags & IFF_RUNNING) ? " running" : " not running");
+      break;
+    }
+  }
+  ::freeifaddrs(addrs);
+  return found;
+}
+
 // Whether a TCP connection to ip:port is accepted within 500 ms
 bool tcp_connects(const std::string& ip, uint16_t port)
 {
@@ -198,7 +275,8 @@ std::string osc_float_message(const std::string& address, float f)
   return m;
 }
 
-void send_osc_float(
+// 0 when the datagram left, the errno of sendto otherwise
+int send_osc_float(
     const std::string& ip, uint16_t port, const std::string& address, float f,
     const std::string& from_ip = {}, uint16_t from_port = 0)
 {
@@ -216,8 +294,10 @@ void send_osc_float(
     ::inet_pton(AF_INET, from_ip.c_str(), &from.sin_addr);
     REQUIRE(::bind(fd, (sockaddr*)&from, sizeof(from)) == 0);
   }
-  ::sendto(fd, m.data(), m.size(), 0, (sockaddr*)&addr, sizeof(addr));
+  const auto n = ::sendto(fd, m.data(), m.size(), 0, (sockaddr*)&addr, sizeof(addr));
+  const int error = n < 0 ? errno : 0;
   ::close(fd);
+  return error;
 }
 
 // The body of the reply to GET <resource> on 127.0.0.1:port, empty on failure
@@ -1455,8 +1535,18 @@ void same_port_on_another_address(
   client.ws.send_message(ossia::oscquery::json_writer::listen("/level"));
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-  send_osc_float(other, osc, "/level", 0.25f, other, sender);
-  REQUIRE(wait_for([&] { return value_of(level) == 0.25f; }, 2000));
+  const int sent = send_osc_float(other, osc, "/level", 0.25f, other, sender);
+  const bool applied = wait_for([&] { return value_of(level) == 0.25f; }, 2000);
+  if(!applied)
+  {
+    // What the server saw of the datagram: a sender that is none of its
+    // clients is listed in ?PEERS
+    const auto ws = static_cast<uint16_t>(std::stoi(url.substr(url.rfind(':') + 1)));
+    UNSCOPED_INFO(
+        "sendto: " << (sent == 0 ? "sent" : std::strerror(sent)) << "; the other address is on "
+                   << interface_of(other) << "; ?PEERS: " << http_get(ws, "/?PEERS"));
+  }
+  REQUIRE(applied);
   REQUIRE(sink.wait_messages(1, 2000));
 }
 }
@@ -1466,6 +1556,10 @@ TEST_CASE("C API: asio server knows a sender by its address and port", "[.][send
   const auto other = other_ipv4();
   if(other.empty())
     SKIP("no interface other than the loopback");
+  if(!warm_up_from(other, warm_up_ms))
+    SKIP("the warm-up datagram from " << interface_of(other) << " did not arrive in "
+                                      << warm_up_ms / 1000
+                                      << " s: the macOS firewall held the flow");
   server s{"c_sender_address_asio"};
   same_port_on_another_address(s.dev, s.osc, s.url(), other);
 }
@@ -1475,6 +1569,10 @@ TEST_CASE("C API: WebSocket++ server knows a sender by its address and port", "[
   const auto other = other_ipv4();
   if(other.empty())
     SKIP("no interface other than the loopback");
+  if(!warm_up_from(other, warm_up_ms))
+    SKIP("the warm-up datagram from " << interface_of(other) << " did not arrive in "
+                                      << warm_up_ms / 1000
+                                      << " s: the macOS firewall held the flow");
   const uint16_t osc = free_port(false), ws = free_port(true);
   auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_sender_address_wspp");
   REQUIRE(dev);
