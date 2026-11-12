@@ -103,8 +103,9 @@ void device::class_setup(t_class* c)
 
 void device::asio_timer(device* x)
 {
-  x->network_context->context.poll();
-  x->network_context->context.restart();
+  // Restarts the context and logs what a handler throws: an exception out of
+  // this poll, on Max's scheduler, would end Max
+  x->network_context->poll();
   clock_delay(x->network_poll_clock, 10);
 }
 

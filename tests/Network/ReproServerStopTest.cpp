@@ -145,6 +145,22 @@ TEST_CASE("Server stop: a stopped server kept alive, a client that leaves", "[st
   CHECK(error.empty());
 }
 
+// What ossia-max's scheduler calls: network_context::poll() logs what a
+// handler throws instead of letting it out, and the context keeps going.
+TEST_CASE("Network context: poll() keeps an exception in and the context going", "[context-poll]")
+{
+  auto ctx = ossia::net::create_network_context();
+  int ran = 0;
+  boost::asio::post(ctx->context, [] { throw std::runtime_error("thrown by a handler"); });
+  boost::asio::post(ctx->context, [&] { ran++; });
+  CHECK_NOTHROW(ctx->poll());
+  CHECK_NOTHROW(ctx->poll());
+  boost::asio::post(ctx->context, [&] { ran++; });
+  CHECK_NOTHROW(ctx->poll());
+  std::printf("context-poll: %d of 2 handlers ran after one threw\n", ran);
+  CHECK(ran == 2);
+}
+
 // After a server is removed from a running network context, a server exposed
 // again on that context, on the same ports or others, must answer HTTP.
 TEST_CASE("Server stop: a server exposed again answers HTTP", "[reexpose]")
