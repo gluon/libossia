@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - Tests: `tests/Network/Repro*Test.cpp` check what the OSCQuery servers, the mirror and the multiplex do, against the OSCQuery proposal: the HTTP answers and the JSON of the tree, `LISTEN` and `IGNORE`, `ACCESS`, a client's own values and crossing writes, bundles, a server stopped with a client connected, and the mDNS announcements (`ReproMdnsTest`, built with `OSSIA_DNSSD`). An attribute the server does not know answers 204, as line 64 of the proposal says (line 71 says 400 for the same case). Two cases are expected to fail (`[!shouldfail]`): the server of `ossia_protocol_oscquery_server_create`, on WebSocket++, still sends a client's values back to it and keeps two values after crossing writes; `ossia.device` and the `Controller` of Unity use the other server, which does neither.
+- Tests: `tests/Network/ZeroconfMinuitListenerTest.cpp` compiles the Minuit listener of ossia-max as it is, against a stand-in for the Max API (`tests/Network/max_listener_stub`) and with the function that builds its devices (`client_mirror.cpp`), and checks that a device leaving the network does not make the listener wait for itself. Holding the listener's lock while it handles the events makes both cases fail.
 - Tools: `tools/check_unity_package.sh` checks a Unity package before a Release: a `.meta` for every file and folder Unity imports, and a version Unity accepts (semver, no leading `v`).
 
 ## [2.1.0+prism.12] - 2026-11-11
