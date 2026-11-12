@@ -10,17 +10,22 @@ public class CustomDevice : MonoBehaviour
 
   // Use this for initialization
   Ossia.Device local;
+  Ossia.NetworkContext network_context;
   float val = 0;
   bool held;
 
   // newDevice is left to the reset of the library, which frees its ports:
   // the reset waits for the Controllers and the Clients of the scene to
-  // free their own devices.
+  // free their own devices. Its server keeps the network context it runs
+  // on: the thread stops first, so that no network event comes while the
+  // device waits for the reset.
   void OnApplicationQuit()
   {
     if (!held)
       return;
     held = false;
+    network_context.Free ();
+    network_context = null;
     Ossia.Controller.Let (true);
   }
 
@@ -40,7 +45,11 @@ public class CustomDevice : MonoBehaviour
     IntPtr intptr_delegate =  Marshal.GetFunctionPointerForDelegate (callback_delegate);
     Ossia.Network.ossia_set_debug_logger (intptr_delegate);
 
-    local = new Ossia.Device (new Ossia.OSCQuery (1234, 5678), "newDevice");
+    // The server a Controller uses (the one of ossia-max), on a network
+    // context that a thread of its own runs
+    network_context = new Ossia.NetworkContext ();
+    local = new Ossia.Device (new Ossia.OSCQuery (network_context, 1234, 5678), "newDevice");
+    network_context.Start ();
     held = true;
     Ossia.Controller.Hold ();
 
