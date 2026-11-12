@@ -79,6 +79,8 @@ set(PROJECT_SRCS
     src/device_base.hpp
     src/device_bundles.hpp
     src/device_bundles.cpp
+    src/device_protocols.hpp
+    src/device_protocols.cpp
     src/device_network.hpp
     src/device_base.cpp
     src/equals.cpp
