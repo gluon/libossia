@@ -149,6 +149,19 @@ if(OSSIA_PROTOCOL_OSCQUERY)
   ossia_add_test(V8ConnectorTest
       "${CMAKE_CURRENT_SOURCE_DIR}/Network/V8ConnectorTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/v8connector_branch.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/device_bundles.cpp")
   target_include_directories(ossia_V8ConnectorTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
+
+  # What the servers, the mirror and the multiplex do, against the OSCQuery
+  # proposal; the files share Network/ReproCommon.hpp
+  ossia_add_test(ReproHttpJsonTest   "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproHttpJsonTest.cpp")
+  ossia_add_test(ReproWebSocketTest  "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproWebSocketTest.cpp")
+  ossia_add_test(ReproBundlesTest    "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproBundlesTest.cpp")
+  ossia_add_test(ReproServerStopTest "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproServerStopTest.cpp")
+  if(OSSIA_DNSSD AND OSSIA_PROTOCOL_MINUIT)
+    # Announces on the local network for a few seconds
+    ossia_add_test(ReproMdnsTest
+        "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproMdnsTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp")
+    target_include_directories(ossia_ReproMdnsTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
+  endif()
 endif()
 
 if(OSSIA_PROTOCOL_MIDI)
