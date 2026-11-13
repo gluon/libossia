@@ -539,13 +539,19 @@ void oscquery_server_protocol::rename_node(
 
 void oscquery_server_protocol::on_OSCMessage(
     const oscpack::ReceivedMessage& m, oscpack::IpEndpointName ip)
-try
 {
   auto ident = [&] {
     std::lock_guard lck{m_clientsMutex};
     return client_identifier(m_clients, ip);
   }();
-  auto id = ossia::net::message_origin_identifier{*this, ident};
+  on_osc_message_from(m, ident);
+}
+
+void oscquery_server_protocol::on_osc_message_from(
+    const oscpack::ReceivedMessage& m, uintptr_t origin)
+try
+{
+  auto id = ossia::net::message_origin_identifier{*this, origin};
   ossia::net::on_input_message<true>(
       m.AddressPattern(), ossia::net::osc_message_applier{id, m}, m_listening, *m_device,
       m_logger);
@@ -789,21 +795,15 @@ ossia::net::server_reply oscquery_server_protocol::on_WSrequest(
 ossia::net::server_reply oscquery_server_protocol::on_BinaryWSrequest(
     const oscquery_server_protocol::connection_handler& hdl, const std::string& message)
 {
+  // The connection identifies the client, as for its other messages: a value
+  // the device echoes does not go back to it
+  const uintptr_t origin = find_client(hdl) ? (uintptr_t)hdl.lock().get() : 0;
   auto handler
-      = [this](const oscpack::ReceivedMessage& m, const oscpack::IpEndpointName& ip) {
-    this->on_OSCMessage(m, ip);
+      = [this, origin](const oscpack::ReceivedMessage& m, const oscpack::IpEndpointName&) {
+    this->on_osc_message_from(m, origin);
   };
   osc::listener<decltype(handler)> h{handler};
-  auto clt = find_client(hdl);
-  if(clt)
-  {
-    // TODO use proper ip / port
-    h.ProcessPacket(message.data(), message.size(), {});
-  }
-  else
-  {
-    h.ProcessPacket(message.data(), message.size(), {});
-  }
+  h.ProcessPacket(message.data(), message.size(), {});
 
   return {};
 }

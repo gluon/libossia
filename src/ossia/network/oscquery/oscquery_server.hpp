@@ -95,6 +95,9 @@ private:
 
   // OSC callback
   void on_OSCMessage(const oscpack::ReceivedMessage& m, oscpack::IpEndpointName ip);
+  // A message from a client: origin is its connection, 0 when unknown; a
+  // value its device echoes is not sent back to it
+  void on_osc_message_from(const oscpack::ReceivedMessage& m, uintptr_t origin);
 
   // Websocket callbacks
   void on_connectionOpen(const connection_handler& hdl);
