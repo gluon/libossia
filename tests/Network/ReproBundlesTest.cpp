@@ -62,6 +62,17 @@ struct sink_server
     return ossia::net::find_node(dev->get_root_node(), "/load/p" + std::to_string(i))->get_parameter();
   }
 };
+
+// A mirror sends its values over UDP from the moment it has read the HOST_INFO
+// of the server, over the WebSocket before: a case that reads the UDP port of
+// the server waits for it
+void wait_host_info(ossia::net::generic_device& client)
+{
+  auto& m = static_cast<ossia::oscquery::oscquery_mirror_protocol&>(client.get_protocol());
+  for(int t = 0; t < 3000 && !m.get_host_info().osc_port; t += 10)
+    std::this_thread::sleep_for(10ms);
+  std::this_thread::sleep_for(100ms); // its sender comes right after
+}
 }
 
 // The mirror's push_bundle sends the values of many parameters in OSC
@@ -73,6 +84,7 @@ TEST_CASE("Mirror: push_bundle sends the values", "[mirror-push-bundle]")
   auto client = std::make_shared<ossia::net::generic_device>(
       std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)), "bundles");
   REQUIRE(client->get_protocol().update(client->get_root_node()));
+  wait_host_info(*client);
   std::vector<const ossia::net::parameter_base*> params;
   for(int i = 0; i < n; i++)
   {
@@ -133,6 +145,7 @@ TEST_CASE("Mirror: values of one parameter in one bundle", "[repeated-parameter-
   auto client = std::make_shared<ossia::net::generic_device>(
       std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)), "bundles");
   REQUIRE(client->get_protocol().update(client->get_root_node()));
+  wait_host_info(*client);
   auto* p0 = ossia::net::find_node(client->get_root_node(), "/load/p0")->get_parameter();
   std::vector<ossia::bundle_element> elements{{p0, 1.f}, {p0, 2.f}, {p0, 3.f}};
   server.sink.clear();
