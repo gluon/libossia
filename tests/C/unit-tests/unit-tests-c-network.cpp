@@ -1209,3 +1209,50 @@ TEST_CASE("C API: crossed writes converge while the server forwards", "[network_
   INFO("divergences " << divergences << " in 20");
   REQUIRE(divergences == 0);
 }
+
+namespace
+{
+// The status code of the reply to GET <resource> on 127.0.0.1:port, 0 on failure
+int http_status(uint16_t port, const std::string& resource)
+{
+  int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  if(::connect(fd, (sockaddr*)&addr, sizeof(addr)) != 0)
+  {
+    ::close(fd);
+    return 0;
+  }
+  timeval tv{2, 0};
+  ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  const std::string req
+      = "GET " + resource + " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+  ::send(fd, req.data(), req.size(), 0);
+  char buf[64]{};
+  const auto n = ::recv(fd, buf, sizeof(buf) - 1, 0);
+  ::close(fd);
+  int code = 0;
+  return n > 0 && std::sscanf(buf, "HTTP/1.1 %d", &code) == 1 ? code : 0;
+}
+}
+
+// A peer of the network must not be able to take the server down: the DATA of
+// LISTEN and IGNORE is a string in the OSCQuery proposal.
+TEST_CASE("C API: LISTEN and IGNORE whose DATA is not a string are ignored", "[network_c]")
+{
+  server s{"c_listen_data_server"};
+  auto level = float_parameter(s.dev, "/level");
+  ossia_parameter_push_f(level, 0.5f);
+  raw_client c{s.url()};
+  REQUIRE(c.ws.connected());
+
+  for(const char* command : {"LISTEN", "IGNORE"})
+    for(const char* data : {"12", "null", "true", "[1]", "{\"a\":1}"})
+      c.ws.send_message(
+          std::string{"{\"COMMAND\":\""} + command + "\",\"DATA\":" + data + "}");
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+  REQUIRE(http_get(s.ws, "/level?VALUE") == "{\"VALUE\":0.5}");
+}
