@@ -5,7 +5,7 @@
 #include <ossia/detail/config.hpp>
 
 #include <ossia/network/oscquery/detail/json_writer.hpp>
-#include <ossia/network/sockets/websocket_client.hpp>
+#include <ossia/network/sockets/websocket_client_beast.hpp>
 
 #include <ossia-c/ossia-c.h>
 
@@ -288,7 +288,8 @@ struct udp_sink
 // server to send the values to a UDP port of the test.
 struct raw_client
 {
-  ossia::net::websocket_client ws{[](auto&&...) {}};
+  // Owns its context: stop() ends connect_and_run()
+  ossia::net::websocket_client_beast ws{[](auto&&...) {}};
   std::thread thread;
 
   explicit raw_client(const std::string& url)
