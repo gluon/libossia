@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 
 #include <ossia/detail/algorithms.hpp>
 #include <ossia/detail/audio_spin_mutex.hpp>
@@ -54,6 +55,9 @@ public:
 
   //! The protocols we are currently exposing this device through.
   const auto& get_protocols() const { return m_protocols; }
+
+  //! Calls f with each protocol, under the lock that push takes.
+  void for_each_protocol(const std::function<void(ossia::net::protocol_base&)>& f);
 
 private:
   std::vector<std::unique_ptr<ossia::net::protocol_base>>

@@ -149,3 +149,51 @@ TEST_CASE("Mirror: values of one parameter in one bundle", "[repeated-parameter-
   CHECK(order == "1 2 3 ");
   CHECK(server.sink.datagrams.size() == 1);
 }
+
+// The same through a server, as the C API and ossia.device send the values of
+// a tick:
+// three values of one parameter in one push_bundle of bundle_element reach a
+// client that listens to it in one bundle, in order, and none reaches a
+// client that does not.
+TEST_CASE("Server: values of one parameter in one bundle", "[server-values-bundle]")
+{
+  sink_server server{1};
+  udp_sink listening{free_port(false)}, quiet{free_port(false)};
+  ws_client listener{server.ws}, other{server.ws};
+  REQUIRE(listener.connected());
+  REQUIRE(other.connected());
+  auto stream = [](ws_client& c, udp_sink& s) {
+    auto text = ossia::oscquery::json_writer::start_osc_streaming(s.port(), 0);
+    c.send_text(std::string(text.GetString(), text.GetSize()));
+  };
+  stream(listener, listening);
+  stream(other, quiet);
+  listener.command("LISTEN", "/load/p0");
+  std::this_thread::sleep_for(500ms);
+
+  std::vector<ossia::bundle_element> elements{
+      {server.param(0), 1.f}, {server.param(0), 2.f}, {server.param(0), 3.f}};
+  listening.clear();
+  quiet.clear();
+  ossia::net::protocol_base* asio{};
+  server.multiplex->for_each_protocol([&](ossia::net::protocol_base& p) {
+    if(dynamic_cast<ossia::oscquery_asio::oscquery_server_protocol_base*>(&p))
+      asio = &p;
+  });
+  REQUIRE(asio);
+  const bool sent = asio->push_bundle(std::span<ossia::bundle_element>(elements));
+  listening.wait_messages(3, 3000);
+  std::this_thread::sleep_for(200ms);
+  std::lock_guard lock{listening.mutex};
+  std::lock_guard lock_quiet{quiet.mutex};
+  std::string order;
+  for(auto& m : listening.messages)
+    order += std::to_string(int(m.value)) + " ";
+  std::printf("server-values-bundle: push_bundle returned %d; the listening client got %zu message(s) (%s) in %zu datagram(s), the other %zu\n",
+              int(sent), listening.messages.size(), order.c_str(), listening.datagrams.size(),
+              quiet.messages.size());
+  CHECK(sent);
+  CHECK(order == "1 2 3 ");
+  CHECK(listening.datagrams.size() == 1);
+  CHECK(quiet.messages.empty());
+}
