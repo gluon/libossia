@@ -1853,6 +1853,13 @@ struct raw_client
     auto msg = ossia::oscquery::json_writer::start_osc_streaming(udp_port, 0);
     ws.send_message(std::string(msg.GetString(), msg.GetSize()));
   }
+  // This client is a peer of the test: it asks for what it wants, as any client
+  void listen_load(int n, const std::string& prefix = "/load/p")
+  {
+    for(int i = 0; i < n; i++)
+      ws.send_message(ossia::oscquery::json_writer::listen(prefix + std::to_string(i)));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
 };
 }
 
@@ -1866,6 +1873,7 @@ TEST_CASE("oscquery_multiplex_push_bundle", "oscquery_multiplex_push_bundle")
   raw_client client{server.url()};
   REQUIRE(client.ws.connected());
   client.stream_to(client_sink.socket.local_endpoint().port());
+  client.listen_load(n);
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
   std::vector<const ossia::net::parameter_base*> params;
@@ -1993,6 +2001,8 @@ TEST_CASE("v8connector_bundles_served_leaves", "v8connector_bundles_served_leave
   b.drain();
   b.set_bundle(true);
   std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  // Once the leaves exist: a LISTEN on an unknown address listens to nothing
+  client.listen_load(n, "/synth/p");
   client_sink.clear();
 
   for(int i = 0; i < n; i++)
@@ -2456,6 +2466,7 @@ TEST_CASE("device_bundles", "device_bundles")
     raw_client client{server.url()};
     REQUIRE(client.ws.connected());
     client.stream_to(client_sink.socket.local_endpoint().port());
+    client.listen_load(n);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     REQUIRE(ossia::max_binding::bundles_by_default(server.dev->get_protocol()));
 
@@ -2594,6 +2605,7 @@ TEST_CASE("oscquery_value_bundles", "oscquery_value_bundles")
     raw_client client{server.url()};
     REQUIRE(client.ws.connected());
     client.stream_to(client_sink.socket.local_endpoint().port());
+    client.listen_load(n);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     std::vector<ossia::bundle_element> elements;
     for(int i = 0; i < n; i++)
