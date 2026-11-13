@@ -1441,8 +1441,9 @@ struct text_client
 {
   std::mutex mutex;
   std::vector<std::string> texts;
-  ossia::net::websocket_client ws{[this](auto&&, auto op, const std::string& text) {
-    if(op == websocketpp::frame::opcode::text)
+  // Owns its context: stop() ends connect_and_run()
+  ossia::net::websocket_client_beast ws{[this](const ossia::net::ws_connection_handle&, ossia::net::ws_opcode op, std::string& text) {
+    if(op == ossia::net::ws_opcode::text)
     {
       std::lock_guard lock{mutex};
       texts.push_back(text);
@@ -1742,8 +1743,9 @@ struct udp_follower
 struct ws_follower
 {
   udp_sink sink{free_port(false)};
-  ossia::net::websocket_client ws{[this](auto&&, auto op, const std::string& data) {
-    if(op == websocketpp::frame::opcode::binary)
+  // Owns its context: stop() ends connect_and_run()
+  ossia::net::websocket_client_beast ws{[this](const ossia::net::ws_connection_handle&, ossia::net::ws_opcode op, std::string& data) {
+    if(op == ossia::net::ws_opcode::binary)
     {
       std::lock_guard lock{sink.mutex};
       sink.decode(data.data(), data.size());
