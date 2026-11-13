@@ -4,6 +4,107 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [2.1.0+prism.14] - 2026-11-13
+
+The packages are built on the WebSocket server and client of the pull request
+[ossia#876](https://github.com/ossia/libossia/pull/876) (Boost.Beast in place of
+WebSocket++, IPv6, socket.io), which is not merged upstream. Every correction of
+`2.1.0+prism.1` to `2.1.0+prism.12` is on that base, each with its test; the
+reproduction tests of `tests/Network/Repro*.cpp` all pass, none of them expected
+to fail.
+
+### Base
+
+- The WebSocket server and client are Boost.Beast: `websocket_server.hpp` and
+  `websocket_client.hpp` are gone, and the sockets speak IPv6. None of this is
+  PRISM's work. What follows is what our corrections became on it, and what had
+  to be written again for it.
+- OSCQuery server: the HTTP status of an error (404 for an address that does not
+  exist, 400 for a bad request, 500 left for the rest) and the 204 of an
+  attribute the server does not know are written on the beast connection. A
+  WebSocket or socket.io query answers nothing for that 204, as for any empty
+  answer.
+- OSCQuery server: `expose oscquery <osc port> <ws port> [<address>]` and
+  `ossia_protocol_oscquery_server_asio_create_bound` listen on one address
+  through `websocket_server_interface::listen(address, port)`, which the beast
+  server serves on that address alone, without the dual stack, and which refuses
+  an address it cannot bind instead of taking every interface.
+- OSCQuery server: the TCP port of a client, which `?PEERS` and
+  `?PRISM_CONNECTIONS` give, comes from the remote endpoint of its connection,
+  the raw socket of WebSocket++ being gone.
+- OSCQuery client: the HTTP client names the host, the port and the request of an
+  error, and answers a 204 without logging an error.
+- OSCQuery client: the mirror of the core and the asio mirror read again the
+  address of a `PATH_CHANGED`, the asio one with a request of its own.
+- `network_context::poll()` restarts the context and keeps in what a handler
+  throws, instead of letting it out on the thread that polls: the change
+  `efb1afc1f` of ossia's `master`, by Jean-Michaël Celerier. `ossia.device`,
+  `ossia.client` and `[ossia]` poll through it.
+- A correction to ossia#876 itself, to send upstream: the beast acceptor no
+  longer logs an error for a client gone before it was accepted. 200 clients
+  that connect and reset gave 92 red lines in Max's console. Measured on macOS,
+  `accept(2)` succeeds for such a client and asio reports `EINVAL` while it sets
+  up a socket whose peer has already left; the same error comes without end from
+  an acceptor that can accept nothing, which is told apart by its count. Beyond
+  32 failures in a row with no connection accepted, the error is logged and the
+  next connection taken 50 ms later.
+
+### Added
+
+- Tests: `tests/Network/Repro*Test.cpp` check what the OSCQuery servers, the mirror and the multiplex do, against the OSCQuery proposal: the HTTP answers and the JSON of the tree, `LISTEN` and `IGNORE`, `ACCESS`, a client's own values and crossing writes, bundles, a server stopped with a client connected, and the mDNS announcements (`ReproMdnsTest`, built with `OSSIA_DNSSD`). An attribute the server does not know answers 204, as line 64 of the proposal says (line 71 says 400 for the same case). Two cases are expected to fail (`[!shouldfail]`): the server of `ossia_protocol_oscquery_server_create`, on WebSocket++, still sends a client's values back to it and keeps two values after crossing writes; `ossia.device` and the `Controller` of Unity use the other server, which does neither.
+- Tests: `tests/Network/ZeroconfMinuitListenerTest.cpp` compiles the Minuit listener of ossia-max as it is, against a stand-in for the Max API (`tests/Network/max_listener_stub`) and with the function that builds its devices (`client_mirror.cpp`), and checks that a device leaving the network does not make the listener wait for itself. Holding the listener's lock while it handles the events makes both cases fail.
+- Tools: `tools/check_unity_package.sh` checks a Unity package before a Release: a `.meta` for every file and folder Unity imports, and a version Unity accepts (semver, no leading `v`).
+- Tools: `tools/check_unity_scripts.sh` compiles the scripts of the Unity package (its `.tgz`, or the sources the install takes) with the C# compiler and the UnityEngine assemblies of a Unity editor, without opening it.
+- Tests: a bundle of values a server sends reaches the clients that listen to its addresses, in one datagram and in order (`[server-values-bundle]` of `tests/Network/ReproBundlesTest.cpp`); a mirror and an asio mirror follow the `PATH_CHANGED` of a server written for the case (`[path-changed]`); a string the C API returns is freed as it was allocated, which AddressSanitizer checks (`[strings]` of `tests/C/unit-tests/unit-tests-c-api.cpp`).
+
+### Fixed
+
+- Tests: `C API: asio server knows a sender by its address and port` failed now and then in a full run of the suite, right after a build. The application firewall of macOS, when it is on, holds the first flow from another address than the loopback that a binary it does not know yet receives, while it decides on that binary: 1.5 to 3.5 s, once 48 s, longer than the 2 s the test waited for its datagram. Before the check, a warm-up datagram from the same address is now waited for, up to 10 s; the test is skipped only if it never comes, with the reason in its output (`ctest -V`, `Testing/Temporary/LastTest.log`). On failure, the test also says whether its datagram left, from which interface, and what the server saw (`?PEERS`). Measured: 21 runs of 21 passed without a build in between; 1 failure in 5 runs of freshly linked binaries without the warm-up; with it, the first run after a build waited 5.7 s and passed. Mutation: a warm-up of 0 s skips both cases.
+- Max: `get protocols` of an `ossia.device` lists its OSCQuery server, and `get oscquery_clients` its clients. Both looked for the server of the C API, which `ossia.device` does not build: after `expose oscquery`, `get protocols` gave a `protocol` message without arguments, and `get oscquery_clients` gave `oscquery_clients_size 0` with clients connected. What they report is now built in `device_protocols.cpp`, without Max, and tested there (`tests/Network/DeviceProtocolsTest.cpp`): before, the server of `ossia.device` not listed and none of its 2 clients; after, the server with its OSC and WebSocket ports, and both clients, with the UDP port they stream to, or -1 for the one that receives over the WebSocket. Not run in Max. Same code in ossia 2.1.0.
+
+### Changed
+
+- Unity: the example `CustomDevice.cs` serves its device with the OSCQuery server the Controller uses, on a network context of its own, which `OnApplicationQuit` frees before the reset of the library: the server that does not send a client's own values back to it and arbitrates crossing writes (`ReproWebSocketTest`). It used `new Ossia.OSCQuery (osc, ws)`, the other server, which does neither. Its scripts compile (`tools/check_unity_scripts.sh`), and `PlayCycleTests.StopWithCustomDeviceAndAClient` passes with it (a new project, Unity 6000.3, batchmode: EditMode 26 of 26, PlayMode 37 of 37).
+
+## [2.1.0+prism.12] - 2026-11-11
+
+A client gets only the addresses it listens to, and the server applies `ACCESS`; `?PEERS` and `CLIENT_NAME` say who follows what under neutral names; a read of a parameter nothing follows no longer waits for the server; the server follows the OSCQuery proposal where it did not; Max makes one connection to a device announced again, and its console no longer shows red lines for clients that leave as they connect or servers that close as a client stops.
+
+### Behavior changes
+
+- OSCQuery server: `ACCESS` is applied. What a client writes to a read-only parameter (`GET`) is ignored, over UDP, over the WebSocket, as JSON and through a pattern; `?VALUE` on a write-only parameter (`SET`) answers 204. What stops working: a client that writes over the network to a parameter published as `GET`. A value set locally, by the patch or the script, is not affected.
+- OSCQuery server: as in the proposal, a client gets only the addresses it sent `LISTEN` for, one address each, and `IGNORE` stops one: a `LISTEN` on a container delivers nothing below it, and a client that never sent `LISTEN` gets no value. An address counts from the moment the server has read its `LISTEN`. The libossia mirror sends `LISTEN` for every parameter that has a callback (`ossia.remote`, `bind` of `ossia.v8connector`, `Ossia.Remote`), and reading a parameter without one asks the server for its value, without waiting: the read returns the last value known, and asks at most every 100 ms for an address (one request in flight, given up after 1 s); an answer older than a write of this client is dropped, so it never brings back the value the write replaced (`C API: an answer older than a write of this client does not undo it`). Read every frame (an `Update` of Unity, a `metro` on `namespace` in Max), it took 0.5 to 1.2 ms and sent 60 requests per second when it waited for the answer; it now takes 0.01 to 0.03 ms and sends 9 to 10 per second; 50 parameters read in one frame took 67 ms, now 2 to 6 ms. A callback (`ossia.remote`, `Ossia.Remote`) is the way to follow a value. What stops working: a client that relied on receiving values without sending `LISTEN` for them, or on receiving the addresses it did not listen to.
+
+### Added
+
+- OSCQuery server: `?PEERS` and `CLIENT_NAME`, declared in the `EXTENSIONS` of `HOST_INFO` (specification: `propositions/oscquery-peers-extension.md` of PRISM). `?PEERS` answers at the root only: the clients (address, port, the name a client gave, its OSC port, the addresses it listens to, its packet count) and the senders of OSC that are not clients, most recent first; what the server cannot fill is left out. `CLIENT_NAME` names the client that sends it. Tests `C API: ?PEERS ...`.
+- OSCQuery client: the mirror gives its name with `CLIENT_NAME` to a server that declares it, else with `PRISM_NAME` to a server that declares `PRISM_CONNECTIONS`.
+- OSCQuery client: a `PATH_CHANGED` makes the mirror read the address again, as the proposal says: the node is created or reloaded, a 404 removes it as `PATH_REMOVED` does; on the root, the whole tree is read again.
+- `tools/prism-map` reads `?PEERS` when a server declares it, else `?PRISM_CONNECTIONS`.
+
+### Deprecated
+
+- `?PRISM_CONNECTIONS` and `PRISM_NAME`, kept unchanged during the transition to `?PEERS` and `CLIENT_NAME`, are to be removed in a later version.
+
+### Fixed
+
+- OSCQuery server: `LISTEN` and `IGNORE` with a `DATA` that is not a string are ignored. `{"COMMAND":"LISTEN","DATA":12}` from any peer of the network took the server down.
+- OSCQuery server: a node not found answers 404 and a bad request 400; both ended as 500. A 204 is no longer logged as an error by the HTTP client.
+- OSCQuery server: a number that is not finite and a map are written as `null`: one such parameter made the whole tree unreadable for a strict JSON parser.
+- OSCQuery server: `HOST_INFO` declares `ECHO` as the device has it (it said true with the echo off, the default), and declares `EXTENDED_TYPE`, which it writes.
+- OSCQuery server: a UDP sender is known by its address and its port: two clients on two machines with the same source port were taken for one.
+- OSCQuery server: one `ATTRIBUTES_CHANGED` for a new parameter (there were two), and none after `PATH_REMOVED` for the parameter of the removed node.
+- OSCQuery server: an attribute query agrees with the tree: an attribute a node does not have is `{}`, an attribute the server does not know is 204 (it gave `null`, `"none"` or another value).
+- OSCQuery server: the fragment of a URL is disregarded, as the proposal says.
+- OSCQuery client: the value of a parameter the server adds comes once, however late the second change of the parameter, and when a Remote reads it before following it (it came twice: `ClientTests.AddressAddedLaterGetsItsValueOnce`, `C API: an added parameter read then followed gets its value once`).
+- Max: the listener of `_oscjson._tcp` keeps the connection it is building to a device that withdraws and makes its announcement again: a server that restarted got two connections of the package, the first dropped. Measured with the bench of TouchDesigner 0.3.5: 4 to 5 connections of the package per run, 1 to 2 times two at once, in 5 runs with `2.1.0+prism.11`; 3 per run, one after each restart of the server, never two at once, in 2 runs.
+- Tests: the tests of UDP senders are reported as skipped on a machine with no interface other than the loopback; they counted as passed.
+- OSCQuery client: an HTTP error names the host, the port and the request (`HTTP Error: <host>:<port><request>: <error>`). The line `HTTP Error: Host not found (authoritative)` seen in Max's console named neither: on macOS, a device found by name is reached at the host name of its announcement, which each request of the client resolves again, and a name that does not resolve at that moment gave that line with nothing to tell which device. Test `C API: an HTTP error names the host and the request`.
+- OSCQuery server: a client that leaves as soon as its WebSocket is open is no error. It put `oscquery_server_protocol::on_connectionOpen: remote_endpoint: Invalid argument` in red in Max's console, with `2.1.0+prism.11` as well: such a client has no address any more when the server takes it. It was never in `?PEERS`, and the clients that stay are listed with their address and port as before. Tests `C API: asio server: a client that leaves as it connects is no error` and its WebSocket++ counterpart; in Max, `tests/Max/check_console.py`, 200 such clients against an `ossia.device`: the line many times with `2.1.0+prism.11`, none after.
+- OSCQuery client: a mirror stopped while its server is closing the connection is no error, and stops at once. It put `Error when stopping WS server` in red in Max's console, with `2.1.0+prism.11` as well, and waited for the server to end the connection, up to the 5 s of the WebSocket closing handshake. Test `C API: a mirror stopped as its server closes is no error`: 5.1 s and the red line before, 0.4 s after; in Max, `tests/Max/check_console.py`, the `disconnect` of an `ossia.client`: 4.70 s and the line with `2.1.0+prism.11`, 0.05 s and no line after.
+- Unity: the sample "Follow a device" keeps following Max when Unity loses the focus. It has no Controller, which sets `Application.runInBackground`, so Unity paused play as soon as Max was clicked, and the cube stopped following (found by hand on `152eba718`). `FollowADevice.cs` sets it as it wakes, and the Unity README states the host condition: Unity must keep playing without the focus.
+- Unity README: running the package's tests in a new project needs `"com.unity.test-framework": "1.6.0"` in the `dependencies` of `Packages/manifest.json`, as well as `"testables": ["io.ossia.ossia-unity"]`; the README gave only the second (found by hand on `152eba718`).
+
 ## [2.1.0+prism.11] - 2026-11-09
 
 Max no longer freezes when a Minuit device leaves the network, nor announces services without end when one comes; its connections to announced devices name the package; an `ossia.remote` gets the value of a node added while connected once; and a value written to the inlet of `ossia.parameter` is no longer lost while the object outputs a value of the network.
@@ -108,7 +209,7 @@ Unity package: Send Updates on by default, no echo of a received value, a Contro
 
 ## [2.1.0+prism.8] - 2026-11-02
 
-A documentation release: no object of the Max package and no script of the Unity package behaves differently from `2.1.0+prism.7`. Published for macOS universal (Apple Silicon and Intel), as `2.1.0+prism.7`.
+Documentation, and one fix in the Unity package: no object of the Max package behaves differently from `2.1.0+prism.7`. Published for macOS universal (Apple Silicon and Intel), as `2.1.0+prism.7`.
 
 ### Added
 
@@ -124,6 +225,10 @@ A documentation release: no object of the Max package and no script of the Unity
 - Max: the README and the reference of `ossia.client` say that `[ossia.client <name>]`, created with a name only, sends itself `connect` without argument as it is created, then, every second, `connect` with nothing after it on its outlet and the help of the protocols in the console, until a `connect` with arguments or a `disconnect`; the notes of `2.1.0+prism.6` described the attempts of `connect <name>` and not this. The README also explains why a connection by name reports every node removed then created: the client reads the tree again.
 - Unity: the patch of the sample "Custom parameters" creates `[ossia.client]` without argument; with `[ossia.client custom]`, it printed the help of the protocols every second from its opening.
 - Unity: the Package Manager's menu item is "Install package from tarball…" in Unity 6.3; the notes of `2.1.0+prism.7` said "Add package from tarball".
+
+### Fixed
+
+- Unity: with Send Updates checked on `ExposeAttributes`, the `Controller` set back a field or a transform value to what `ExposeAttributes` had published the frame before, once Unity called the script that changes it between the two (Unity chooses that order). The values a binding pushes come back to it through the `Controller`'s message queue, and were applied again: the cube of the sample "Custom parameters" turned by jerks, measured in the editor at 60 frames per second at 0.45 to 0.6 times its speed, 1.0 with the fix. A binding no longer applies the value it published while the parameter still holds it; a value from a client is applied as before. The binding is that of ossia 2.1.0 (`unity3d/impl/ParameterBindings.cs`).
 
 ## [2.1.0+prism.7] - 2026-11-02
 
@@ -147,6 +252,7 @@ Unity package **ossia (PRISM)** (`io.ossia.ossia-unity`), for macOS universal, i
 ### Fixed
 
 - Unity: the package the build assembles installs and compiles: it carries `ossia.asmdef`, without which Unity compiled none of its scripts, and a `.meta` file for each file and folder, without which Unity ignored them all in a package installed from a tarball (150 assets ignored). Its version is the tag without its leading `v`; its macOS library is enabled for any CPU, no longer for x86_64 only, which the Apple Silicon editor did not load.
+- Unity: a player builds: `PresetController.cs` declared its inspector drawer, editor code, outside `#if UNITY_EDITOR`, and any player build, Mono or IL2CPP, failed to compile (`PropertyDrawer` not found).
 - Unity: the scene follows the values received when Unity loses focus: with the project's Run In Background off, Unity stopped `Update`, where the `Controller` applies them, until its window was focused again.
 - Unity: `Vector4` and `Quaternion` are sent x, y, z, w, the order they are read in and the order of ossia's `orientation.quaternion`; they were sent w, x, y, z. A peer that reordered the components it received from Unity must stop doing so.
 - Unity: a `Color32` no longer throws `InvalidCastException`: it is sent and read with components from 0 to 255 (`color.rgba8`).

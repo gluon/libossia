@@ -1,104 +1,12 @@
-ossia-prism 2.1.0+prism.3
-Paquet Max ossia (libossia 2.1.0) avec l'objet ossia.v8connector.
+ossia-prism 2.1.0+prism.14
+Max package ossia (libossia 2.1.0) with the object ossia.v8connector,
+which lets a v8 or v8ui script declare its own parameters.
 Julien Bayle, PRISM (CNRS), https://www.prism.cnrs.fr/
 
-CONTENU
-- Tous les objets ossia.* du paquet ossia officiel 2.1.0.
-- ossia.v8connector : les paramètres déclarés par un script v8 ou v8ui
-  rejoignent l'arbre ossia du patch, à côté des ossia.parameter.
-- Plateformes : macOS universel (Apple Silicon et Intel), Windows x64.
+The documentation is the README of the repository:
+https://gitlab.prism.cnrs.fr/labo/outils/libossia
+installation, update, declaring your own parameters, reference of the
+object and of its helper, limits and troubleshooting.
 
-INSTALLATION
-1. Quitter Max.
-2. Retirer le paquet ossia officiel s'il est installé (Package Manager,
-   ossia, Uninstall, ou supprimer Documents/Max 9/Packages/ossia).
-   ossia-prism contient déjà tous les objets ossia : les deux paquets
-   ne peuvent pas cohabiter.
-3. Décompresser l'archive dans Documents/Max 9/Packages/
-   (on obtient Documents/Max 9/Packages/ossia-prism).
-4. macOS seulement, le paquet n'étant pas signé par Apple, dans le Terminal :
-   xattr -dr com.apple.quarantine ~/Documents/Max\ 9/Packages/ossia-prism
-5. Relancer Max. À la création d'un ossia.v8connector, la console affiche
-   « ossia-prism 2.1.0+prism.3, PRISM CNRS ».
-
-PRISE EN MAIN
-- Aide : clic droit sur ossia.v8connector, Open Help (onglets Basic,
-  Script, Limits).
-- Démo : examples/ossia.v8connector.demo.maxpat dans le paquet.
-- Helper JavaScript : javascript/ossia.v8connector.js (declare, set,
-  bind, on).
-
-RECETTES
-- Ajouter et retirer depuis un script : le helper envoie lui-même add et
-  remove, en trouvant l'objet par son nom de scripting (varname, dans
-  l'inspecteur), sans câble. Le câble de la sortie gauche vers le script
-  ne sert qu'à recevoir les valeurs, ready et refused. Exemple : une
-  grille v8ui où un clic crée cell/x/y et un second le retire :
-    if (cells.has(a)) { cells.delete(a); grid.remove(a); }
-    else { cells.add(a); grid.add(a, { type: "float", min: 0, max: 1, default: 0 }); }
-  Si l'objet est supprimé puis recréé, il envoie ready et le helper rejoue
-  les cases encore déclarées, pas celles retirées.
-  Exemple complet dans le paquet : examples/ossia.v8connector.grid.maxpat,
-  une grille 8 x 8, un ossia.device à exposer sur les ports 7101 et 7102
-  (un seul clic sur expose) et un jweb qui montre l'arbre servi en direct.
-- Qui possède un paramètre : une instance ne retire que ce qu'elle a
-  déclaré. remove cell/3/4 envoyé à une autre instance y est refusé
-  (refused cell/3/4 unknown address 'cell/3/4') et le paramètre reste :
-  son propriétaire rejoue ses déclarations à chaque ready. Pour agir sur
-  un paramètre déclaré ailleurs : bind puis set.
-- L'argument est obligatoire : [ossia.v8connector synth] nomme le nœud
-  qui regroupe les paramètres de l'instance, sous le model ou le device
-  englobant ; add gain crée synth/gain. Un second synth au même endroit
-  devient synth.1. Sans argument, la console affiche « ossia.v8connector
-  needs a branch name as first argument ». bind ne passe pas par ce nœud :
-  son adresse est relative au model ou au device englobant, comme pour
-  ossia.remote (bind synth/gain).
-
-MISE À JOUR
-- Ne pas mettre ossia à jour depuis le Package Manager : il réinstallerait
-  le paquet officiel.
-- Pour une nouvelle version d'ossia-prism, remplacer le dossier
-  Documents/Max 9/Packages/ossia-prism par celui de la nouvelle archive.
-
-LIMITES CONNUES
-- Serveur OSCQuery : celui d'ossia.device, inchangé. Un second « expose »
-  sur un port déjà occupé fait planter Max : utiliser des ports explicites
-  et libres, et envoyer « stop » avant d'exposer de nouveau.
-- Windows : la découverte automatique des devices OSCQuery (mDNS) dépend
-  du service Bonjour, installé et démarré. Sans lui, connecter ossia.client
-  à une adresse explicite.
-- Unités de couleur : libossia les publie en EXTENDED_TYPE (tableau
-  color.rgb.r, color.rgb.g, ...) suivi d'une seconde clé EXTENDED_TYPE
-  « vecf », jamais en UNIT. Un client qui garde la dernière clé en double
-  voit « vecf » et aucune unité. Les autres unités (gain, temps, distance,
-  vitesse, angle) sont publiées en UNIT.
-- Une unité impose son type (color.rgb : vec3f, color.rgba : vec4f) :
-  une déclaration dont le @type diffère est refusée, avec la raison.
-- @clip none est accepté comme mode libre (free).
-- Tout refus sort aussi par la sortie gauche : refused <adresse> <raison>.
-  « ready » et « refused » sont des noms réservés.
-- Autres limites de l'objet : onglet Limits de l'aide.
-
-DÉFAUTS CONNUS
-- Max a planté deux fois dans ossia.v8connector (branch::queue_current_value,
-  appelé quand l'objet s'enregistre de nouveau), dans un patch dont les bind
-  visent un device distant : une fois 1,4 s après le retour de ce device sous
-  le même nom, une fois sans action sur ce device depuis 30 minutes. Un retour
-  identique, plus tôt, n'a pas planté. La cause n'est pas établie.
-- Un ossia.client connecté par nom (connect <nom>, zeroconf) reçoit l'arbre,
-  mais les changements envoyés ensuite par le serveur (PATH_ADDED,
-  ATTRIBUTES_CHANGED) ne sont pas appliqués : un paramètre ajouté sur le
-  serveur n'apparaît pas. Dans le code, ces commandes ne sont exécutées que
-  pour un client connecté par URL (connect oscquery ws://hôte:port).
-- Le client OSCQuery envoie un message OSC par valeur, jamais un bundle, même
-  pour des valeurs poussées ensemble : 128 paramètres liés qui changent à
-  chaque frame donnent 128 messages WebSocket par frame. Le serveur sait
-  envoyer des bundles.
-
-LIENS
-- Paquets Max : https://docs.cycling74.com/userguide/packages/
-- Documentation ossia : https://ossia.io/ossia-docs/
-
-LICENCE
-libossia : LGPLv3 ou CeCILL-C, au choix. Fichiers de ossia.v8connector :
-copyright CNRS.
+In Max: right click on ossia.v8connector > Open Help; Extras menu >
+ossia-prism examples.
