@@ -1721,6 +1721,7 @@ struct sink_server
       auto* p = ossia::try_setup_parameter("float", n);
       p->set_domain(ossia::make_domain(0.f, 1000000.f));
     }
+    ossia::try_setup_parameter("impulse", ossia::net::create_node(dev->get_root_node(), "/bang"));
     multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol_base>(
         ctx,
         std::vector<ossia::net::osc_server_configuration>{
@@ -2378,4 +2379,61 @@ TEST_CASE("ossia_object_expose_oscquery", "ossia_object_expose_oscquery")
   REQUIRE(ossia::net::find_node(dev->get_root_node(), "/foo/bar") != nullptr);
   dev.reset();
   multiplex.clear();
+}
+
+// Bundles of values: each element carries its own value, so a parameter may
+// come several times. The client's mirror and the OSCQuery server send them;
+// the server splits them under 1400 bytes.
+TEST_CASE("oscquery_value_bundles", "oscquery_value_bundles")
+{
+  const int n = 3000;
+  sink_server server{n};
+
+  SECTION("client: the values of the elements, in order")
+  {
+    auto client = std::make_shared<ossia::net::generic_device>(
+        std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+        "td_bench");
+    REQUIRE(client->get_protocol().update(client->get_root_node()));
+    auto* p0 = ossia::net::find_node(client->get_root_node(), "/load/p0")->get_parameter();
+    std::vector<ossia::bundle_element> elements{{p0, 1.f}, {p0, 2.f}, {p0, 3.f}};
+    server.sink.clear();
+    REQUIRE(client->get_protocol().push_bundle(std::span<ossia::bundle_element>(elements)));
+    REQUIRE(server.sink.wait_messages(3, 3000));
+    std::lock_guard lock{server.sink.mutex};
+    const std::vector<std::pair<std::string, float>> expected{
+        {"/load/p0", 1.f}, {"/load/p0", 2.f}, {"/load/p0", 3.f}};
+    REQUIRE(server.sink.messages == expected);
+    REQUIRE(server.sink.datagrams.size() == 1);
+  }
+
+  SECTION("server: 3000 values in datagrams of at most 1400 bytes")
+  {
+    udp_sink client_sink{free_port(false)};
+    raw_client client{server.url()};
+    REQUIRE(client.ws.connected());
+    client.stream_to(client_sink.socket.local_endpoint().port());
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    std::vector<ossia::bundle_element> elements;
+    for(int i = 0; i < n; i++)
+      elements.push_back(
+          {ossia::net::find_node(server.dev->get_root_node(), "/load/p" + std::to_string(i))->get_parameter(),
+           float(i)});
+    ossia::oscquery_asio::oscquery_server_protocol_base* proto{};
+    static_cast<ossia::net::multiplex_protocol&>(server.dev->get_protocol())
+        .for_each_protocol([&](ossia::net::protocol_base& p) {
+      proto = dynamic_cast<ossia::oscquery_asio::oscquery_server_protocol_base*>(&p);
+        });
+    REQUIRE(proto);
+    REQUIRE(proto->push_bundle(std::span<ossia::bundle_element>(elements)));
+    const bool all = client_sink.wait_messages(n, 3000);
+    std::lock_guard lock{client_sink.mutex};
+    std::size_t largest = 0;
+    for(auto size : client_sink.datagrams)
+      largest = std::max(largest, size);
+    INFO("datagrams " << client_sink.datagrams.size() << ", largest " << largest);
+    REQUIRE(all);
+    REQUIRE(largest <= 1400);
+    REQUIRE(client_sink.messages[1234] == std::pair<std::string, float>{"/load/p1234", 1234.f});
+  }
 }
