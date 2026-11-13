@@ -90,3 +90,24 @@ TEST_CASE("C API: create pattern", "[pattern]")
   ossia_device_free(dev);
   ossia_protocol_free(proto);
 }
+
+// A string the API returns is freed by ossia_string_free, one of the preset
+// API by ossia_free_string: each must free it as it was allocated. A mismatch
+// shows under AddressSanitizer with alloc_dealloc_mismatch=1.
+TEST_CASE("C API: a string the API returns is freed as it was allocated", "[strings]")
+{
+  ossia_value_t v = ossia_value_create_string("a string");
+  const char* s = ossia_value_to_string(v);
+  REQUIRE(s);
+  REQUIRE(std::string(s) == "a string");
+  ossia_string_free(const_cast<char*>(s));
+  ossia_value_free(v);
+
+  ossia_preset_t p;
+  REQUIRE(ossia_presets_read_json(R"_({"a": {"b": 1}})_", &p) == OSSIA_PRESETS_OK);
+  const char* text{};
+  REQUIRE(ossia_presets_to_string(p, &text) == OSSIA_PRESETS_OK);
+  REQUIRE(text);
+  REQUIRE(ossia_free_string(text) == OSSIA_PRESETS_OK);
+  REQUIRE(ossia_presets_free(p) == OSSIA_PRESETS_OK);
+}
