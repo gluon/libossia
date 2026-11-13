@@ -45,4 +45,8 @@ template <typename State>
 struct http_async_answer;
 template <typename State>
 struct http_async_value_answer;
+template <typename State>
+struct http_async_path_answer;
+template <typename State>
+struct http_async_path_error;
 }

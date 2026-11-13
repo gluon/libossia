@@ -123,6 +123,53 @@ void oscquery_mirror_asio_protocol::http_send_message(const rapidjson::StringBuf
   hrq->resolve(m_httpHost, m_queryPort);
 }
 
+void oscquery_mirror_asio_protocol::read_path(const std::string& path)
+{
+  using request = ossia::oscquery_asio::http_async_path_request<async_state>;
+  auto hrq = std::make_shared<request>(
+      http_async_path_answer<async_state>{m_async_state, path},
+      http_async_path_error<async_state>{m_async_state, path}, m_ctx->context, m_httpHost,
+      path);
+  hrq->resolve(m_httpHost, m_queryPort);
+}
+
+// On the thread of the context, as the other messages of the server: the
+// answer creates or reloads the node, or the whole tree for "/"
+void oscquery_mirror_asio_protocol::on_path_read(
+    const std::string& path, const std::string& message)
+try
+{
+  using json_parser = ossia::oscquery::json_parser;
+  auto doc = json_parser::parse(message);
+  if(doc->IsNull() || !doc->IsObject())
+    return;
+  auto& root = m_device->get_root_node();
+  if(path == "/")
+    json_parser::parse_namespace(root, *doc);
+  else
+    json_parser::parse_path_added(root, path, *doc);
+}
+catch(const std::exception& e)
+{
+  if(m_logger.inbound_logger)
+    m_logger.inbound_logger->warn("Error while reading {}: {}", path, e.what());
+}
+catch(...)
+{
+}
+
+// A 404: the node is gone, as for PATH_REMOVED
+void oscquery_mirror_asio_protocol::on_path_gone(const std::string& path)
+{
+  if(auto node = ossia::net::find_node(m_device->get_root_node(), path))
+  {
+    if(m_zombie_on_remove)
+      ossia::net::set_zombie(*node, true);
+    else if(auto parent = node->get_parent())
+      parent->remove_child(*node);
+  }
+}
+
 void oscquery_mirror_asio_protocol::ws_send_message(const std::string& str)
 {
   if(m_hasWS)
@@ -585,7 +632,10 @@ bool oscquery_mirror_asio_protocol::on_text_ws_message(
         }
 
         case message_type::PathChanged: {
-          json_parser::parse_path_changed(m_device->get_root_node(), *data);
+          // The proposal: the client asks for the structure of that address
+          auto dat_it = data->FindMember(ossia::oscquery::detail::data());
+          if(dat_it != data->MemberEnd() && dat_it->value.IsString())
+            read_path(std::string{dat_it->value.GetString(), dat_it->value.GetStringLength()});
           break;
         }
 

@@ -56,6 +56,50 @@ struct http_async_error
   }
 };
 
+// The reading of an address after a PATH_CHANGED: its structure, or a 404
+// when it is gone
+template <typename State>
+struct http_async_path_answer
+{
+  static constexpr auto reserve_expect = 65535 * 8;
+  std::weak_ptr<State> state;
+  std::string path;
+
+  template <typename T, typename S>
+  void operator()(T& req, const S& str)
+  {
+    if(auto ptr = state.lock())
+    {
+      if(ptr->active)
+      {
+        ptr->self.on_path_read(path, str);
+      }
+    }
+  }
+};
+
+template <typename State>
+struct http_async_path_error
+{
+  std::weak_ptr<State> state;
+  std::string path;
+
+  template <typename T>
+  void operator()(T& req)
+  {
+    req.close();
+    if(req.status() != 404)
+      return;
+    if(auto ptr = state.lock())
+    {
+      if(ptr->active)
+      {
+        ptr->self.on_path_gone(path);
+      }
+    }
+  }
+};
+
 template <typename T>
 auto wait_for_future(
     const std::future<T>& fut, std::chrono::milliseconds timeout,
@@ -95,6 +139,15 @@ struct http_async_value_request
 {
   using ossia::net::http_get_request<
       http_async_value_answer<State>, http_async_error>::http_get_request;
+};
+
+template <typename State>
+struct http_async_path_request
+    : ossia::net::http_get_request<
+          http_async_path_answer<State>, http_async_path_error<State>>
+{
+  using ossia::net::http_get_request<
+      http_async_path_answer<State>, http_async_path_error<State>>::http_get_request;
 };
 
 struct http_async_client_context
