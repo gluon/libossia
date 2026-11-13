@@ -13,7 +13,8 @@
 //   C API (ossia_protocol_oscquery_server_create), zeroconf disabled.
 // - asio_server: ossia::oscquery_asio::oscquery_server_protocol under a
 //   multiplex, as ossia-max exposes an ossia.device, on a network context run
-//   by a thread. It is announced over mDNS when the build has OSSIA_DNSSD.
+//   by a thread. It listens on the loopback only, which also keeps it off
+//   mDNS: a server bound to one address is not announced.
 //
 // macOS and Linux. Loopback only.
 #include <ossia/detail/config.hpp>
@@ -504,7 +505,7 @@ struct asio_server
   void start()
   {
     auto s = std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
-        ctx, osc, ws, false);
+        ctx, osc, ws, false, "127.0.0.1");
     server = s.get();
     multiplex->expose_to(std::move(s));
     net = std::thread([this] { ctx->run(); });
