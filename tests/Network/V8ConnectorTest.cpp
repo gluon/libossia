@@ -1597,3 +1597,178 @@ TEST_CASE("v8connector_client_reconnects", "v8connector_client_reconnects")
     client.reset();
   }
 }
+
+#include <ossia/protocols/osc/osc_factory.hpp>
+
+#include <boost/asio/ip/udp.hpp>
+#include <boost/endian/conversion.hpp>
+
+#include <oscpack/osc/OscReceivedElements.h>
+
+#include <atomic>
+#include <mutex>
+
+namespace
+{
+// What an OSCQuery client sends over UDP, as received: every datagram, and
+// the messages it holds (a bundle is opened). The server below announces this
+// port in HOST_INFO and does not listen to it itself.
+struct udp_sink
+{
+  boost::asio::io_context ctx;
+  boost::asio::ip::udp::socket socket{ctx};
+  std::thread thread;
+  std::mutex mutex;
+  std::vector<std::size_t> datagrams;              // size of each datagram
+  std::vector<std::pair<std::string, float>> messages; // address, first float
+  std::atomic_bool running{true};
+
+  explicit udp_sink(uint16_t port)
+  {
+    socket.open(boost::asio::ip::udp::v4());
+    socket.bind({boost::asio::ip::make_address("0.0.0.0"), port});
+    socket.non_blocking(true);
+    thread = std::thread([this] {
+      std::vector<char> buf(65536);
+      while(running)
+      {
+        boost::system::error_code ec;
+        boost::asio::ip::udp::endpoint from;
+        auto n = socket.receive_from(boost::asio::buffer(buf), from, 0, ec);
+        if(ec)
+        {
+          std::this_thread::sleep_for(std::chrono::microseconds(200));
+          continue;
+        }
+        std::lock_guard lock{mutex};
+        datagrams.push_back(n);
+        decode(buf.data(), n);
+      }
+    });
+  }
+  ~udp_sink()
+  {
+    running = false;
+    thread.join();
+  }
+  void decode(const char* data, std::size_t size)
+  {
+    try
+    {
+      oscpack::ReceivedPacket p{data, (oscpack::osc_bundle_element_size_t)size};
+      if(p.IsBundle())
+      {
+        oscpack::ReceivedBundle b{p};
+        for(auto it = b.ElementsBegin(); it != b.ElementsEnd(); ++it)
+          decode(it->Contents(), it->Size());
+      }
+      else
+      {
+        oscpack::ReceivedMessage m{p};
+        float v = 0.f;
+        if(m.ArgumentCount() > 0 && m.ArgumentsBegin()->IsFloat())
+          v = m.ArgumentsBegin()->AsFloat();
+        messages.emplace_back(m.AddressPattern(), v);
+      }
+    }
+    catch(...)
+    {
+    }
+  }
+  void clear()
+  {
+    std::lock_guard lock{mutex};
+    datagrams.clear();
+    messages.clear();
+  }
+  // Waits until n messages arrived, or the time is up.
+  bool wait_messages(std::size_t n, int ms)
+  {
+    for(int i = 0; i < ms / 5; i++)
+    {
+      {
+        std::lock_guard lock{mutex};
+        if(messages.size() >= n)
+          return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::lock_guard lock{mutex};
+    return messages.size() >= n;
+  }
+};
+
+// An OSCQuery server whose OSC port is read by a udp_sink.
+struct sink_server
+{
+  ossia::net::network_context_ptr ctx = ossia::net::create_network_context();
+  ossia::net::multiplex_protocol* multiplex{};
+  std::unique_ptr<ossia::net::generic_device> dev;
+  uint16_t osc = free_port(false);
+  uint16_t ws = free_port(true);
+  udp_sink sink{osc};
+  std::thread net;
+
+  explicit sink_server(int leaves)
+  {
+    auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+    multiplex = mp.get();
+    dev = std::make_unique<ossia::net::generic_device>(std::move(mp), "td_bench");
+    for(int i = 0; i < leaves; i++)
+    {
+      auto& n = ossia::net::create_node(dev->get_root_node(), "/load/p" + std::to_string(i));
+      auto* p = ossia::try_setup_parameter("float", n);
+      p->set_domain(ossia::make_domain(0.f, 1000000.f));
+    }
+    multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol_base>(
+        ctx,
+        std::vector<ossia::net::osc_server_configuration>{
+            ossia::net::udp_server_configuration{{{"0.0.0.0"}, osc}}},
+        ws, false));
+    net = std::thread([this] { ctx->run(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+  ~sink_server()
+  {
+    ossia::net::stop_network_context(*ctx);
+    net.join();
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(ws); }
+};
+}
+
+// The client's push_bundle sends the values of many parameters in OSC
+// bundles: over UDP, no datagram above 1400 bytes.
+TEST_CASE("oscquery_mirror_push_bundle", "oscquery_mirror_push_bundle")
+{
+  const int n = 3000;
+  sink_server server{n};
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(server.url(), free_port(false)),
+      "td_bench");
+  REQUIRE(client->get_protocol().update(client->get_root_node()));
+
+  std::vector<const ossia::net::parameter_base*> params;
+  for(int i = 0; i < n; i++)
+  {
+    auto* node = ossia::net::find_node(client->get_root_node(), "/load/p" + std::to_string(i));
+    REQUIRE(node);
+    auto* p = node->get_parameter();
+    p->set_value(ossia::value(float(i)));
+    params.push_back(p);
+  }
+  server.sink.clear();
+
+  const bool sent = client->get_protocol().push_bundle(params);
+  const bool all = server.sink.wait_messages(n, 3000);
+  std::lock_guard lock{server.sink.mutex};
+  INFO("datagrams " << server.sink.datagrams.size() << ", messages " << server.sink.messages.size());
+  REQUIRE(sent);
+  REQUIRE(all);
+  REQUIRE(server.sink.messages.size() == std::size_t(n));
+  for(auto size : server.sink.datagrams)
+    REQUIRE(size <= 1400);
+  REQUIRE(server.sink.datagrams.size() < std::size_t(n) / 20);
+  REQUIRE(server.sink.messages[1234].first == "/load/p1234");
+  REQUIRE(server.sink.messages[1234].second == 1234.f);
+}
