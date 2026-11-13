@@ -930,6 +930,43 @@ TEST_CASE("C API: a mirror reads the value again after a crossing", "[network_c]
   REQUIRE(divergences == 0);
 }
 
+// A bool is served as a JSON boolean, as the OSCQuery proposal asks: a
+// client that reads VALUE, or ?VALUE after a crossing, gets its state.
+TEST_CASE("C API: a bool is served as true or false", "[network_c]")
+{
+  server s{"c_bool_server", 0, "127.0.0.1"};
+  auto flag = ossia_node_create_parameter(
+      ossia_node_create(ossia_device_get_root_node(s.dev), "/flag"), BOOL_T);
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+  ossia_parameter_push_b(flag, 1);
+  auto value = http_get(s.ws, "/flag?VALUE");
+  INFO(value);
+  REQUIRE(value.find("\"VALUE\":true") != std::string::npos);
+  auto node = http_get(s.ws, "/flag");
+  INFO(node);
+  REQUIRE((node.find("\"VALUE\":true") != std::string::npos
+           || node.find("\"VALUE\":[true]") != std::string::npos));
+
+  ossia_parameter_push_b(flag, 0);
+  value = http_get(s.ws, "/flag?VALUE");
+  INFO(value);
+  REQUIRE(value.find("\"VALUE\":false") != std::string::npos);
+
+  // A mirror reads it
+  mirror m{s.url(), "c_bool_mirror"};
+  auto remote = find_parameter(m.dev, "/flag");
+  REQUIRE(remote);
+  ossia_parameter_push_b(flag, 1);
+  auto bool_of = [](ossia_parameter_t p) {
+    auto v = ossia_parameter_get_value(p);
+    const bool b = ossia_value_to_bool(v);
+    ossia_value_free(v);
+    return b;
+  };
+  REQUIRE(wait_for([&] { return bool_of(remote); }, 2000));
+}
+
 // Out of a crossing, nothing comes back: writes long after the server's last
 // value are not answered.
 TEST_CASE("C API: a write that crossed nothing is not sent back", "[network_c]")
