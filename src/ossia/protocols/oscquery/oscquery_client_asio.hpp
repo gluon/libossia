@@ -34,6 +34,13 @@ public:
   {
   }
 
+  //! A client gets only the addresses it sent LISTEN for
+  bool listens_to(std::string_view path)
+  {
+    std::lock_guard lck{listeningMutex};
+    return listening.find(path) != listening.end();
+  }
+
   void start_listen(std::string path, ossia::net::parameter_base* addr)
   {
     if(addr)

@@ -673,14 +673,18 @@ TEST_CASE("test_oscquery_http", "test_oscquery_http")
 
   ws_proto->update(ws_clt->get_root_node());
 
-  double d{7.8};
-  a->push_value(d);
-  std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
   auto node = find_node(ws_clt->get_root_node(), "/main");
   REQUIRE(node);
   auto param = node->get_parameter();
   REQUIRE(param);
+  // Followed: a client gets the values of what it listens to
+  param->add_callback([](const ossia::value&) { });
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  double d{7.8};
+  a->push_value(d);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
   auto b = param->value();
   ossia::value expected_value{d};
 
@@ -1165,6 +1169,9 @@ TEST_CASE("test_oscquery_osc_to_ws", "test_oscquery_osc_to_ws")
   auto ws_param = ws_node->get_parameter();
   REQUIRE(ws_param);
   REQUIRE(ws_param->value().get<float>() == 6.f);
+  // Followed: a client gets the values of what it listens to
+  ws_param->add_callback([](const ossia::value&) { });
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   using conf = ossia::net::osc_protocol_configuration;
 

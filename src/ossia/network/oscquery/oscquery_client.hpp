@@ -1,4 +1,6 @@
 #pragma once
+#include <string_view>
+
 #include <ossia/detail/mutex.hpp>
 #include <ossia/detail/string_map.hpp>
 #include <ossia/network/common/network_logger.hpp>
@@ -41,6 +43,13 @@ public:
   explicit oscquery_client(ossia::net::ws_connection_handle h)
       : connection{std::move(h)}
   {
+  }
+
+  //! A client gets only the addresses it sent LISTEN for
+  bool listens_to(std::string_view path)
+  {
+    std::lock_guard lck{listeningMutex};
+    return listening.find(path) != listening.end();
   }
 
   void start_listen(std::string path, ossia::net::parameter_base* addr)

@@ -149,6 +149,9 @@ TEST_CASE("test_oscquery_rename_node_callback", "test_oscquery_rename_node_callb
     p->add_callback([&](const value& v) { client_nested_cb_float = v.get<float>(); });
   }
 
+  // Each callback made the client send LISTEN: the server has to read them first
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
   param->push_value(-1234.56789f);
   nested_param->push_value(9876.5432f);
 

@@ -129,8 +129,9 @@ bool oscquery_server_protocol::push_impl(const T& addr, const ossia::value& v)
   auto val = bound_value(addr, v);
   if(val.valid())
   {
-    record_sent(ossia::net::osc_address(addr), val);
-    // Push to all clients
+    const std::string_view address = ossia::net::osc_address(addr);
+    record_sent(std::string{address}, val);
+    // Push to the clients that listen to it
     auto critical = addr.get_critical();
     if(!critical)
     {
@@ -138,6 +139,8 @@ bool oscquery_server_protocol::push_impl(const T& addr, const ossia::value& v)
       for(auto& client_p : m_clients)
       {
         auto& client = *client_p;
+        if(!client.listens_to(address))
+          continue;
         if(client.sender)
         {
           if(m_logger.outbound_logger)
@@ -165,6 +168,8 @@ bool oscquery_server_protocol::push_impl(const T& addr, const ossia::value& v)
       for(auto& client_p : m_clients)
       {
         auto& client = *client_p;
+        if(!client.listens_to(address))
+          continue;
         if(m_logger.outbound_logger)
         {
           m_logger.outbound_logger->info(
@@ -253,7 +258,8 @@ bool oscquery_server_protocol::echo_incoming_message(
     const ossia::value& val)
 {
   bool not_this_protocol = &id.protocol != this;
-  record_sent(addr.get_node().osc_address(), val, not_this_protocol ? 0 : id.identifier);
+  const std::string_view address = ossia::net::osc_address(addr);
+  record_sent(std::string{address}, val, not_this_protocol ? 0 : id.identifier);
   // we know that the value is valid
   // Push to all clients except ours
   auto critical = addr.get_critical();
@@ -264,6 +270,8 @@ bool oscquery_server_protocol::echo_incoming_message(
     for(auto& client_p : m_clients)
     {
       auto& client = *client_p;
+      if(!client.listens_to(address))
+        continue;
       if(not_this_protocol || !is_same(client, id))
       {
         if(client.sender)
@@ -294,6 +302,8 @@ bool oscquery_server_protocol::echo_incoming_message(
     for(auto& client_p : m_clients)
     {
       auto& client = *client_p;
+      if(!client.listens_to(address))
+        continue;
       if(not_this_protocol || !is_same(client, id))
       {
 
@@ -613,6 +623,9 @@ void oscquery_server_protocol::answer_crossing(
     auto& client = *client_p;
     if((uintptr_t)client.connection.lock().get() != origin)
       continue;
+    // It was sent nothing there: its write cannot have crossed anything
+    if(!client.listens_to(address))
+      return;
     if(m_logger.outbound_logger)
       m_logger.outbound_logger->info("Out: {} {}", address, value);
     if(client.sender && !param->get_critical())
