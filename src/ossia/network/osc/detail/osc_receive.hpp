@@ -101,6 +101,31 @@ struct osc_message_applier
   }
 };
 
+//! For what a client writes to an OSCQuery server: a message to a read-only
+//! parameter is ignored
+struct osc_client_message_applier : osc_message_applier
+{
+  void on_listened_value(
+      ossia::net::parameter_base& the_addr, ossia::net::device_base& dev,
+      network_logger& logger)
+  {
+    if(the_addr.get_access() != ossia::access_mode::GET)
+      osc_message_applier::on_listened_value(the_addr, dev, logger);
+  }
+
+  void on_value(ossia::net::parameter_base& the_addr, ossia::net::device_base& dev)
+  {
+    if(the_addr.get_access() != ossia::access_mode::GET)
+      osc_message_applier::on_value(the_addr, dev);
+  }
+
+  void on_value_quiet(ossia::net::parameter_base& the_addr, ossia::net::device_base& dev)
+  {
+    if(the_addr.get_access() != ossia::access_mode::GET)
+      osc_message_applier::on_value_quiet(the_addr, dev);
+  }
+};
+
 template <bool SilentUpdate, typename F>
 void on_input_message(
     std::string_view addr_txt, F&& f, const ossia::net::listened_parameters& listening,

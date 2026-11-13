@@ -1045,6 +1045,9 @@ void json_parser::parse_parameter_value(
         auto addr = node->get_parameter();
         if(addr)
         {
+          if(addr->get_access() == ossia::access_mode::GET)
+            continue;
+
           auto val = addr->value();
           val.apply(detail::json_to_value_unchecked{it->value});
 
