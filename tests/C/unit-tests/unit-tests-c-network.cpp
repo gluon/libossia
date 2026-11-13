@@ -1535,3 +1535,68 @@ TEST_CASE("C API: WebSocket++ server sends each tree change of a parameter once"
   tree_changes_of_a_parameter(dev, "ws://127.0.0.1:" + std::to_string(ws));
   ossia_device_free(dev);
 }
+
+namespace
+{
+// One member of the JSON at that resource, as text
+std::string member_of(uint16_t port, const std::string& resource, const char* key)
+{
+  rapidjson::Document doc;
+  doc.Parse(http_get(port, resource).c_str());
+  if(doc.HasParseError() || !doc.IsObject() || !doc.HasMember(key))
+    return "absent";
+  rapidjson::StringBuffer buf;
+  rapidjson::Writer<rapidjson::StringBuffer> wr(buf);
+  doc[key].Accept(wr);
+  return buf.GetString();
+}
+}
+
+// What a node does not have is an empty object, as for the TYPE of a container
+// in the proposal; what a query says agrees with the tree.
+TEST_CASE("C API: attribute queries agree with the tree", "[network_c]")
+{
+  server s{"c_attr_query_server"};
+  auto root = ossia_device_get_root_node(s.dev);
+  float_parameter(s.dev, "/ctn/sub");
+  float_parameter(s.dev, "/f");
+  ossia_node_create_parameter(ossia_node_create(root, "/i"), INT_T);
+  auto v3 = ossia_node_create_parameter(ossia_node_create(root, "/v3"), VEC3F_T);
+  ossia_parameter_set_unit(v3, "position.cart3D");
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  for(const char* query : {"/ctn?TYPE", "/ctn?VALUE", "/ctn?RANGE", "/?VALUE", "/f?UNIT",
+                           "/f?EXTENDED_TYPE", "/i?RANGE", "/v3?UNIT"})
+  {
+    INFO(query);
+    REQUIRE(http_status(s.ws, query) == 200);
+    REQUIRE(http_get(s.ws, query) == "{}");
+  }
+
+  for(const char* key : {"FULL_PATH", "TYPE", "VALUE", "ACCESS", "CLIPMODE", "EXTENDED_TYPE"})
+  {
+    INFO(key);
+    REQUIRE(member_of(s.ws, std::string{"/v3?"} + key, key) == member_of(s.ws, "/v3", key));
+  }
+  REQUIRE(member_of(s.ws, "/v3?EXTENDED_TYPE", "EXTENDED_TYPE").find("position.cartesian.x") != std::string::npos);
+  REQUIRE(member_of(s.ws, "/ctn?CONTENTS", "CONTENTS") == member_of(s.ws, "/ctn", "CONTENTS"));
+  REQUIRE(http_get(s.ws, "/f?TYPE&ACCESS") == "{\"TYPE\":\"f\",\"ACCESS\":3}");
+}
+
+TEST_CASE("C API: an unknown attribute is 204 without a body", "[network_c]")
+{
+  server s{"c_attr_unknown_server"};
+  float_parameter(s.dev, "/ctn/sub");
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  for(const char* query : {"/ctn/sub?BOGUS", "/ctn?BOGUS", "/?BOGUS", "/ctn/sub?BOGUS=1"})
+  {
+    INFO(query);
+    REQUIRE(http_status(s.ws, query) == 204);
+    REQUIRE(http_get(s.ws, query).empty());
+  }
+  REQUIRE(http_status(s.ws, "/nothing?BOGUS") == 404);
+  // A known attribute with a value is still that attribute
+  REQUIRE(http_status(s.ws, "/ctn/sub?VALUE=1") == 200);
+  REQUIRE(member_of(s.ws, "/ctn/sub?VALUE=1", "VALUE") == member_of(s.ws, "/ctn/sub", "VALUE"));
+}
