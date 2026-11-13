@@ -1431,3 +1431,107 @@ TEST_CASE("C API: WebSocket++ server knows a sender by its address and port", "[
   same_port_on_another_address(dev, osc, "ws://127.0.0.1:" + std::to_string(ws), other);
   ossia_device_free(dev);
 }
+
+namespace
+{
+// A WebSocket client that keeps the text messages of the server
+struct text_client
+{
+  std::mutex mutex;
+  std::vector<std::string> texts;
+  ossia::net::websocket_client ws{[this](auto&&, auto op, const std::string& text) {
+    if(op == websocketpp::frame::opcode::text)
+    {
+      std::lock_guard lock{mutex};
+      texts.push_back(text);
+    }
+  }};
+  std::thread thread;
+
+  explicit text_client(const std::string& url)
+  {
+    thread = std::thread([this, url] {
+      try
+      {
+        ws.connect_and_run(url);
+      }
+      catch(...)
+      {
+      }
+    });
+    wait_for([&] { return ws.connected(); }, 2000);
+  }
+  ~text_client()
+  {
+    ws.stop();
+    thread.join();
+  }
+  int count(const std::string& what)
+  {
+    std::lock_guard lock{mutex};
+    return std::count_if(texts.begin(), texts.end(), [&](const auto& t) {
+      return t.find(what) != std::string::npos;
+    });
+  }
+};
+
+void settle()
+{
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+}
+
+void tree_changes_of_a_parameter(ossia_device_t dev, const std::string& url)
+{
+  settle();
+  text_client c{url};
+  REQUIRE(c.ws.connected());
+  settle();
+  auto root = ossia_device_get_root_node(dev);
+
+  // Added: its type once
+  auto node = ossia_node_create(root, "/added");
+  ossia_node_create_parameter(node, FLOAT_T);
+  settle();
+  REQUIRE(c.count("\"PATH_ADDED\"") == 1);
+  REQUIRE(c.count("\"ATTRIBUTES_CHANGED\"") == 1);
+
+  // The parameter alone removed, the node stays: clients are told
+  ossia_node_remove_parameter(node);
+  settle();
+  REQUIRE(c.count("\"ATTRIBUTES_CHANGED\"") == 2);
+  REQUIRE(c.count("\"PATH_REMOVED\"") == 0);
+
+  // The node removed: PATH_REMOVED and nothing after it
+  ossia_node_create_parameter(node, FLOAT_T);
+  settle();
+  REQUIRE(c.count("\"ATTRIBUTES_CHANGED\"") == 3);
+  ossia_node_remove_child(root, node);
+  settle();
+  REQUIRE(c.count("\"PATH_REMOVED\"") == 1);
+  REQUIRE(c.count("\"ATTRIBUTES_CHANGED\"") == 3);
+
+  // Nor for the parameters below a node removed
+  auto parent = ossia_node_create(root, "/parent");
+  ossia_node_create_parameter(ossia_node_create(root, "/parent/child"), FLOAT_T);
+  settle();
+  const auto before = c.count("\"ATTRIBUTES_CHANGED\"");
+  ossia_node_remove_child(root, parent);
+  settle();
+  REQUIRE(c.count("\"ATTRIBUTES_CHANGED\"") == before);
+}
+}
+
+TEST_CASE("C API: asio server sends each tree change of a parameter once", "[network_c]")
+{
+  server s{"c_tree_changes_asio"};
+  tree_changes_of_a_parameter(s.dev, s.url());
+}
+
+TEST_CASE("C API: WebSocket++ server sends each tree change of a parameter once", "[network_c]")
+{
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_tree_changes_wspp");
+  REQUIRE(dev);
+  tree_changes_of_a_parameter(dev, "ws://127.0.0.1:" + std::to_string(ws));
+  ossia_device_free(dev);
+}
