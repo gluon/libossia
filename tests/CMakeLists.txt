@@ -158,7 +158,9 @@ if(OSSIA_PROTOCOL_OSCQUERY)
   target_include_directories(ossia_DeviceProtocolsTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
   if(OSSIA_DNSSD AND OSSIA_PROTOCOL_MINUIT)
     # Announces on the local network for a few seconds
-    ossia_add_test(ReproMdnsTest "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproMdnsTest.cpp")
+    ossia_add_test(ReproMdnsTest
+        "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproMdnsTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp")
+    target_include_directories(ossia_ReproMdnsTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
   endif()
   # A LISTEN or IGNORE whose DATA is not a string, from any peer
   ossia_add_test(ReproListenDataTest "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproListenDataTest.cpp")

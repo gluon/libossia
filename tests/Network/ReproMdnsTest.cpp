@@ -8,6 +8,7 @@
 
 #include <ossia/network/minuit/minuit.hpp>
 
+#include "client_mirror.hpp"
 #include "include_catch.hpp"
 
 #include <functional>
@@ -247,11 +248,12 @@ static std::string minuit_announcement(
 }
 
 // ossia-max's Minuit listener builds a device for each Minuit device it finds
-// (ZeroconfMinuitListener.cpp). If that device announced itself, the listener
-// would find it as a new device, build one more, and so on. The follower is
-// built as the listener of this tree builds it, with the protocol's defaults.
-// The first case checks that a device built with those defaults is seen, so
-// that "not seen" in the second one means something.
+// (ZeroconfMinuitListener.cpp), with make_minuit_listener_device
+// (client_mirror.cpp, which does not need the Max SDK). If that device
+// announced itself, the listener would find it as a new device, build one
+// more, and so on. The first case checks that a device built with the
+// protocol's defaults is seen, so that "not seen" in the second one means
+// something.
 TEST_CASE("mDNS: a Minuit device built to follow another one does not announce itself", "[minuit-announce]")
 {
   const std::string instance = "repro_minuit_" + std::to_string(getpid());
@@ -263,9 +265,7 @@ TEST_CASE("mDNS: a Minuit device built to follow another one does not announce i
         announced);
   }, "minuit_protocol with its defaults").empty());
   CHECK(minuit_announcement(follower, [&] {
-    return std::make_unique<ossia::net::generic_device>(
-        std::make_unique<ossia::net::minuit_protocol>(
-            follower, "127.0.0.1", free_port(false), free_port(false)),
-        follower);
-  }, "as the listener builds it").empty());
+    return ossia::max_binding::make_minuit_listener_device(
+        follower, "127.0.0.1", free_port(false), free_port(false));
+  }, "make_minuit_listener_device").empty());
 }
