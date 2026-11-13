@@ -544,7 +544,7 @@ struct transport_visitor
 json_writer::string_t json_writer::query_host_info(
     std::string_view name,
     const std::vector<ossia::net::osc_server_configuration>& osc_port,
-    std::string_view local_ip, int ws_port)
+    std::string_view local_ip, int ws_port, bool echo)
 {
   string_t buf;
   writer_t wr(buf);
@@ -596,7 +596,7 @@ json_writer::string_t json_writer::query_host_info(
   wr.Bool(true);
 
   wr.Key("ECHO");
-  wr.Bool(true);
+  wr.Bool(echo);
 
   wr.Key(detail::path_changed());
   wr.Bool(false);
