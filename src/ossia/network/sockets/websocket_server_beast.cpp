@@ -2,6 +2,7 @@
 #include <ossia/network/sockets/websocket_server_beast.hpp>
 
 #include <ossia/detail/json.hpp>
+#include <ossia/network/exceptions.hpp>
 
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/ip/v6_only.hpp>
@@ -146,13 +147,25 @@ void beast_ws_connection::on_read_http(boost::beast::error_code ec, std::size_t)
   auto* server = m_life->server;
   if(server && server->m_on_message)
   {
+    namespace http = boost::beast::http;
+    // An error keeps its own status: an address that does not exist is not a
+    // failure of the server
+    auto write_status = [this](http::status status) {
+      http::response<http::string_body> res{status, m_http_req.version()};
+      res.set(http::field::server, "ossia");
+      res.set(http::field::access_control_allow_origin, "*");
+      res.set(http::field::connection, "close");
+      res.prepare_payload();
+
+      boost::beast::error_code write_ec;
+      http::write(boost::beast::get_lowest_layer(m_ws), res, write_ec);
+    };
     try
     {
       auto resource = std::string(m_http_req.target());
       auto reply = server->m_on_message(
           shared_from_this(), ws_opcode::text, resource);
 
-      namespace http = boost::beast::http;
       http::response<http::string_body> res{http::status::ok, m_http_req.version()};
       res.set(http::field::server, "ossia");
       res.set(http::field::access_control_allow_origin, "*");
@@ -176,17 +189,25 @@ void beast_ws_connection::on_read_http(boost::beast::error_code ec, std::size_t)
       boost::beast::error_code write_ec;
       http::write(boost::beast::get_lowest_layer(m_ws), res, write_ec);
     }
+    catch(const ossia::node_not_found_error&)
+    {
+      write_status(http::status::not_found);
+    }
+    catch(const ossia::bad_request_error& e)
+    {
+      ossia::logger().error(
+          "Error in request: {} ==> {}", std::string(m_http_req.target()), e.what());
+      write_status(http::status::bad_request);
+    }
     catch(const std::exception& e)
     {
-      namespace http = boost::beast::http;
-      http::response<http::string_body> res{
-          http::status::internal_server_error, m_http_req.version()};
-      res.set(http::field::server, "ossia");
-      res.set(http::field::connection, "close");
-      res.prepare_payload();
-
-      boost::beast::error_code write_ec;
-      http::write(boost::beast::get_lowest_layer(m_ws), res, write_ec);
+      ossia::logger().error("Error in request: {}", e.what());
+      write_status(http::status::internal_server_error);
+    }
+    catch(...)
+    {
+      ossia::logger().error("Error in request");
+      write_status(http::status::internal_server_error);
     }
   }
   lock.unlock();
