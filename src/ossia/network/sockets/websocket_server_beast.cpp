@@ -166,28 +166,36 @@ void beast_ws_connection::on_read_http(boost::beast::error_code ec, std::size_t)
       auto reply = server->m_on_message(
           shared_from_this(), ws_opcode::text, resource);
 
-      http::response<http::string_body> res{http::status::ok, m_http_req.version()};
-      res.set(http::field::server, "ossia");
-      res.set(http::field::access_control_allow_origin, "*");
-      res.set(http::field::connection, "close");
-
-      switch(reply.type)
+      if(reply.type == server_reply::data_type::no_content)
       {
-        case server_reply::data_type::json:
-          res.set(http::field::content_type, "application/json; charset=utf-8");
-          break;
-        case server_reply::data_type::html:
-          res.set(http::field::content_type, "text/html; charset=utf-8");
-          break;
-        default:
-          break;
+        // Nothing to say, as for an attribute the server does not know
+        write_status(http::status::no_content);
       }
+      else
+      {
+        http::response<http::string_body> res{http::status::ok, m_http_req.version()};
+        res.set(http::field::server, "ossia");
+        res.set(http::field::access_control_allow_origin, "*");
+        res.set(http::field::connection, "close");
 
-      res.body() = std::move(reply.data);
-      res.prepare_payload();
+        switch(reply.type)
+        {
+          case server_reply::data_type::json:
+            res.set(http::field::content_type, "application/json; charset=utf-8");
+            break;
+          case server_reply::data_type::html:
+            res.set(http::field::content_type, "text/html; charset=utf-8");
+            break;
+          default:
+            break;
+        }
 
-      boost::beast::error_code write_ec;
-      http::write(boost::beast::get_lowest_layer(m_ws), res, write_ec);
+        res.body() = std::move(reply.data);
+        res.prepare_payload();
+
+        boost::beast::error_code write_ec;
+        http::write(boost::beast::get_lowest_layer(m_ws), res, write_ec);
+      }
     }
     catch(const ossia::node_not_found_error&)
     {

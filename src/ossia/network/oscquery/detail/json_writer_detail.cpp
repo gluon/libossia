@@ -614,6 +614,46 @@ json_writer::string_t json_writer::query_host_info(
   return buf;
 }
 
+bool json_writer::known_attribute(std::string_view method)
+{
+  return method == detail::contents() || detail::attributesMap().count(method) != 0;
+}
+
+json_writer::string_t json_writer::query_attributes_impl(
+    const net::node_base& node, const std::vector<std::string_view>& methods)
+{
+  string_t tree;
+  {
+    writer_t wr(tree);
+    detail::json_writer_impl p{wr};
+    p.writeNode(node);
+  }
+
+  rapidjson::Document doc;
+  doc.Parse<rapidjson::kParseFullPrecisionFlag>(tree.GetString(), tree.GetSize());
+
+  string_t buf;
+  writer_t wr(buf);
+  wr.StartObject();
+  if(!doc.HasParseError())
+  {
+    for(auto method : methods)
+    {
+      if(!known_attribute(method))
+        continue;
+      auto it = doc.FindMember(rapidjson::StringRef(method.data(), method.size()));
+      if(it != doc.MemberEnd())
+      {
+        write_json_key(wr, method);
+        it->value.Accept(wr);
+      }
+    }
+  }
+  wr.EndObject();
+
+  return buf;
+}
+
 json_writer::string_t json_writer::query_namespace(const net::node_base& node)
 {
   string_t buf;
