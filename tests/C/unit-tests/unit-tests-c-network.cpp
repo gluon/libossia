@@ -176,9 +176,7 @@ bool tcp_connects(const std::string& ip, uint16_t port)
 }
 
 // Sends "<address> <f>" in one datagram to ip:port
-void send_osc_float(
-    const std::string& ip, uint16_t port, const std::string& address, float f,
-    const std::string& from_ip = {}, uint16_t from_port = 0)
+std::string osc_float_message(const std::string& address, float f)
 {
   std::string m = address;
   m.append(4 - m.size() % 4, '\0');
@@ -188,6 +186,14 @@ void send_osc_float(
   std::memcpy(&bits, &f, 4);
   bits = htonl(bits);
   m.append(reinterpret_cast<const char*>(&bits), 4);
+  return m;
+}
+
+void send_osc_float(
+    const std::string& ip, uint16_t port, const std::string& address, float f,
+    const std::string& from_ip = {}, uint16_t from_port = 0)
+{
+  const auto m = osc_float_message(address, f);
   int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
@@ -1609,4 +1615,80 @@ TEST_CASE("C API: the fragment of a URL is disregarded", "[network_c]")
   REQUIRE(http_get(s.ws, "/level#frag") == http_get(s.ws, "/level"));
   REQUIRE(http_get(s.ws, "/level?VALUE#frag") == "{\"VALUE\":0.5}");
   REQUIRE(http_status(s.ws, "/nothing#frag") == 404);
+}
+
+namespace
+{
+// What a client writes to a read-only parameter is ignored, by each way a
+// value can come in. /rw takes the same way each time, to prove the way works.
+void access_is_applied(ossia_device_t dev, uint16_t osc, uint16_t ws, const std::string& url)
+{
+  auto ro = float_parameter(dev, "/ro");
+  auto rw = float_parameter(dev, "/rw");
+  auto so = float_parameter(dev, "/so");
+  ossia_parameter_set_access_mode(ro, GET);
+  ossia_parameter_set_access_mode(so, SET);
+  ossia_parameter_push_f(ro, 0.5f);
+  ossia_parameter_push_f(so, 0.25f);
+  settle();
+  raw_client c{url};
+  REQUIRE(c.ws.connected());
+  settle();
+
+  int n = 1;
+  auto written = [&](const std::function<void(const char*, float)>& write) {
+    const float value = 10.f * n++;
+    write("/ro", value + 1.f);
+    write("/rw", value);
+    REQUIRE(wait_for([&] { return value_of(rw) == value; }, 2000));
+    settle();
+    REQUIRE(value_of(ro) == 0.5f);
+  };
+  written([&](const char* a, float f) { send_osc_float("127.0.0.1", osc, a, f); });
+  written([&](const char* a, float f) { c.ws.send_binary_message(osc_float_message(a, f)); });
+  written([&](const char* a, float f) {
+    c.ws.send_message(std::string{"{\"" } + a + "\":" + std::to_string(f) + "}");
+  });
+
+  // By a pattern: /rw is reached, /ro is not
+  send_osc_float("127.0.0.1", osc, "/r?", 77.f);
+  REQUIRE(wait_for([&] { return value_of(rw) == 77.f; }, 2000));
+  settle();
+  REQUIRE(value_of(ro) == 0.5f);
+
+  // The same once the parameters are observed, which is another way in the server
+  auto noop = [](void*, ossia_value_t) {};
+  ossia_parameter_add_callback(ro, noop, nullptr);
+  ossia_parameter_add_callback(rw, noop, nullptr);
+  settle();
+  written([&](const char* a, float f) { send_osc_float("127.0.0.1", osc, a, f); });
+  send_osc_float("127.0.0.1", osc, "/r?", 78.f);
+  REQUIRE(wait_for([&] { return value_of(rw) == 78.f; }, 2000));
+  settle();
+  REQUIRE(value_of(ro) == 0.5f);
+
+  // A write-only parameter: its value cannot be queried, and it can be written
+  send_osc_float("127.0.0.1", osc, "/so", 3.f);
+  REQUIRE(wait_for([&] { return value_of(so) == 3.f; }, 2000));
+  REQUIRE(http_status(ws, "/so?VALUE") == 204);
+  REQUIRE(http_get(ws, "/so?VALUE").empty());
+  REQUIRE(member_of(ws, "/so?VALUE&TYPE", "VALUE") == "absent");
+  REQUIRE(member_of(ws, "/so?VALUE&TYPE", "TYPE") == "\"f\"");
+  REQUIRE(http_status(ws, "/ro?VALUE") == 200);
+}
+}
+
+TEST_CASE("C API: asio server applies ACCESS", "[network_c]")
+{
+  server s{"c_access_asio", 0, "127.0.0.1"};
+  access_is_applied(s.dev, s.osc, s.ws, s.url());
+}
+
+TEST_CASE("C API: WebSocket++ server applies ACCESS", "[network_c]")
+{
+  const uint16_t osc = free_port(false), ws = free_port(true);
+  auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_access_wspp");
+  REQUIRE(dev);
+  access_is_applied(dev, osc, ws, "ws://127.0.0.1:" + std::to_string(ws));
+  ossia_device_free(dev);
 }
