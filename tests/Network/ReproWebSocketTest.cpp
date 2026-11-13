@@ -8,12 +8,17 @@
 // OSSIA_DNSSD=OFF to keep it off mDNS). Loopback.
 #include "ReproCommon.hpp"
 
+#include <ossia/network/base/node_attributes.hpp>
+#include <ossia/network/exceptions.hpp>
 #include <ossia/network/oscquery/oscquery_mirror.hpp>
+#include <ossia/network/sockets/websocket_server_beast.hpp>
+#include <ossia/protocols/oscquery/oscquery_mirror_asio.hpp>
 #include <ossia/network/value/value_conversion.hpp>
 
 #include "include_catch.hpp"
 
 #include <functional>
+#include <map>
 
 using namespace repro;
 
@@ -279,4 +284,220 @@ TEST_CASE("Mirror: the value of an added parameter arrives once", "[mirror-added
               when_added, after_change);
   CHECK(when_added == 1);
   CHECK(after_change == 1);
+}
+
+namespace
+{
+// An OSCQuery server written by hand, as another implementation may be: it
+// signals a change of its tree by PATH_CHANGED, which the servers of this
+// library do not send. Its tree: /f and the nodes the test sets, each a
+// float.
+struct changing_server
+{
+  ossia::net::network_context_ptr ctx = ossia::net::create_network_context();
+  ossia::net::websocket_server_beast ws{ctx};
+  uint16_t port = free_port(true);
+  uint16_t osc = free_port(false);
+  std::mutex mutex;
+  std::vector<ossia::net::ws_connection_handle> clients;
+  std::map<std::string, float> nodes{{"f", 0.5f}};
+  std::thread thread;
+
+  changing_server()
+  {
+    ws.set_open_handler([this](ossia::net::ws_connection_handle hdl) {
+      std::lock_guard lock{mutex};
+      clients.push_back(hdl);
+    });
+    ws.set_close_handler([](ossia::net::ws_connection_handle) {});
+    ws.set_message_handler(
+        [this](const ossia::net::ws_connection_handle&, ossia::net::ws_opcode,
+               const std::string& text) { return answer(text); });
+    ws.listen(port);
+    thread = std::thread([this] { ws.run(); });
+    std::this_thread::sleep_for(100ms);
+  }
+  ~changing_server()
+  {
+    ws.stop();
+    ossia::net::stop_network_context(*ctx);
+    thread.join();
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(port); }
+
+  static std::string node_json(const std::string& name, float v)
+  {
+    return "{\"FULL_PATH\":\"/" + name + "\",\"TYPE\":\"f\",\"ACCESS\":3,\"VALUE\":"
+           + std::to_string(v) + "}";
+  }
+  ossia::net::server_reply answer(const std::string& text)
+  {
+    ossia::net::server_reply reply;
+    reply.type = ossia::net::server_reply::data_type::json;
+    if(text.empty() || text[0] != '/')
+      return reply; // a command: LISTEN, START_OSC_STREAMING
+    if(text.find("HOST_INFO") != std::string::npos)
+    {
+      reply.data = "{\"NAME\":\"changing\",\"OSC_PORT\":" + std::to_string(osc)
+                   + ",\"OSC_TRANSPORT\":\"UDP\",\"EXTENSIONS\":{\"LISTEN\":true,"
+                     "\"PATH_CHANGED\":true,\"VALUE\":true}}";
+      return reply;
+    }
+    const auto query = text.find('?');
+    const std::string path = text.substr(0, query);
+    std::lock_guard lock{mutex};
+    if(path == "/")
+    {
+      std::string contents;
+      for(auto& [name, v] : nodes)
+        contents += (contents.empty() ? "\"" : ",\"") + name + "\":" + node_json(name, v);
+      reply.data = "{\"FULL_PATH\":\"/\",\"ACCESS\":0,\"CONTENTS\":{" + contents + "}}";
+      return reply;
+    }
+    auto it = nodes.find(path.substr(1));
+    if(it == nodes.end())
+      throw ossia::node_not_found_error{path};
+    reply.data = query == std::string::npos
+                     ? node_json(it->first, it->second)
+                     : "{\"VALUE\":" + std::to_string(it->second) + "}";
+    return reply;
+  }
+  void set(const std::string& name, float v)
+  {
+    std::lock_guard lock{mutex};
+    nodes[name] = v;
+  }
+  void remove(const std::string& name)
+  {
+    std::lock_guard lock{mutex};
+    nodes.erase(name);
+  }
+  void path_changed(const std::string& path)
+  {
+    std::vector<ossia::net::ws_connection_handle> to;
+    {
+      std::lock_guard lock{mutex};
+      to = clients;
+    }
+    for(auto& c : to)
+      ws.send_message(c, "{\"COMMAND\":\"PATH_CHANGED\",\"DATA\":\"" + path + "\"}");
+  }
+};
+
+// The mirror of an ossia client (oscquery_mirror_protocol, which applies the
+// tree on the thread that runs its commands) or the asio mirror (which applies
+// it on the thread of its context).
+struct mirror_under_test
+{
+  bool asio;
+  ossia::net::network_context_ptr ctx;
+  std::unique_ptr<ossia::net::generic_device> dev;
+  ossia::oscquery::oscquery_mirror_protocol* mirror{};
+  std::atomic_bool polling{true};
+  std::thread poller;
+  bool updated{};
+
+  mirror_under_test(bool use_asio, const std::string& url)
+      : asio{use_asio}
+  {
+    if(asio)
+    {
+      ctx = ossia::net::create_network_context();
+      auto p = std::make_unique<ossia::oscquery_asio::oscquery_mirror_asio_protocol>(ctx, url);
+      auto* proto = p.get();
+      dev = std::make_unique<ossia::net::generic_device>(std::move(p), "changing_asio");
+      updated = proto->update(dev->get_root_node());
+      poller = std::thread([this] {
+        while(polling)
+        {
+          ctx->context.poll();
+          std::this_thread::sleep_for(1ms);
+        }
+      });
+    }
+    else
+    {
+      auto p = std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url, free_port(false));
+      mirror = p.get();
+      dev = std::make_unique<ossia::net::generic_device>(std::move(p), "changing");
+      updated = mirror->update(dev->get_root_node());
+    }
+  }
+  ~mirror_under_test()
+  {
+    polling = false;
+    if(poller.joinable())
+      poller.join();
+    dev.reset();
+  }
+  const char* name() const { return asio ? "asio mirror" : "mirror"; }
+  bool wait(const std::function<bool()>& done, int ms = 3000)
+  {
+    for(int t = 0; t < ms; t += 10)
+    {
+      if(mirror)
+        mirror->run_commands();
+      if(done())
+        return true;
+      std::this_thread::sleep_for(10ms);
+    }
+    return false;
+  }
+  ossia::net::node_base* node(const std::string& path)
+  {
+    return ossia::net::find_node(dev->get_root_node(), path);
+  }
+  // A node that is there and not a zombie
+  bool alive(const std::string& path)
+  {
+    auto* n = node(path);
+    return n && !ossia::net::get_zombie(n->get_extended_attributes());
+  }
+  float value(const std::string& path)
+  {
+    auto* n = node(path);
+    auto* p = n ? n->get_parameter() : nullptr;
+    return p ? ossia::convert<float>(p->value()) : -1.f;
+  }
+};
+}
+
+// Proposal, line 158: PATH_CHANGED says the structure of an address changed,
+// and the client asks for it: a node that appears, changes or goes, or the
+// whole tree.
+TEST_CASE("Mirror: PATH_CHANGED reads the address again", "[path-changed]")
+{
+  const bool use_asio = GENERATE(false, true);
+  changing_server s;
+  mirror_under_test m{use_asio, s.url()};
+  REQUIRE(m.updated);
+  REQUIRE(m.wait([&] { return m.alive("/f"); }));
+  std::this_thread::sleep_for(300ms); // the WebSocket is up
+
+  s.set("new", 1.5f);
+  s.path_changed("/new");
+  const bool appeared = m.wait([&] { return m.alive("/new"); });
+  const float first = m.value("/new");
+
+  s.set("new", 2.5f);
+  s.path_changed("/new");
+  const bool changed = m.wait([&] { return m.value("/new") == 2.5f; });
+
+  s.remove("new");
+  s.path_changed("/new");
+  const bool gone = m.wait([&] { return !m.alive("/new"); });
+
+  s.set("late", 0.25f);
+  s.path_changed("/");
+  const bool whole = m.wait([&] { return m.alive("/late"); });
+
+  std::printf("path-changed: %s: appeared %d (value %g), changed %d, gone %d, whole tree %d, /f kept %d\n",
+              m.name(), int(appeared), first, int(changed), int(gone), int(whole),
+              int(m.alive("/f")));
+  CHECK(appeared);
+  CHECK(first == 1.5f);
+  CHECK(changed);
+  CHECK(gone);
+  CHECK(whole);
+  CHECK(m.alive("/f"));
 }
