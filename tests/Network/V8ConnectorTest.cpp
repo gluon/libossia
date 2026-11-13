@@ -1811,7 +1811,7 @@ TEST_CASE("oscquery_mirror_push_bundle", "oscquery_mirror_push_bundle")
   REQUIRE(server.sink.messages[1234].second == 1234.f);
 }
 
-#include <ossia/network/sockets/websocket_client.hpp>
+#include <ossia/network/sockets/websocket_client_beast.hpp>
 
 namespace
 {
@@ -1821,9 +1821,10 @@ namespace
 struct raw_client
 {
   std::atomic_int binary_frames{0};
-  ossia::net::websocket_client ws{
-      [this](auto, websocketpp::frame::opcode::value op, const std::string&) {
-    if(op == websocketpp::frame::opcode::value::BINARY)
+  // Owns its context: stop() ends connect_and_run()
+  ossia::net::websocket_client_beast ws{
+      [this](const ossia::net::ws_connection_handle&, ossia::net::ws_opcode op, std::string&) {
+    if(op == ossia::net::ws_opcode::binary)
       binary_frames++;
       }};
   std::thread thread;
