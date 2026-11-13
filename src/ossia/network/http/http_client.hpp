@@ -81,6 +81,12 @@ public:
     m_stream.socket().close(ec);
   }
 
+  //! The status of the answer, once its header came; 0 before
+  unsigned int status() const noexcept
+  {
+    return m_parser.is_header_done() ? m_parser.get().result_int() : 0;
+  }
+
 private:
   static std::string percent_encode_spaces(const std::string& path)
   {
