@@ -4,6 +4,7 @@
 #include <ossia/network/sockets/websocket_server_interface.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -111,6 +112,13 @@ public:
 private:
   void do_accept();
   void on_accept(boost::beast::error_code ec, boost::asio::ip::tcp::socket socket);
+  void retry_accept_later();
+  //! Accept failures in a row, none of them letting a connection through,
+  //! that are taken for clients gone before they were accepted: beyond that,
+  //! the error is logged. A client that leaves gives one failure and the next
+  //! connection is accepted; an acceptor that can accept nothing gives them
+  //! without end.
+  static constexpr int max_accept_failures_in_a_row = 32;
   void add_connection(std::shared_ptr<beast_ws_connection> conn);
   void remove_connection(std::shared_ptr<beast_ws_connection> conn);
 
@@ -119,6 +127,8 @@ private:
   ossia::net::network_context_ptr m_context;
   std::shared_ptr<detail::beast_server_life> m_life;
   boost::asio::ip::tcp::acceptor m_acceptor;
+  boost::asio::steady_timer m_accept_retry;
+  int m_accept_failures_in_a_row{};
   std::set<std::shared_ptr<beast_ws_connection>> m_connections;
   std::mutex m_connections_mutex;
 
