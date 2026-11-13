@@ -2102,8 +2102,10 @@ struct fake_device
   std::atomic_bool late_child{false};
   std::atomic_int value_requests{0};
   std::map<std::string, std::string> extra; // path -> JSON of the node
-  ossia::net::websocket_server::connection_handler client;
-  ossia::net::websocket_server ws;
+  ossia::net::ws_connection_handle client;
+  // The beast server runs on a context of its own, which the thread runs
+  ossia::net::network_context_ptr ctx = std::make_shared<ossia::net::network_context>();
+  ossia::net::websocket_server_beast ws{ctx};
   std::thread thread;
 
   explicit fake_device(const std::string& extensions)
@@ -2149,6 +2151,7 @@ struct fake_device
   ~fake_device()
   {
     ws.stop();
+    ctx->context.stop();
     thread.join();
   }
   std::string url() const { return "ws://127.0.0.1:" + std::to_string(port); }
