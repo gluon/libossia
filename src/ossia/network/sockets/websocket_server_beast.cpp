@@ -338,10 +338,36 @@ websocket_server_beast::~websocket_server_beast()
 
 void websocket_server_beast::listen(uint16_t port)
 {
+  boost::beast::error_code ec;
+
+  // IPv4 only, unless dual stack was asked for: the OSC side of OSCQuery is
+  // IPv4 (oscpack), and a server sends a client its values at the address it
+  // connected from. A client that reached a dual-stack server by a name, which
+  // resolves ::1 or a link-local address before an IPv4 one, would be streamed
+  // its values at an address it cannot receive on: it would read the tree and
+  // never see a value. On IPv4 such a client falls back to IPv4 and is served.
+  if(!m_dual_stack)
+  {
+    const boost::asio::ip::tcp::endpoint v4{boost::asio::ip::tcp::v4(), port};
+    m_acceptor.open(v4.protocol(), ec);
+    if(ec)
+      return;
+    m_acceptor.set_option(boost::asio::socket_base::reuse_address(true), ec);
+    if(ec)
+      return;
+    m_acceptor.bind(v4, ec);
+    if(ec)
+      return;
+    m_acceptor.listen(boost::asio::socket_base::max_listen_connections, ec);
+    if(ec)
+      return;
+    do_accept();
+    return;
+  }
+
   // Listen on IPv6 with dual-stack (accepts both IPv4 and IPv6)
   boost::asio::ip::tcp::endpoint endpoint{boost::asio::ip::tcp::v6(), port};
 
-  boost::beast::error_code ec;
   m_acceptor.open(endpoint.protocol(), ec);
   if(ec)
     return;

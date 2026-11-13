@@ -501,3 +501,102 @@ TEST_CASE("Mirror: PATH_CHANGED reads the address again", "[path-changed]")
   CHECK(whole);
   CHECK(m.alive("/f"));
 }
+
+namespace
+{
+// The server of an ossia.device on every interface, as expose oscquery leaves
+// it: a client may then reach it over IPv6, which the dual-stack listener of
+// this base accepts.
+struct open_asio_server
+{
+  ossia::net::network_context_ptr ctx = ossia::net::create_network_context();
+  std::unique_ptr<ossia::net::generic_device> dev;
+  ossia::net::multiplex_protocol* multiplex{};
+  uint16_t osc = free_port(false);
+  uint16_t ws = free_port(true);
+  std::thread net;
+
+  open_asio_server()
+  {
+    auto mp = std::make_unique<ossia::net::multiplex_protocol>();
+    multiplex = mp.get();
+    dev = std::make_unique<ossia::net::generic_device>(std::move(mp), "open");
+    add_float(dev->get_root_node(), "/f", 0.f);
+    multiplex->expose_to(std::make_unique<ossia::oscquery_asio::oscquery_server_protocol>(
+        ctx, osc, ws, false));
+    net = std::thread([this] { ctx->run(); });
+    std::this_thread::sleep_for(300ms);
+  }
+  ~open_asio_server()
+  {
+    ossia::net::stop_network_context(*ctx);
+    if(net.joinable())
+      net.join();
+  }
+  ossia::net::parameter_base* param()
+  {
+    return ossia::net::find_node(dev->get_root_node(), "/f")->get_parameter();
+  }
+};
+}
+
+// A client that reaches the server by a name, as ossia.client connect <name>
+// does, resolves ::1 before 127.0.0.1. The OSC side of OSCQuery is IPv4 only
+// (oscpack): a client that arrived over IPv6 would be streamed its values at
+// an address it cannot receive on, and would get the tree and no value. The
+// server listens on IPv4, so such a client falls back to 127.0.0.1, which the
+// server sees, and the values reach it.
+TEST_CASE("Mirror: a client that resolves ::1 first falls back to IPv4 and gets the values",
+          "[mirror-ipv6]")
+{
+  const bool over_ipv6 = GENERATE(false, true);
+  open_asio_server s;
+  // localhost resolves to ::1 first, as the name an mDNS announcement gives does
+  const std::string host = over_ipv6 ? "localhost" : "127.0.0.1";
+  auto client = std::make_shared<ossia::net::generic_device>(
+      std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+          "ws://" + host + ":" + std::to_string(s.ws), free_port(false)),
+      "mirror");
+  auto* mirror = dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(&client->get_protocol());
+  REQUIRE(mirror);
+  REQUIRE(mirror->update(client->get_root_node()));
+
+  auto* node = ossia::net::find_node(client->get_root_node(), "/f");
+  REQUIRE(node);
+  auto* p = node->get_parameter();
+  REQUIRE(p);
+  std::mutex m;
+  std::vector<float> got;
+  p->add_callback([&](const ossia::value& v) {
+    std::lock_guard l{m};
+    got.push_back(ossia::convert<float>(v));
+  });
+  // The LISTEN of the callback, and the client's own port, reach the server
+  for(int t = 0; t < 100; t++)
+  {
+    mirror->run_commands();
+    std::this_thread::sleep_for(10ms);
+  }
+
+  s.param()->push_value(0.75f);
+  for(int t = 0; t < 200; t++)
+  {
+    mirror->run_commands();
+    std::this_thread::sleep_for(10ms);
+    std::lock_guard l{m};
+    if(!got.empty())
+      break;
+  }
+  // The address the server sees: a client that fell back is at 127.0.0.1
+  const auto peers = http_get(s.ws, "/?PEERS");
+  std::lock_guard l{m};
+  std::printf("mirror-ipv6: client at %s: %zu value(s) after a push of 0.75: %s; the server sees %s\n",
+              host.c_str(), got.size(), got.empty() ? "none" : std::to_string(got.back()).c_str(),
+              peers.body.find("127.0.0.1") != std::string::npos ? "127.0.0.1"
+                  : (peers.body.find("::1") != std::string::npos ? "::1" : "another address"));
+  CHECK(!got.empty());
+  if(!got.empty())
+    CHECK(got.back() == 0.75f);
+  CHECK(peers.body.find("127.0.0.1") != std::string::npos);
+  CHECK(peers.body.find("::1") == std::string::npos);
+}

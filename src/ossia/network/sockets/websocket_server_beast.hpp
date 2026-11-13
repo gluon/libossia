@@ -91,6 +91,12 @@ public:
 
   void listen(uint16_t port) override;
   void listen(const std::string& address, uint16_t port) override;
+  //! Whether listen(port) takes IPv6 as well, off by default: a client that
+  //! reaches a dual-stack server by a name arrives over IPv6, and the OSC
+  //! side of OSCQuery is IPv4, so its values would go to an address it cannot
+  //! receive on. Set it before listen().
+  void set_dual_stack(bool dual_stack) noexcept { m_dual_stack = dual_stack; }
+  bool dual_stack() const noexcept { return m_dual_stack; }
   void run() override;
   void stop() override;
   void close(ws_connection_handle hdl) override;
@@ -129,6 +135,7 @@ private:
   boost::asio::ip::tcp::acceptor m_acceptor;
   boost::asio::steady_timer m_accept_retry;
   int m_accept_failures_in_a_row{};
+  bool m_dual_stack{};
   std::set<std::shared_ptr<beast_ws_connection>> m_connections;
   std::mutex m_connections_mutex;
 
