@@ -1564,7 +1564,7 @@ TEST_CASE("C API: asio server knows a sender by its address and port", "[.][send
   same_port_on_another_address(s.dev, s.osc, s.url(), other);
 }
 
-TEST_CASE("C API: WebSocket++ server knows a sender by its address and port", "[.][sender_address]")
+TEST_CASE("C API: C API server knows a sender by its address and port", "[.][sender_address]")
 {
   const auto other = other_ipv4();
   if(other.empty())
@@ -1676,7 +1676,7 @@ TEST_CASE("C API: asio server sends each tree change of a parameter once", "[net
   tree_changes_of_a_parameter(s.dev, s.url());
 }
 
-TEST_CASE("C API: WebSocket++ server sends each tree change of a parameter once", "[network_c]")
+TEST_CASE("C API: C API server sends each tree change of a parameter once", "[network_c]")
 {
   const uint16_t osc = free_port(false), ws = free_port(true);
   auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_tree_changes_wspp");
@@ -1831,7 +1831,7 @@ TEST_CASE("C API: asio server applies ACCESS", "[network_c]")
   access_is_applied(s.dev, s.osc, s.ws, s.url());
 }
 
-TEST_CASE("C API: WebSocket++ server applies ACCESS", "[network_c]")
+TEST_CASE("C API: C API server applies ACCESS", "[network_c]")
 {
   const uint16_t osc = free_port(false), ws = free_port(true);
   auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_access_wspp");
@@ -2009,7 +2009,7 @@ TEST_CASE("C API: asio server filters by LISTEN", "[network_c]")
   listen_filters(s.dev, s.osc, s.url());
 }
 
-TEST_CASE("C API: WebSocket++ server filters by LISTEN", "[network_c]")
+TEST_CASE("C API: C API server filters by LISTEN", "[network_c]")
 {
   const uint16_t osc = free_port(false), ws = free_port(true);
   auto dev = ossia_device_create(ossia_protocol_oscquery_server_create(osc, ws), "c_listen_wspp");
@@ -2313,7 +2313,7 @@ TEST_CASE("C API: asio server: a client that leaves as it connects is no error",
   REQUIRE(log.str().find("[error]") == std::string::npos);
 }
 
-TEST_CASE("C API: WebSocket++ server: a client that leaves as it connects is no error", "[network_c]")
+TEST_CASE("C API: C API server: a client that leaves as it connects is no error", "[network_c]")
 {
   std::ostringstream log;
   auto sink = std::make_shared<spdlog::sinks::ostream_sink_mt>(log);
