@@ -12,6 +12,12 @@
 #include <nano_signal_slot.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 namespace osc
 {
 template <typename T>
@@ -85,7 +91,30 @@ public:
   void set_zeroconf_servers(
       net::zeroconf_server oscquery_server, net::zeroconf_server osc_server);
 
+  //! A client's write that comes less than this after the server sent it a
+  //! different value on that address gets the server's final value back, to
+  //! that client only: crossed writes end on the same value. 0 turns it off.
+  static constexpr std::chrono::milliseconds default_crossing_window{100};
+  void set_crossing_window(std::chrono::milliseconds window) noexcept
+  {
+    m_crossingWindow.store(window.count(), std::memory_order_relaxed);
+  }
+  std::chrono::milliseconds crossing_window() const noexcept
+  {
+    return std::chrono::milliseconds{m_crossingWindow.load(std::memory_order_relaxed)};
+  }
+
 private:
+  // A value the server sent on its own (a local change, another client's
+  // value it forwards), to every client but skipped
+  void record_sent(std::string address, const ossia::value& v, uintptr_t skipped = 0);
+  // Before a write of origin to address is applied: the value the server
+  // sent it there within the crossing window, if any
+  std::optional<ossia::value> sent_within_window(std::string_view address, uintptr_t origin);
+  // After the write: its answer, when it left the address with another value
+  // than sent. The answer opens no window.
+  void answer_crossing(std::string_view address, uintptr_t origin, const ossia::value& sent);
+
   // List of connected clients
   oscquery_client* find_client(const connection_handler& hdl);
 
@@ -154,6 +183,17 @@ private:
   // function queue to hold ws callback
   // and avoid tree to be modified on another thread
   ossia::spsc_queue<std::function<void()>> m_functionQueue;
+
+  struct sent_value
+  {
+    std::chrono::steady_clock::time_point time;
+    ossia::value value;
+    uintptr_t skipped{};
+  };
+  // By address, the last value the server sent on its own
+  std::mutex m_sentMutex;
+  std::unordered_map<std::string, sent_value> m_sent;
+  std::atomic<int64_t> m_crossingWindow{default_crossing_window.count()};
 };
 }
 

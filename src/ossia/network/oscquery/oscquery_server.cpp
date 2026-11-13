@@ -129,6 +129,7 @@ bool oscquery_server_protocol::push_impl(const T& addr, const ossia::value& v)
   auto val = bound_value(addr, v);
   if(val.valid())
   {
+    record_sent(ossia::net::osc_address(addr), val);
     // Push to all clients
     auto critical = addr.get_critical();
     if(!critical)
@@ -252,6 +253,7 @@ bool oscquery_server_protocol::echo_incoming_message(
     const ossia::value& val)
 {
   bool not_this_protocol = &id.protocol != this;
+  record_sent(addr.get_node().osc_address(), val, not_this_protocol ? 0 : id.identifier);
   // we know that the value is valid
   // Push to all clients except ours
   auto critical = addr.get_critical();
@@ -552,9 +554,14 @@ void oscquery_server_protocol::on_osc_message_from(
 try
 {
   auto id = ossia::net::message_origin_identifier{*this, origin};
+  // Read before the value is applied: forwarding it to the other clients
+  // replaces what was sent
+  auto sent = origin ? sent_within_window(m.AddressPattern(), origin) : std::nullopt;
   ossia::net::on_input_message<true>(
       m.AddressPattern(), ossia::net::osc_message_applier{id, m}, m_listening, *m_device,
       m_logger);
+  if(sent)
+    answer_crossing(m.AddressPattern(), origin, *sent);
 }
 catch(const std::exception& e)
 {
@@ -563,6 +570,58 @@ catch(const std::exception& e)
 catch(...)
 {
   logger().error("oscquery_server_protocol::on_OSCMessage: error.");
+}
+
+void oscquery_server_protocol::record_sent(
+    std::string address, const ossia::value& v, uintptr_t skipped)
+{
+  std::lock_guard lock{m_sentMutex};
+  m_sent.insert_or_assign(
+      std::move(address), sent_value{std::chrono::steady_clock::now(), v, skipped});
+}
+
+std::optional<ossia::value>
+oscquery_server_protocol::sent_within_window(std::string_view address, uintptr_t origin)
+{
+  const auto window = crossing_window();
+  if(window.count() <= 0)
+    return std::nullopt;
+  std::lock_guard lock{m_sentMutex};
+  auto it = m_sent.find(std::string(address));
+  if(it == m_sent.end() || it->second.skipped == origin
+     || std::chrono::steady_clock::now() - it->second.time > window)
+    return std::nullopt;
+  return it->second.value;
+}
+
+void oscquery_server_protocol::answer_crossing(
+    std::string_view address, uintptr_t origin, const ossia::value& sent)
+{
+  auto* node = ossia::net::find_node(m_device->get_root_node(), address);
+  auto* param = node ? node->get_parameter() : nullptr;
+  if(!param)
+    return;
+  // The client's value differs from what it was sent: it applied the
+  // server's value after its own, and keeps it unless it gets the final one
+  const auto value = param->value();
+  if(value == sent)
+    return;
+
+  lock_t lock(m_clientsMutex);
+  for(auto& client_p : m_clients)
+  {
+    auto& client = *client_p;
+    if((uintptr_t)client.connection.lock().get() != origin)
+      continue;
+    if(m_logger.outbound_logger)
+      m_logger.outbound_logger->info("Out: {} {}", address, value);
+    if(client.sender && !param->get_critical())
+      ossia::oscquery::osc_writer::send_message(*param, value, client.sender->socket());
+    else
+      m_websocketServer->send_binary_message(
+          client.connection, osc_writer::to_message(*param, value));
+    break;
+  }
 }
 
 void oscquery_server_protocol::on_connectionOpen(const connection_handler& hdl)
