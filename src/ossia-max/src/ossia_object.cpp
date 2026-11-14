@@ -81,6 +81,7 @@ void ossia_object::destroy(ossia_object* x)
     clock_free((t_object*)x->m_bundle_clock);
     x->m_bundle_clock = nullptr;
   }
+  x->free_notify();
 
   if(x->network_poll_clock)
   {

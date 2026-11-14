@@ -79,6 +79,7 @@ void device::class_setup(t_class* c)
 {
   device_base::class_setup(c);
   device_base::bundle_class_setup(c);
+  device_base::notify_class_setup(c);
   class_addmethod(c, (method)device::register_children, "register", A_NOTHING, 0);
   class_addmethod(c, (method)device::expose, "expose", A_GIMME, 0);
   class_addmethod(
@@ -220,6 +221,7 @@ void device::destroy(device* x)
     clock_free((t_object*)x->m_bundle_clock);
     x->m_bundle_clock = nullptr;
   }
+  x->free_notify();
   x->m_device = nullptr;
 
   if(x->m_dumpout)

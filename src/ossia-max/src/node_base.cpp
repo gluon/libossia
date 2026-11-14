@@ -169,6 +169,17 @@ void node_base::get_namespace(node_base* x, t_symbol* s, long argc, t_atom* argv
     A_SETLONG(&a, children.size());
     outlet_anything(x->m_dumpout, gensym("namespace_size"), 1, &a);
 
+    // Those nothing follows are read again for next time: many at once, their
+    // tree is read once instead of a value read each
+    {
+      std::vector<ossia::net::parameter_base*> params;
+      params.reserve(children.size());
+      for(auto* child : children)
+        if(auto p = child->get_parameter())
+          params.push_back(p);
+      ossia::oscquery::refresh_followed_values(params);
+    }
+
     int pos = ossia::net::osc_parameter_string(*n).length();
     if(pos > 1)
       pos++; // root node always have '/' osc_address,
@@ -184,7 +195,7 @@ void node_base::get_namespace(node_base* x, t_symbol* s, long argc, t_atom* argv
       auto param = child->get_parameter();
       if(param)
       {
-        ossia::value val = ossia::oscquery::read_followed_value(*param);
+        ossia::value val = param->value();
         val.apply(vm);
       }
 

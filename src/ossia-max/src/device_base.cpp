@@ -64,14 +64,101 @@ void device_base::flush_bundles(device_base* x)
 }
 Nano::Signal<void(device_base*)> device_base::on_device_removing{};
 
+void device_base::notify_class_setup(t_class* c)
+{
+  CLASS_ATTR_LONG(c, "notify", 0, device_base, m_notify);
+  CLASS_ATTR_FILTER_CLIP(c, "notify", 0, 2);
+  CLASS_ATTR_LABEL(
+      c, "notify",
+      0, "Tree changes out of the dumpout: 0 namespace_changed only, 1 also each change when few, 2 each change at once");
+}
+
+// From the thread that changes the tree: the main thread for a polled client,
+// another one for some protocols. No symbol is made here unless @notify 2.
+void device_base::note_change(
+    change_batch::kind k, const ossia::net::node_base& node, const std::string& old_name)
+{
+  const std::string& path = node.osc_address();
+  std::string old_path;
+  if(k == change_batch::kind::node_renamed)
+    old_path = path.substr(0, path.size() - node.get_name().size()) + old_name;
+  const std::string& device = node.get_device().get_name();
+  if(m_notify >= 2)
+  {
+    change_batch::change c;
+    c.what = k;
+    c.address = device + ":" + path;
+    if(k == change_batch::kind::node_renamed)
+      c.old_address = device + ":" + old_path;
+    output_change(c);
+  }
+  if(m_changes.add(k, device, path, old_path) && m_changes_qelem)
+    qelem_set(m_changes_qelem);
+}
+
+// One change, as ossia-max always gave it
+void device_base::output_change(const change_batch::change& c)
+{
+  if(!m_dumpout)
+    return;
+  t_atom a[3];
+  using k = change_batch::kind;
+  switch(c.what)
+  {
+    case k::node_created:
+    case k::node_removed:
+      A_SETSYM(a, gensym(c.what == k::node_created ? "created" : "removed"));
+      A_SETSYM(a + 1, gensym(c.address.c_str()));
+      outlet_anything(m_dumpout, gensym("node"), 2, a);
+      break;
+    case k::parameter_created:
+    case k::parameter_removed:
+      A_SETSYM(a, gensym(c.what == k::parameter_created ? "created" : "removed"));
+      A_SETSYM(a + 1, gensym(c.address.c_str()));
+      outlet_anything(m_dumpout, gensym("parameter"), 2, a);
+      break;
+    case k::node_renamed:
+      A_SETSYM(a, gensym("renamed"));
+      A_SETSYM(a + 1, gensym(c.old_address.c_str()));
+      A_SETSYM(a + 2, gensym(c.address.c_str()));
+      outlet_anything(m_dumpout, gensym("node"), 3, a);
+      break;
+  }
+}
+
+// On the main thread: what changed since the last flush
+void device_base::flush_changes(device_base* x)
+{
+  auto r = x->m_changes.take();
+  if(r.empty() || !x->m_dumpout)
+    return;
+  if(x->m_notify == 1 && !r.overflow)
+    for(const auto& c : r.changes)
+      x->output_change(c);
+  std::vector<t_atom> va(4 + r.paths.size());
+  A_SETLONG(&va[0], r.nodes_created);
+  A_SETLONG(&va[1], r.nodes_removed);
+  A_SETLONG(&va[2], r.parameters_created);
+  A_SETLONG(&va[3], r.parameters_removed);
+  for(std::size_t i = 0; i < r.paths.size(); i++)
+    A_SETSYM(&va[4 + i], gensym(r.paths[i].c_str()));
+  outlet_anything(x->m_dumpout, gensym("namespace_changed"), short(va.size()), va.data());
+}
+
+void device_base::free_notify()
+{
+  if(m_changes_qelem)
+  {
+    qelem_unset(m_changes_qelem);
+    qelem_free(m_changes_qelem);
+    m_changes_qelem = nullptr;
+  }
+  m_changes.take();
+}
+
 void device_base::on_parameter_created_callback(const ossia::net::parameter_base& param)
 {
-  auto& node = param.get_node();
-  std::string addr = ossia::net::address_string_from_node(node);
-  t_atom a[2];
-  A_SETSYM(a, gensym("created"));
-  A_SETSYM(a + 1, gensym(addr.c_str()));
-  outlet_anything(m_dumpout, gensym("parameter"), 2, a);
+  note_change(change_batch::kind::parameter_created, param.get_node());
 }
 
 void device_base::on_unhandled_message_callback(
@@ -89,12 +176,7 @@ void device_base::on_unhandled_message_callback(
 
 void device_base::on_parameter_deleted_callback(const ossia::net::parameter_base& param)
 {
-  auto& node = param.get_node();
-  std::string addr = ossia::net::address_string_from_node(node);
-  t_atom a[2];
-  A_SETSYM(a, gensym("removed"));
-  A_SETSYM(a + 1, gensym(addr.c_str()));
-  outlet_anything(m_dumpout, gensym("parameter"), 2, a);
+  note_change(change_batch::kind::parameter_removed, param.get_node());
 }
 
 void device_base::on_attribute_modified_callback(
@@ -151,39 +233,25 @@ void device_base::on_attribute_modified_callback(
 void device_base::on_node_renamed_callback(
     ossia::net::node_base& node, const std::string& old_name)
 {
-  auto name = node.get_name();
-  std::string addr = ossia::net::address_string_from_node(node);
-  std::string old_addr = addr.substr(0, addr.size() - name.size()) + old_name;
-  t_atom a[3];
-  A_SETSYM(a, gensym("renamed"));
-  A_SETSYM(a + 1, gensym(old_addr.c_str()));
-  A_SETSYM(a + 2, gensym(addr.c_str()));
-  outlet_anything(m_dumpout, gensym("node"), 3, a);
+  note_change(change_batch::kind::node_renamed, node, old_name);
 }
 
 void device_base::on_node_created_callback(ossia::net::node_base& node)
 {
-  std::string addr = ossia::net::address_string_from_node(node);
-  t_atom a[2];
-  A_SETSYM(a, gensym("created"));
-  A_SETSYM(a + 1, gensym(addr.c_str()));
-  outlet_anything(m_dumpout, gensym("node"), 2, a);
+  note_change(change_batch::kind::node_created, node);
 }
 
 void device_base::on_node_removing_callback(ossia::net::node_base& node)
 {
-  std::string addr = ossia::net::address_string_from_node(node);
-  t_atom a[2];
-  A_SETSYM(a, gensym("removed"));
-  A_SETSYM(a + 1, gensym(addr.c_str()));
-  if(m_dumpout)
-    outlet_anything(m_dumpout, gensym("node"), 2, a);
+  note_change(change_batch::kind::node_removed, node);
 }
 
 void device_base::connect_slots()
 {
   if(m_device)
   {
+    if(!m_changes_qelem)
+      m_changes_qelem = qelem_new(this, (method)device_base::flush_changes);
     m_device->on_parameter_created.connect<&device_base::on_parameter_created_callback>(
         this);
     m_device->on_parameter_removing.connect<&device_base::on_parameter_deleted_callback>(

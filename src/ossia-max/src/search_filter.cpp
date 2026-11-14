@@ -184,6 +184,14 @@ void dump_node_list(
   auto format_param_default
       = [outlet, prefix](
             const std::vector<ossia::net::node_base*>& nodes, std::vector<t_atom>& va) {
+    // Those nothing follows are read again for next time, many as one tree
+    {
+      std::vector<ossia::net::parameter_base*> params;
+      for(const auto& nn : nodes)
+        if(auto p = nn->get_parameter())
+          params.push_back(p);
+      ossia::oscquery::refresh_followed_values(params);
+    }
     for(const auto& nn : nodes)
     {
       auto& n = *nn;
@@ -198,7 +206,7 @@ void dump_node_list(
       // Print the param
       if(auto param = n.get_parameter())
       {
-        const ossia::value val = ossia::oscquery::read_followed_value(*param);
+        const ossia::value val = param->value();
         val.apply(vm);
       }
 

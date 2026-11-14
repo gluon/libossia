@@ -74,6 +74,8 @@ set(PROJECT_SRCS
     src/client.cpp
     src/client_mirror.hpp
     src/client_mirror.cpp
+    src/change_batch.hpp
+    src/change_batch.cpp
     src/device.hpp
     src/device.cpp
     src/device_base.hpp

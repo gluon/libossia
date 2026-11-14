@@ -1,4 +1,5 @@
 #pragma once
+#include <ossia-max/src/change_batch.hpp>
 #include <ossia-max/src/node_base.hpp>
 
 namespace ossia
@@ -21,6 +22,24 @@ public:
   void stop_bundles();
   static void flush_bundles(device_base* x);
   static void bundle_class_setup(t_class* c);
+
+  // @notify: what the tree changes of the device give out of the dumpout,
+  // flushed on the main thread. 0: one namespace_changed for the changes
+  // since the last flush (counts, and the paths that cover them); 1
+  // (default): the same, and before it each change as before (node created,
+  // parameter removed...) when there were at most notify_keep of them; 2: each
+  // change at once, as before, and namespace_changed.
+  long m_notify{1};
+  static constexpr std::size_t notify_keep = 32;
+  change_batch m_changes{notify_keep};
+  void* m_changes_qelem{};
+  void note_change(
+      change_batch::kind k, const ossia::net::node_base& node,
+      const std::string& old_name = {});
+  void output_change(const change_batch::change& c);
+  static void flush_changes(device_base* x);
+  static void notify_class_setup(t_class* c);
+  void free_notify();
 
   void on_parameter_created_callback(const ossia::net::parameter_base& param);
   void on_parameter_deleted_callback(const ossia::net::parameter_base& param);

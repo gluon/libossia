@@ -41,8 +41,10 @@ extern "C" void ossia_client_setup()
 
   device_base::class_setup(c);
   device_base::bundle_class_setup(c);
+  device_base::notify_class_setup(c);
 
   class_addmethod(c, (method)client::update, "update", A_NOTHING, 0);
+  class_addmethod(c, (method)client::stats, "stats", A_NOTHING, 0);
 
   class_addmethod(c, (method)client::connect_mess_cb, "connect", A_GIMME, 0);
 
@@ -245,6 +247,7 @@ void client::destroy(client* x)
     clock_free((t_object*)x->m_bundle_clock);
     x->m_bundle_clock = nullptr;
   }
+  x->free_notify();
   if(x->m_poll_clock)
   {
     clock_unset(x->m_poll_clock);
@@ -627,6 +630,23 @@ void client::update(client* x)
     x->m_device->get_protocol().update(*x->m_device);
     output_all_values(x->m_patcher, true);
   }
+}
+
+// The value reads of the mirror: waiting, then since it was made sent, failed,
+// cancelled (their node removed)
+void client::stats(client* x)
+{
+  ossia::oscquery::oscquery_mirror_protocol::value_read_stats st;
+  if(x->m_device)
+    if(auto* mirror = dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(
+           &x->m_device->get_protocol()))
+      st = mirror->get_value_read_stats();
+  t_atom a[4];
+  A_SETLONG(a, long(st.queued));
+  A_SETLONG(a + 1, long(st.sent));
+  A_SETLONG(a + 2, long(st.failed));
+  A_SETLONG(a + 3, long(st.cancelled));
+  outlet_anything(x->m_dumpout, gensym("stats"), 4, a);
 }
 
 void client::disconnect(client* x)

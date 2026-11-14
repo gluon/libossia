@@ -95,6 +95,7 @@ public:
   static void get_devices(client* x);
   static void check_thread_status(client* x);
   static void update(client* x);
+  static void stats(client* x);
   static void poll_message(client* x);
   static void poll_main(client* x);
   // static void destroy(client* x);
