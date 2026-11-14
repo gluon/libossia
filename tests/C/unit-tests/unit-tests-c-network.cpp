@@ -2667,7 +2667,9 @@ TEST_CASE("C API: an answer older than a write of this client does not undo it",
   auto f = find_parameter(m.dev, "/f");
   REQUIRE(f);
   settle();
-  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  // Past the values the tree read at the connection brought: a value read in a
+  // tree less than tree_fresh_window ago is not read again
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
 
   d.value = 0.3f;
   d.value_delay_ms = 300;

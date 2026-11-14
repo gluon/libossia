@@ -172,6 +172,11 @@ if(OSSIA_PROTOCOL_OSCQUERY)
   ossia_add_test(ReproLargeTreeTest
       "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproLargeTreeTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp")
   target_include_directories(ossia_ReproLargeTreeTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
+  # What the client reads and removes: value answers, cancelled reads, read
+  # errors, bulk refresh, sliced removals; ossia-max's change batch
+  ossia_add_test(ReproMirrorReadsTest
+      "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproMirrorReadsTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/change_batch.cpp")
+  target_include_directories(ossia_ReproMirrorReadsTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
   # The client against a large tree: a bench run by hand, not a ctest test
   add_executable(ossia_LargeTreeBench
       "${CMAKE_CURRENT_SOURCE_DIR}/Network/LargeTreeBench.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp")

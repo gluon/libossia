@@ -272,7 +272,9 @@ private:
 // 3.1 s, about 64 ms per MB). 0: answered as fast as the tree is written.
 // The cases of the judge also give each reading of the tree a fixed time
 // (host_ms_per_tree_reading), make GET / fail (root_status) or never answer
-// it (hold_root). A ?VALUE under a track is answered {"VALUE":0.5}.
+// it (hold_root). A ?VALUE under a track is answered {"VALUE":0.5}, or with
+// distinct_values the value of /tracks/t/devices/d/parameters/p/value is
+// 1 + 10000 t + 100 d + p; each ?VALUE takes value_ms on the host thread.
 struct reading
 {
   std::string target;
@@ -335,11 +337,14 @@ public:
   std::string url() const { return "ws://127.0.0.1:" + std::to_string(port); }
 
   void path_changed(const std::string& path);
+  void path_removed(const std::string& path);
 
   // Set before the client connects
   double host_ms_per_tree_reading = 0;
   unsigned root_status = 200;
   std::atomic_bool hold_root{false};
+  std::atomic_bool distinct_values{false};
+  std::atomic<double> value_ms{0};
 
   // Statistics
   std::atomic<int> tcp_open{0}, tcp_open_max{0}, tcp_total{0};
@@ -354,6 +359,14 @@ public:
 
   // The readings of a target, and how many of the readings that match were
   // under way at once, at most
+  // The readings that match, asked at t0 or after
+  int count_if(const std::function<bool(const reading&)>& match,
+               clock_type::time_point t0 = {})
+  {
+    std::lock_guard lock{stats_mutex};
+    return int(std::count_if(readings.begin(), readings.end(),
+                             [&](const reading& r) { return r.asked >= t0 && match(r); }));
+  }
   int count(const std::string& target)
   {
     std::lock_guard lock{stats_mutex};
@@ -610,9 +623,20 @@ private:
       std::string track;
       if(path.rfind("/tracks/", 0) == 0
          && srv.tree.json(path.substr(0, path.find('/', 8)), track))
-        body = "{\"VALUE\":0.5}";
+      {
+        int t = -1, d = -1, p = -1;
+        char tail[16] = {};
+        if(srv.distinct_values
+           && std::sscanf(path.c_str(), "/tracks/%d/devices/%d/parameters/%d/%15s", &t, &d, &p, tail) == 4
+           && std::string(tail) == "value")
+          body = "{\"VALUE\":" + std::to_string(1 + 10000 * t + 100 * d + p) + ".0}";
+        else
+          body = "{\"VALUE\":0.5}";
+      }
       else
         status = 404;
+      if(srv.value_ms > 0)
+        std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(srv.value_ms.load()));
     }
     else if(tree_reading && path == "/" && srv.root_status != 200)
       status = srv.root_status;
@@ -730,6 +754,20 @@ inline void bench_server::host_loop()
     }
     job();
   }
+}
+
+inline void bench_server::path_removed(const std::string& path)
+{
+  const std::string msg = "{\"COMMAND\":\"PATH_REMOVED\",\"DATA\":\"" + path + "\"}";
+  std::vector<std::shared_ptr<ws_session>> all;
+  {
+    std::lock_guard lock{ws_mutex};
+    for(auto& w : sessions)
+      if(auto s = w.lock())
+        all.push_back(s);
+  }
+  for(auto& s : all)
+    s->send(msg);
 }
 
 inline void bench_server::path_changed(const std::string& path)
