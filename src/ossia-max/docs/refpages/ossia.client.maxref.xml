@@ -32,7 +32,7 @@
 	<outletlist>
 			<outlet id="0" name="Info outlet" type="any">
 			<digest>Various information messages</digest>
-			<description>Messages and information in reply to various messages. <m>connect</m> followed by 1 and the connection parameters when the device is connected, by 0 when the connection failed or when the server went away, for a connection by URL or by name; the object then tries again every second (see <at>reconnect</at>) and sends <m>connect</m> 1 again when the server is back. By URL: <m>connect</m> 1 or 0, then the connection parameters (oscquery, a name, the URL). By name: <m>connect</m> 1 or 0, then the name. <m>disconnected</m> when a device connected by name goes away. <m>devices</m> followed by their number, then one <m>device</m> line per device found, in reply to <m>get</m> devices.</description>
+			<description>Messages and information in reply to various messages. <m>connect</m> followed by 1 and the connection parameters when the device is connected, by 0 when the connection failed or when the server went away, for a connection by URL or by name; the object then tries again every second (see <at>reconnect</at>) and sends <m>connect</m> 1 again when the server is back. By URL: <m>connect</m> 1 or 0, then the connection parameters (oscquery, a name, the URL). By name: <m>connect</m> 1 or 0, then the name. <m>disconnected</m> when a device connected by name goes away. <m>devices</m> followed by their number, then one <m>device</m> line per device found, in reply to <m>get</m> devices. <m>namespace_changed</m> after the tree of the device changed, and the changes themselves when few (see <at>notify</at>). <m>stats</m> in reply to <m>stats</m>.</description>
 		</outlet>
 	</outletlist>
 
@@ -44,7 +44,17 @@
 				Output list of all parameters and their current values
 			</digest>
 			<description>
-				Sending the <m>namespace</m> message to the leftmost inlet outputs the list of all parameters registered under this node, and their current values
+				Sending the <m>namespace</m> message to the leftmost inlet outputs the list of all parameters registered under this node, and their current values: <m>namespace_size</m>, then a <m>namespace</m> line per parameter. A parameter nothing follows (no <o>ossia.remote</o> on it) gets from the server only what it is asked for: <m>namespace</m> gives the value known, and asks for the new one for next time; more than 32 such parameters, it asks once for their tree, which brings all their values, instead of one request each.
+			</description>
+		</method>
+
+		<method name="stats">
+			<arglist/>
+			<digest>
+				Output the value reads of the client
+			</digest>
+			<description>
+				The <m>stats</m> message outputs <m>stats</m> followed by four numbers about the value reads the client sends to an OSCQuery server: those waiting to be sent, then, since the connection was made, those sent, those that failed, and those cancelled because their node was removed before they left. A read that fails writes an error in the Max console: one line, then at most one a second that says how many failed since.
 			</description>
 		</method>
 
@@ -157,6 +167,15 @@
 			</digest>
 			<description>
 				The <at>bundle</at> attribute groups what the objects of this device (<o>ossia.parameter</o>, <o>ossia.remote</o>, <o>ossia.view</o>) push during a tick of the scheduler: the values leave at the end of the tick, in OSC bundles of at most 1400 bytes over UDP, in order, nothing merged (two values of one address both leave). -1 (default): bundles when the device speaks OSCQuery; 0: one message per value; 1: always. <o>ossia.v8connector</o> groups its own values (its <at>bundle</at> attribute).
+			</description>
+		</attribute>
+
+		<attribute name="notify" get="1" set="1" type="int" size="1">
+			<digest>
+				What the tree changes give out of the outlet
+			</digest>
+			<description>
+				The <at>notify</at> attribute says what the changes of the device's tree give out of the outlet. After a batch of changes (what came since the last flush, on the main thread), the object sends <m>namespace_changed</m> followed by the numbers of nodes created, nodes removed, parameters created and parameters removed, then the paths that cover every change: 16 at most, a common parent when more places changed. 1 (default): before it, each change as ossia-max always sent it (<m>node</m> created, removed or renamed, <m>parameter</m> created or removed, with the address), when the batch holds at most 32 changes; a larger change, a tree of thousands of nodes, gives <m>namespace_changed</m> alone. 2: each change at once, as it happens, then <m>namespace_changed</m>; on a large tree each change costs Max a symbol it keeps. 0: <m>namespace_changed</m> alone. A subtree removed gives its deepest nodes first.
 			</description>
 		</attribute>
 

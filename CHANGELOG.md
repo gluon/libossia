@@ -51,6 +51,31 @@ to fail.
 
 ### Behavior changes
 
+- Max: `ossia.client` and `ossia.device` no longer send a message for each node
+  and parameter created or removed when many change at once. After a batch of
+  changes (what came since the last flush, on the main thread) they send one
+  `namespace_changed <nodes created> <nodes removed> <parameters created>
+  <parameters removed> <paths...>`, the paths covering every change, 16 at most
+  (a common parent when more places changed). The messages of each change
+  (`node created|removed|renamed`, `parameter created|removed`) still come, as
+  before, before it, when the batch holds at most 32 changes (`@notify 1`, the
+  default); `@notify 2` sends each change at once, as before, and
+  `namespace_changed` as well; `@notify 0` sends `namespace_changed` alone. They
+  come after the change, no longer from inside it, and a subtree removed gives
+  its leaves first, as before. What stops working by default: a patch that
+  counts `parameter created` to know a large tree arrived (it gets
+  `namespace_changed`), or that waits for each address of a large change.
+- Max: the message `namespace` of `ossia.client`, `ossia.device` and the other
+  objects gives the values it knows, without a request for each; more than 32
+  parameters nothing follows, it asks the server for their tree once (the
+  deepest node that holds them all), which brings their values for the next
+  `namespace`.
+- OSCQuery client: a parameter nothing follows, read less than a second after a
+  reading of its tree (`tree_fresh_window`), is not read again from the server:
+  its value came with that reading. `ossia_parameter_get_value` of the C API and
+  `namespace` follow this rule; before, the first read after a connection
+  always sent a request.
+
 - OSCQuery server, both of them (the one of the C API, and the one of
   `ossia.device` and Unity): a query for an attribute outside the OSCQuery
   proposal and outside what the server serves or declares in the `EXTENSIONS` of
@@ -65,6 +90,22 @@ to fail.
 
 ### Added
 
+- Max: `@notify` of `ossia.client` and `ossia.device`, the message
+  `namespace_changed` out of their dumpout, and the message `stats` of
+  `ossia.client`: `stats <queued> <sent> <failed> <cancelled>`, the value reads
+  of its mirror (waiting, and since it was made sent, failed, and cancelled
+  because their node was removed). See Behavior changes.
+- OSCQuery client: `refresh_tree(path)`, `refresh_followed_values(params)` and
+  `get_value_read_stats()`; `tree_fresh_window` (1 s), `bulk_refresh_threshold`
+  (32).
+- Tests: `tests/Network/ReproMirrorReadsTest.cpp`: each value answer on the
+  parameter it was asked for (`[value-pairing]`), the reads of a removed node not
+  sent (`[value-reads-cancelled]`), read errors written at most once a second
+  (`[value-read-errors]`), many parameters read as one tree (`[bulk-refresh]`),
+  removals in slices (`[sliced-removal]`), the tree changes applied in the order
+  they came, whichever thread brought them (`[command-order]`), and what
+  ossia-max makes of a batch of changes (`[change-batch]`).
+
 - Tests: `tests/Network/Repro*Test.cpp` check what the OSCQuery servers, the mirror and the multiplex do, against the OSCQuery proposal: the HTTP answers and the JSON of the tree, `LISTEN` and `IGNORE`, `ACCESS`, a client's own values and crossing writes, bundles, a server stopped with a client connected, and the mDNS announcements (`ReproMdnsTest`, built with `OSSIA_DNSSD`). An attribute the server does not know answers 400, as line 71 of the proposal says, and a node attribute of the proposal it does not serve 204, as line 64 says (see Behavior changes). Two cases are expected to fail (`[!shouldfail]`): the server of `ossia_protocol_oscquery_server_create`, on WebSocket++, still sends a client's values back to it and keeps two values after crossing writes; `ossia.device` and the `Controller` of Unity use the other server, which does neither.
 - Tests: `tests/Network/ZeroconfMinuitListenerTest.cpp` compiles the Minuit listener of ossia-max as it is, against a stand-in for the Max API (`tests/Network/max_listener_stub`) and with the function that builds its devices (`client_mirror.cpp`), and checks that a device leaving the network does not make the listener wait for itself. Holding the listener's lock while it handles the events makes both cases fail.
 - Tools: `tools/check_unity_package.sh` checks a Unity package before a Release: a `.meta` for every file and folder Unity imports, and a version Unity accepts (semver, no leading `v`).
@@ -74,6 +115,50 @@ to fail.
 - Tests: `tests/Network/LargeTreeBench.cpp`, a bench run by hand (`ossia_LargeTreeBench`, not in ctest), puts the mirror of `ossia.client` in front of a synthetic tree the size of a Live set of 64 tracks of 8 devices (342,992 leaves, 46.6 MB), served on the loopback by a server that takes a host's time per answer. Its reference numbers are in `tests/Network/LargeTreeBench.md`. `[path-changed-burst]` and `[large-tree]` of `tests/Network/ReproLargeTreeTest.cpp` check the two corrections below on the same server, `[namespace-reread]` and `[sliced-apply]` the tree applied by the polling thread only, in slices. Its scenario `apply` measures what applying a reading costs, without the network.
 
 ### Fixed
+
+- Max: Max's main thread was held for seconds, then minutes, after a large tree
+  change of a device (a Live set of 64 tracks, 47 MB): `ossia.client` sent a
+  message for each node created or removed, each with a symbol of the full
+  address, which Max keeps (about 1.3 ms a node on that tree, measured inside
+  Max: a track has 5,278 nodes). Since the tree changes are applied on the main
+  thread, this held it; before, it held Max's scheduler. A batch of changes now
+  costs a counter and a path each, and one message (see Behavior changes). The
+  per-node messages are those of ossia: **ossia-prism 2.1.0+prism.12 and ossia's
+  `master` have this cost**, on the scheduler thread.
+- OSCQuery client: a value read that failed (404, the node gone from the server)
+  put every later answer on the parameter read before it: the answers were paired
+  with the reads in order, and a failed read never took its place. Each read now
+  carries its address and who waits for it (`[value-pairing]`, red on the former
+  code, polled or not). ossia's `master` pairs them the same way. **ossia-prism
+  2.1.0+prism.12 has this defect.**
+- OSCQuery client: the value reads still to send for a node the server removed
+  were sent, and came back 404; they are dropped when the node is removed
+  (`[value-reads-cancelled]`: 17 of 1,276 reached the server; before, 234 in the first 1.5 s, and the rest after). The
+  reads of a polled mirror are applied on the polling thread, as its tree
+  changes are.
+- Max: the message `namespace` read the value of each parameter nothing follows,
+  one request each: on a Live set of 64 tracks, 394,442 requests answered in 77
+  ms each by LiveOSCQuery, about 8 hours, and a line in the console for each read
+  of a track deleted meanwhile. This came from PRISM (`2.1.0+prism.12`, the read
+  of a parameter nothing follows), not from ossia. Now one reading of their tree
+  (`[bulk-refresh]`), and the errors of value reads give one line, then at most
+  one a second with how many failed (`[value-read-errors]`: 2 lines for 100
+  failures). **ossia-prism 2.1.0+prism.12 has this defect.**
+- OSCQuery client: the tree changes and the readings that come of them are put
+  in the mirror's queue by the WebSocket thread (`PATH_REMOVED`, `PATH_ADDED`)
+  and by the HTTP thread (the reading of a `PATH_CHANGED`), and applied by the
+  thread that polls: the queue was a single-producer queue, which two threads may
+  corrupt, and which builds with ThreadSanitizer replace with a queue that keeps
+  the order of each thread only. A path removed then added again could end
+  removed (`[command-order]`: 20 rounds of 20 under ThreadSanitizer). The queue
+  now keeps the order across threads. ossia's `master` puts in it from the
+  WebSocket thread only. **ossia-prism 2.1.0+prism.12 has this defect** (the
+  reading of a `PATH_CHANGED`, from the HTTP thread).
+- OSCQuery client: a polled mirror applied a removal (`PATH_REMOVED`, the tree
+  read again without some nodes) a subtree at once: a track of the Live set held
+  the main thread for its 5,278 nodes. Removals now go in the slices of the
+  budget too, the deepest first (`[sliced-removal]`: longest call 10 ms, 120 ms
+  before with a cost of 20 µs a node).
 
 - Max: `ossia.client`, and the mirrors ossia-max builds for the OSCQuery devices announced over mDNS, never connected to a device whose tree takes more than 3 s to come, as Live with a large set: the attempt waited 3 s for the tree, destroyed the mirror, and tried again a second later, without end (in the bench: 15 attempts in 60 s, none connected, each WebSocket open 3.06 s). The attempt now waits for the tree as long as the HTTP client does (30 s at each step), and a tree that fails ends it at once (a `GET /` answered 500: 0.07 s instead of 3.07 s). `oscquery_mirror_protocol::update()` keeps its 3 s, and returns false for a tree that failed.
 - Max: Max could crash (`EXC_BAD_ACCESS`, or an abort) when an `ossia.client` connected by name, or polled its device, while the main thread walked the device's tree: `namespace`, the explorer, the objects being registered. `ossia.client` applied the tree changes the server sent (`PATH_ADDED`, `PATH_REMOVED`, the paths read again after `PATH_CHANGED`) from its poll clock, which Max runs on its scheduler thread when Overdrive is on, while the main thread walked the same nodes; the crash report of Max 9.2.1 shows both stacks at once, a node removed on the scheduler thread (`client::poll_message`, `run_commands`, `remove_child`) and the same node read on the main thread (`node_base::get_namespace`). The removals of a device that changed while no client polled it wait in its queue: the next `ossia.client` that connects by name applies them at once. Reproduced in Max: tracks deleted in Live while no patch was open, then a patch connecting by name and asking `namespace`: a crash at the first try. The poll, the connection and the reconnection of `ossia.client` now run on Max's main thread (the clocks only set qelems), and the tree changes are applied there in slices of 10 ms at most, the rest at the next poll, at once: on a Live set of 64 tracks, a reading of the tracks takes 110 to 120 ms to apply whole, the tree read again 300 ms. Values do not go through it and keep their path. **ossia-prism 2.1.0+prism.12, the latest Release, has this defect**, as ossia's `master` and ossia#876 have.

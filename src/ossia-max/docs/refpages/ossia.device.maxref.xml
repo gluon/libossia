@@ -35,7 +35,7 @@
 	<outletlist>
 			<outlet id="0" name="Info outlet" type="any">
 			<digest>Various information messages</digest>
-			<description>Messages and information in reply to various messages. After <m>expose</m> oscquery, <m>announced</m> followed by the name the device is announced under over mDNS, about a second later (see <m>expose</m>).</description>
+			<description>Messages and information in reply to various messages. After <m>expose</m> oscquery, <m>announced</m> followed by the name the device is announced under over mDNS, about a second later (see <m>expose</m>). <m>namespace_changed</m> after the tree of the device changed, and the changes themselves when few (see <at>notify</at>).</description>
 		</outlet>
 	</outletlist>
 
@@ -137,6 +137,15 @@
 			</digest>
 			<description>
 				The <at>bundle</at> attribute groups what the objects of this device (<o>ossia.parameter</o>, <o>ossia.remote</o>, <o>ossia.view</o>) push during a tick of the scheduler: the values leave at the end of the tick, in OSC bundles of at most 1400 bytes over UDP, in order, nothing merged (two values of one address both leave). -1 (default): bundles when the device speaks OSCQuery; 0: one message per value; 1: always. <o>ossia.v8connector</o> groups its own values (its <at>bundle</at> attribute).
+			</description>
+		</attribute>
+
+		<attribute name="notify" get="1" set="1" type="int" size="1">
+			<digest>
+				What the tree changes give out of the outlet
+			</digest>
+			<description>
+				The <at>notify</at> attribute says what the changes of the device's tree give out of the outlet. After a batch of changes (what came since the last flush, on the main thread), the object sends <m>namespace_changed</m> followed by the numbers of nodes created, nodes removed, parameters created and parameters removed, then the paths that cover every change: 16 at most, a common parent when more places changed. 1 (default): before it, each change as ossia-max always sent it (<m>node</m> created, removed or renamed, <m>parameter</m> created or removed, with the address), when the batch holds at most 32 changes; a larger change, a tree of thousands of nodes, gives <m>namespace_changed</m> alone. 2: each change at once, as it happens, then <m>namespace_changed</m>; on a large tree each change costs Max a symbol it keeps. 0: <m>namespace_changed</m> alone. A subtree removed gives its deepest nodes first.
 			</description>
 		</attribute>
 

@@ -301,6 +301,9 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.14` add to ossia 2.1.0, one line per 
 | A client that leaves as soon as it connects to an `ossia.device` puts no red line in the console | `ossia.device`, `expose oscquery`, `websocket_server_beast.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` and `[2.1.0+prism.14]` | `C API: asio server: a client that leaves as it connects is no error`, `tests/Max/check_console.py` |
 | An `ossia.client` whose server is closing the connection disconnects at once, with no red line | `ossia.client`, `disconnect`, `websocket_client_beast.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: a mirror stopped as its server closes is no error`, `tests/Max/check_console.py` |
 | `get protocols` lists the OSCQuery server of an `ossia.device`, and `get oscquery_clients` its clients | `ossia.device`, `device_protocols.cpp` | .14 | CHANGELOG, `[Unreleased]` | `tests/Network/DeviceProtocolsTest.cpp`; not run in Max |
+| One `namespace_changed` for a batch of tree changes, the changes themselves when few; `@notify` | `ossia.client`, `ossia.device`: `@notify`, `namespace_changed`; `change_batch.cpp` | .14 | [Large trees](#large-trees); reference of `ossia.client`; reference of `ossia.device` | `[change-batch]` of `tests/Network/ReproMirrorReadsTest.cpp`; in Max, the trial of `gros-arbre` |
+| `namespace` reads the values of many parameters nothing follows as one tree | `node_base.cpp`, `search_filter.cpp`, `refresh_followed_values` | .14 | [Large trees](#large-trees); reference of `ossia.client` | `[bulk-refresh]` |
+| The value reads of a client, counted | `ossia.client`: `stats` | .14 | [Large trees](#large-trees); reference of `ossia.client` | `[value-reads-cancelled]`, `[value-read-errors]` (the counters); not run in Max |
 
 #### Unity package
 
@@ -374,6 +377,10 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.14` add to ossia 2.1.0, one line per 
 | A read of a mirrored parameter nothing follows asks the server, without waiting, at most every 100 ms | `read_followed_value`, `refresh_unfollowed` | .12 | `ossia_parameter_get_value` in `src/ossia-c/ossia-c.h`; CHANGELOG | `C API: reading a mirrored parameter nothing follows asks the server`, `C API: an added parameter read then followed gets its value once` |
 | The mirror reads the address of a `PATH_CHANGED` again | `oscquery_mirror.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: a mirror reads again the address of a PATH_CHANGED` |
 | A path is read once at a time, a burst of `PATH_CHANGED` gives one reading more, at most two HTTP connections (the tree, the values) | `oscquery_mirror.cpp`, `http_client.hpp` | .14 | [Differences from ossia 2.1.0](#differences-from-ossia-210); CHANGELOG, `[2.1.0+prism.14]` | `[path-changed-burst]` of `ReproLargeTreeTest`, `tests/Network/LargeTreeBench.md` |
+| Each value answer on the parameter it was asked for; the reads of a removed node dropped; read errors at most one line a second | `oscquery_mirror.cpp`: `queue_value_read`, `cancel_value_reads`; `http_client.hpp` (`Err::quiet`) | .14 | CHANGELOG, `[2.1.0+prism.14]` | `[value-pairing]`, `[value-reads-cancelled]`, `[value-read-errors]` |
+| Many parameters read as one tree; a value read in a tree less than a second ago not read again | `refresh_tree`, `refresh_followed_values`, `tree_fresh_window` | .14 | [Large trees](#large-trees) | `[bulk-refresh]` |
+| A polled mirror removes in slices, the deepest first | `oscquery_mirror.cpp`, `tree_job::removal` | .14 | [Large trees](#large-trees) | `[sliced-removal]` |
+| The tree changes of the WebSocket and HTTP threads applied in the order they came | `oscquery_mirror.hpp`, `command_queue` | .14 | CHANGELOG, `[2.1.0+prism.14]` | `[command-order]` (red under ThreadSanitizer) |
 | The server follows the proposal where it did not: `DATA` of `LISTEN`, 404 and 400, valid JSON, `ECHO` and `EXTENDED_TYPE` declared, UDP senders by address and port, one `ATTRIBUTES_CHANGED` per new parameter, attribute queries, URL fragments | `json_query_parser.hpp`, `websocket_server_beast.cpp`, `json.hpp`, `json_writer_detail.cpp`, `get_query_parser.hpp`, `node.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | the tests named in each commit of `prism/consolidation-12` |
 | An HTTP error names the host, the port and the request | `http_client.hpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: an HTTP error names the host and the request` |
 
@@ -462,6 +469,18 @@ Send `connect <name>` to the client. Since `2.1.0+prism.10`, `[ossia.client <nam
 When it connects by name, the client takes the tree the listener's mirror holds (`client.cpp`, `finish_connect`). Up to `2.1.0+prism.9` it read the tree again: the mirror emptied its root and built it again, the outlet sent `removed` then `created` for every node, the `ossia.remote` objects registered again and the values that arrived in between came out as `osc <address> <values>`. A connection by URL reads the tree once, on its own thread.
 
 mDNS works within one subnet: the machines must share a VLAN, multicast 224.0.0.251 on UDP 5353 must pass between them, Wi-Fi client isolation must be off. On Windows, mDNS in Max needs the Bonjour service. Where discovery cannot work, connect by address: `connect oscquery ws://<ip>:<port>`.
+
+### Large trees
+
+A device of hundreds of thousands of nodes, as the address space of a Live set of 64 tracks (LiveOSCQuery: 394,442 parameters, 47 MB), changes by thousands of nodes at once: a track added or removed is 5,278 nodes. Since `2.1.0+prism.14`, `ossia.client` applies these changes on Max's main thread, 10 ms at most at a time, the rest at the next poll, removals included.
+
+**`namespace_changed`.** After a batch of changes (what came since the last flush), `ossia.client` and `ossia.device` send one `namespace_changed <nodes created> <nodes removed> <parameters created> <parameters removed> <paths...>` out of their dumpout. The paths cover every change, 16 at most: a track added gives `/tracks/68`, changes in more than 16 places give a common parent such as `/tracks`. Route it to read again what you show of the tree: `namespace`, or the addresses under the paths.
+
+**`@notify`.** 1 (the default): before `namespace_changed`, each change as ossia-max always sent it (`node created <address>`, `node removed`, `node renamed <old> <new>`, `parameter created`, `parameter removed`), when the batch holds at most 32 changes. A parameter added in TouchDesigner still gives `parameter created td_synth:/synth/cutoff`; a track of Live gives `namespace_changed` alone. 2: each change at once, as before `2.1.0+prism.14`, then `namespace_changed`; each costs Max a symbol it never frees, about 1.3 ms a node on Live's tree. 0: `namespace_changed` alone.
+
+**`namespace` and the values.** An OSCQuery server sends a client only the values it listens to: a parameter nothing follows (no `ossia.remote` on it) has the value of the last reading. `namespace` gives that value and asks the server for the new one, for the next `namespace`; for more than 32 such parameters it asks once for their tree (the deepest node that holds them all), which brings every value, instead of one request each (77 ms a request on LiveOSCQuery). A value read in a tree less than a second ago is not asked again. To follow a value as it changes, put an `ossia.remote` on it.
+
+**`stats`.** `stats` on `ossia.client` answers `stats <queued> <sent> <failed> <cancelled>`: the value reads of its mirror waiting to leave, and since it connected those sent, failed, and cancelled because their node was removed before they left. A read that fails writes an error in the console: one line, then at most one a second that says how many failed since.
 
 ### Known limits
 
