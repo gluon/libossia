@@ -96,26 +96,28 @@ added.
 ### After the corrections
 
 `bf28fd1bb` (the attempt waits for the tree, a failed tree ends it) and
-`3968dc45d` (one reading of a path at a time, two HTTP queues), same machine,
-on battery, three runs of `loop` and `burst`.
+`3968dc45d` (one reading of a path at a time, two HTTP queues), measured at
+`7f5bc4813`, same machine, on AC power, three runs of `loop` and `burst`
+(remeasured: the first figures, taken on battery, differed by 0.02 s at most).
 
 | Measure | 64 ms/MB | 0 ms/MB (one run) |
 | :- | -: | -: |
-| `read`: tree read after the WebSocket | 3.50 s | 0.54 s |
+| `read`: tree read after the WebSocket | 3.48 s | 0.53 s |
 | `read`: resident memory of the client, before and with the tree | 6 MB, 577 MB | 6 MB, 577 MB |
-| `loop` (60 s): attempts, connected | 1, 1 (at 3.50 s) | |
-| `loop`: WebSocket open, readings of `/` | 60.06 s (to the end), 1 | |
-| `loop` (600 s, one run): connected, WebSocket open | at 3.50 s, 600.06 s (to the end) | |
+| `loop` (60 s): attempts, connected | 1, 1 (at 3.49 to 3.51 s) | |
+| `loop`: WebSocket open, readings of `/` | 60.06 to 60.07 s (to the end), 1 | |
+| `loop` (600 s, one run): connected, WebSocket open | at 3.51 s, 600.06 s (to the end) | |
 | `loop`: HTTP connections the server held at once; client connections (`lsof`), WebSocket included | 2; 2 | |
 | `burst`: `PATH_CHANGED /tracks` sent, readings of `/tracks` | 64, 40 | 64, 64 |
 | `burst`: readings under way at once, at most | 2 | 2 |
 | `burst`: HTTP connections the server held at once, at most | 2 | 2 |
-| `burst`: client connections established at once (`lsof`), WebSocket included | 2 | 2 |
-| `burst`: seconds per reading, p50, p95, max | 1.18, 2.92, 3.20 | 0.14, 0.24, 0.26 |
+| `burst`: client connections established at once (`lsof`), WebSocket included | 2 to 3 | 2 |
+| `burst`: seconds per reading, p50, p95, max | 1.17 to 1.18, 2.92, 3.20 to 3.21 | 0.14, 0.24, 0.25 |
 | `burst`: readings answered after the client gave them up | 0 | 0 |
 | `burst`: after the build: tracks, leaves in the mirror, WebSocket | 68, 342,992, up | 68, 342,992, up |
 
 At most two client HTTP connections at a time, one per queue: the readings of
 the tree, and the rest (values, `HOST_INFO`, commands). In `loop` and `burst`
 the two at once are the `HOST_INFO` and the tree of the connection; `lsof`,
-sampled twice a second, saw at most one of them beside the WebSocket.
+sampled twice a second, saw both beside the WebSocket in one `burst` run of
+three (3 connections), at most one of them in the others.
