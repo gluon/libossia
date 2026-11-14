@@ -128,11 +128,17 @@ void* client::create(t_symbol* name, long argc, t_atom* argv)
     x->m_otype = object_class::client;
 
     x->m_poll_clock = clock_new(x, (method)client::poll_message);
-    x->m_clock = clock_new(x, (method)client::connect);
-    x->m_attempt_clock = clock_new(x, (method)client::attempt_check);
+    x->m_poll_qelem = qelem_new(x, (method)client::poll_main);
+    // Their clocks only set them: the connection, as the poll, runs on the
+    // main thread, where the tree is changed and walked
+    x->m_connect_qelem = qelem_new(x, (method)client::connect);
+    x->m_attempt_qelem = qelem_new(x, (method)client::attempt_check);
+    x->m_clock = clock_new(x, (method)client::connect_clock);
+    x->m_attempt_clock = clock_new(x, (method)client::attempt_clock);
 
     // The link to a server reached by URL. Everything it does runs on the
-    // main thread, through the poll clock.
+    // main thread: the poll clock only sets the poll's qelem (Max runs clocks
+    // on its scheduler thread when Overdrive is on).
     x->m_link = std::make_unique<oscquery_link>(oscquery_link::host{
         [x](int ms) { clock_delay(x->m_poll_clock, ms); },
         [x] { clock_unset(x->m_poll_clock); },
@@ -154,7 +160,10 @@ void* client::create(t_symbol* name, long argc, t_atom* argv)
       client::connect(x);
       const bool ok = x->m_link->watching() && !x->m_link->lost();
       if(!ok && x->m_clock)
+      {
         clock_unset(x->m_clock);
+        qelem_unset(x->m_connect_qelem);
+      }
       return ok;
         }});
 
@@ -209,6 +218,9 @@ void client::destroy(client* x)
   if(x->m_clock)
     clock_free((t_object*)x->m_clock);
   x->m_clock = nullptr;
+  if(x->m_connect_qelem)
+    qelem_free(x->m_connect_qelem);
+  x->m_connect_qelem = nullptr;
 
   disconnect(x);
   // No tick after this: the link forgets its clock, then the clock goes.
@@ -218,6 +230,11 @@ void client::destroy(client* x)
     clock_unset(x->m_attempt_clock);
     clock_free((t_object*)x->m_attempt_clock);
     x->m_attempt_clock = nullptr;
+  }
+  if(x->m_attempt_qelem)
+  {
+    qelem_free(x->m_attempt_qelem);
+    x->m_attempt_qelem = nullptr;
   }
   // Waits for the attempts still running: one attempt at most each.
   x->m_attempt.reset();
@@ -233,6 +250,11 @@ void client::destroy(client* x)
     clock_unset(x->m_poll_clock);
     clock_free((t_object*)x->m_poll_clock);
     x->m_poll_clock = nullptr;
+  }
+  if(x->m_poll_qelem)
+  {
+    qelem_free(x->m_poll_qelem);
+    x->m_poll_qelem = nullptr;
   }
   if(x->m_dumpout)
     outlet_delete(x->m_dumpout);
@@ -495,6 +517,7 @@ void client::finish_connect(client* x, int count, t_atom* status, bool read_tree
     client::update(x);
   client::on_device_created(x);
   clock_unset(x->m_clock);
+  qelem_unset(x->m_connect_qelem);
 
   register_children_in_patcher_recursively(x->m_patcher, x);
   output_all_values(x->m_patcher, true);
@@ -590,9 +613,17 @@ void client::unregister_children()
 
 void client::update(client* x)
 {
-
   if(x->m_device)
   {
+    auto* mirror = dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(
+        &x->m_device->get_protocol());
+    if(mirror && mirror->polled())
+    {
+      // The poll applies it, on this thread, which must not wait for it:
+      // the values come out once it is applied
+      x->m_tree_read = mirror->update_async(x->m_device->get_root_node());
+      return;
+    }
     x->m_device->get_protocol().update(*x->m_device);
     output_all_values(x->m_patcher, true);
   }
@@ -630,19 +661,55 @@ void client::disconnect_impl(client* x)
     x->stop_bundles();
     x->m_device = nullptr;
     x->m_oscq_protocol = nullptr;
+    x->m_tree_read = {};
     client::on_device_removing(x);
 
     outlet_anything(x->m_dumpout, gensym("disconnected"), 0, nullptr);
   }
   if(x->m_clock)
     clock_unset(x->m_clock); // avoid automatic reconnection
+  if(x->m_connect_qelem)
+    qelem_unset(x->m_connect_qelem);
 }
 
+void client::connect_clock(client* x)
+{
+  if(x->m_connect_qelem)
+    qelem_set(x->m_connect_qelem);
+}
+
+void client::attempt_clock(client* x)
+{
+  if(x->m_attempt_qelem)
+    qelem_set(x->m_attempt_qelem);
+}
+
+// Max's clock: the scheduler thread when Overdrive is on. The tree is changed
+// and walked on the main thread only: the poll runs there.
 void client::poll_message(client* x)
+{
+  if(x->m_poll_qelem)
+    qelem_set(x->m_poll_qelem);
+}
+
+void client::poll_main(client* x)
 {
   critical_enter(0);
   poll_message_impl(x);
   critical_exit(0);
+  if(x->m_tree_read.valid()
+     && x->m_tree_read.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+  {
+    try
+    {
+      x->m_tree_read.get();
+    }
+    catch(...)
+    {
+    }
+    x->m_tree_read = {};
+    output_all_values(x->m_patcher, true);
+  }
 }
 
 void client::poll_message_impl(client* x)
@@ -657,8 +724,9 @@ void client::poll_message_impl(client* x)
   // connects again when the announcement comes back.
   if(x->m_oscq_protocol)
   {
-    x->m_oscq_protocol->run_commands();
-    clock_delay(x->m_poll_clock, x->m_rate);
+    // At most main_thread_budget of tree changes; the rest at once after
+    const bool more = x->m_oscq_protocol->run_commands_for(main_thread_budget);
+    clock_delay(x->m_poll_clock, more ? 1 : x->m_rate);
   }
 }
 

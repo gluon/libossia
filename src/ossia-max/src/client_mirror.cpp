@@ -418,9 +418,9 @@ void oscquery_link::tick()
     case state::connected:
       if(m_mirror->connected())
       {
-        m_mirror->run_commands();
+        const bool more = m_mirror->run_commands_for(main_thread_budget);
         if(m_host.schedule)
-          m_host.schedule(m_poll_ms);
+          m_host.schedule(more ? 1 : m_poll_ms);
         return;
       }
       // The WebSocket went down: the device stays until the first attempt

@@ -52,6 +52,14 @@ public:
   std::vector<ossia::net::oscquery_connection_data> m_oscq_devices;
 
   void* m_poll_clock;
+  // The poll itself, on Max's main thread: the clock only sets it
+  void* m_poll_qelem{};
+  void* m_connect_qelem{};
+  void* m_attempt_qelem{};
+  static void connect_clock(client* x);
+  static void attempt_clock(client* x);
+  // The tree read again by update, applied by the poll: values output then
+  std::future<void> m_tree_read;
 
   ossia::oscquery::oscquery_mirror_protocol* m_oscq_protocol{};
   // Connection by URL: polls the mirror, reconnects when the server goes away.
@@ -88,6 +96,7 @@ public:
   static void check_thread_status(client* x);
   static void update(client* x);
   static void poll_message(client* x);
+  static void poll_main(client* x);
   // static void destroy(client* x);
   // static void* create(t_symbol* name, int argc, t_atom* argv);
   static void find_devices_async(client* x);

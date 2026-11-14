@@ -30,17 +30,29 @@ namespace max_binding
 // The OSCQuery mirror of a client's device, whether the client connected by
 // URL or by name, set up as ossia-max sets up a connection by URL: a path the
 // server removes is removed, not kept as a zombie. The tree changes the server
-// sends (PATH_ADDED, PATH_REMOVED, ATTRIBUTES_CHANGED) wait in the mirror's
-// command queue until run_commands is called, which the client does when it
-// polls. Returns nullptr for a device of another protocol.
+// sends (PATH_ADDED, PATH_REMOVED, ATTRIBUTES_CHANGED, the paths read again
+// after PATH_CHANGED, the tree read again) wait in the mirror's command queue
+// until the client polls it, on Max's main thread: Max runs clocks on its
+// scheduler thread when Overdrive is on, while the main thread walks the tree
+// (namespace, explorer, the objects registered). Returns nullptr for a device
+// of another protocol.
 inline ossia::oscquery::oscquery_mirror_protocol*
 polled_oscquery_mirror(ossia::net::device_base& dev)
 {
   auto* mirror = dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(&dev.get_protocol());
   if(mirror)
+  {
     mirror->set_zombie_on_remove(false);
+    mirror->set_polled(true);
+  }
   return mirror;
 }
+
+// What applying the tree changes may take of Max's main thread at each poll;
+// the rest waits for the next poll, at once. A reading of the tracks of a Live
+// set of 64 tracks takes 110 to 120 ms to apply whole, the tree read again
+// 300 ms (tests/Network/LargeTreeBench.md, apply).
+static constexpr std::chrono::milliseconds main_thread_budget{10};
 
 // The device the Minuit listener of the package builds for an instance it saw
 // announced under _minuit._tcp, at ip:remote_port; it listens on local_port.
