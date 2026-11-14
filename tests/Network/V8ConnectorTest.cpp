@@ -1273,12 +1273,15 @@ TEST_CASE("v8connector_parameter_recreated", "v8connector_parameter_recreated")
   bool ok = received(*leaf, ossia::value(0.25f));
   INFO("before: " << ok);
 
-  // The client reads the whole tree again (update): every parameter is
-  // removed, then created again at the same address.
+  // The client reads the whole tree again (update), as ossia.client does
+  // on a polled mirror: without waiting, applied by the poll. The parameters
+  // there are stay, merged with what the server gives.
   bool reloaded = false, reload_bound = false, after_reload = false;
   if(ok)
   {
-    reloaded = client->get_protocol().update(croot);
+    auto tree = mirror->update_async(croot);
+    reloaded = poll_until(
+        [&] { return tree.wait_for(std::chrono::seconds(0)) == std::future_status::ready; });
     reload_bound = poll_until([&] { return b.bound_count("td_bench:/bench/p0") == 1; });
     after_reload = received(*leaf, ossia::value(0.5f));
   }

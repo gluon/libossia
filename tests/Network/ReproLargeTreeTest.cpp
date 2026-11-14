@@ -32,8 +32,10 @@ struct polled_mirror
         url, bench_server::free_udp_port());
     mirror = p.get();
     dev = std::make_unique<ossia::net::generic_device>(std::move(p), "large_tree");
-    ossia::max_binding::polled_oscquery_mirror(*dev);
+    // Read before anything polls it, as oscquery_connect_attempt does: once
+    // polled, the tree read again waits for a poll
     updated = mirror->update(dev->get_root_node());
+    ossia::max_binding::polled_oscquery_mirror(*dev);
     poller = std::thread([this] {
       while(polling)
       {
@@ -187,6 +189,131 @@ TEST_CASE("Mirror: a burst of PATH_CHANGED on a slow server", "[path-changed-bur
     CHECK(values() == 50);
     CHECK(m.tracks() == 12);
   }
+}
+
+// A polled mirror (ossia-max) is read and changed by the thread that polls it:
+// every change of the tree a server sends is applied by run_commands(). The
+// tree read again (update(), update_async(): the "update" message of
+// ossia.client, a connection by URL) must be applied there too, not on the
+// HTTP thread while the polling thread walks the tree. Run it under TSan and
+// ASan.
+TEST_CASE("Mirror: the tree read again while the polling thread walks it", "[namespace-reread]")
+{
+  tree_shape sh;
+  sh.base_tracks = 16;
+  sh.tracks = 0;
+  synthetic_tree tree{sh};
+  bench_server s{tree, 0};
+  auto p = std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+      s.url(), bench_server::free_udp_port());
+  auto* mirror = p.get();
+  auto dev = std::make_unique<ossia::net::generic_device>(std::move(p), "large_tree");
+  auto& root = dev->get_root_node();
+  // Read once before anything polls it, as oscquery_connect_attempt does
+  REQUIRE(mirror->update(root));
+  ossia::max_binding::polled_oscquery_mirror(*dev);
+
+  std::atomic_bool stop{false};
+  std::atomic_long walks{0};
+  std::size_t names = 0;
+  std::thread owner([&] {
+    while(!stop)
+    {
+      mirror->run_commands();
+      for(auto* n : ossia::net::list_all_children(&root))
+      {
+        names += n->get_name().size();
+        if(auto* param = n->get_parameter())
+          (void)param->value();
+      }
+      walks++;
+    }
+  });
+
+  int answered = 0;
+  for(int i = 0; i < 5; i++)
+  {
+    auto fut = mirror->update_async(root);
+    if(fut.wait_for(std::chrono::seconds(20)) == std::future_status::ready)
+    {
+      try
+      {
+        fut.get();
+        answered++;
+      }
+      catch(...)
+      {
+      }
+    }
+  }
+  stop = true;
+  owner.join();
+  const long leaves = count_leaves(root);
+  std::printf("namespace-reread: %d of 5 readings applied, %ld walks of the tree, leaves %ld of %ld\n",
+              answered, walks.load(), leaves, tree.leaves());
+  CHECK(answered == 5);
+  CHECK(leaves == tree.leaves());
+}
+
+// The polling thread is Max's main thread: a large reading is applied there
+// in slices of the budget, not whole (a reading of the tracks of a Live set of
+// 64 tracks takes 110 to 120 ms whole, the tree read again 300 ms).
+TEST_CASE("Mirror: a polled mirror applies a large reading in slices", "[sliced-apply]")
+{
+  tree_shape sh;
+  sh.base_tracks = 16;
+  sh.tracks = 16;
+  synthetic_tree tree{sh};
+  tree.present = sh.base_tracks;
+  bench_server s{tree, 0};
+  auto p = std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
+      s.url(), bench_server::free_udp_port());
+  auto* mirror = p.get();
+  auto dev = std::make_unique<ossia::net::generic_device>(std::move(p), "large_tree");
+  auto& root = dev->get_root_node();
+  REQUIRE(mirror->update(root));
+  ossia::max_binding::polled_oscquery_mirror(*dev);
+  auto tracks = [&] {
+    auto n = ossia::net::find_node(root, "/tracks");
+    return n ? long(n->children().size()) : 0;
+  };
+
+  double longest_ms = 0;
+  int calls_left_work = 0;
+  auto poll_until = [&](const std::function<bool()>& done) {
+    const auto t0 = clock_type::now();
+    while(seconds_since(t0) < 30)
+    {
+      const auto c0 = clock_type::now();
+      const bool more = mirror->run_commands_for(std::chrono::milliseconds(10));
+      longest_ms = std::max(
+          longest_ms, std::chrono::duration<double, std::milli>(clock_type::now() - c0).count());
+      if(more)
+        calls_left_work++;
+      else if(done())
+        return true;
+      else
+        std::this_thread::sleep_for(2ms);
+    }
+    return false;
+  };
+
+  tree.present = sh.base_tracks + sh.tracks;
+  s.path_changed("/tracks");
+  const bool read = poll_until([&] { return tracks() == tree.present; });
+  const int reading_calls = calls_left_work;
+  auto fut = mirror->update_async(root);
+  const bool reread = poll_until(
+      [&] { return fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready; });
+  const long leaves = count_leaves(root);
+  std::printf("sliced-apply: tracks reading applied %d, in %d calls that left work; tree read again "
+              "%d; longest call %.1f ms; leaves %ld of %ld\n",
+              int(read), reading_calls, int(reread), longest_ms, leaves, tree.leaves());
+  CHECK(read);
+  CHECK(reread);
+  CHECK(reading_calls >= 2);
+  CHECK(longest_ms < 40);
+  CHECK(leaves == tree.leaves());
 }
 
 // The connection of ossia-max (oscquery_connect_attempt, by name or by URL)

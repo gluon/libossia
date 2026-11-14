@@ -9,6 +9,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
+#include <memory>
 #include <future>
 #include <mutex>
 #include <string>
@@ -96,6 +98,25 @@ public:
    * This can be used to put the command in the application's main loop.
    */
   void set_command_callback(std::function<void()>);
+
+  /**
+   * @brief For a device read and changed by the one thread that polls it
+   * (ossia-max): every change of the tree, the tree read again by update()
+   * and update_async() included, is applied only by run_commands() or
+   * run_commands_for(), on that thread, never on a network thread. Set it
+   * before the device is shared. From then on, the polling thread must not
+   * wait in update(), which needs a poll to end: call update_async() and poll.
+   * The tree read again is merged into the nodes there are (the nodes the
+   * server no longer has are removed), not cleared and built again.
+   */
+  void set_polled(bool polled) noexcept { m_polled = polled; }
+  bool polled() const noexcept { return m_polled; }
+
+  /**
+   * @brief run_commands() for about `budget`: a large reading is applied node
+   * by node across calls, each change in its order. True when more waits.
+   */
+  bool run_commands_for(std::chrono::microseconds budget);
 
   /**
    * @brief Request a new node from the server
@@ -271,6 +292,10 @@ private:
   std::mutex m_attributeReadsMutex;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_attributeReads;
   ossia::spsc_queue<std::function<void()>> m_functionQueue;
+  // A reading being applied in slices, then the next ones: the polling thread only
+  struct tree_job;
+  std::deque<std::shared_ptr<tree_job>> m_jobs;
+  std::atomic_bool m_polled{false};
   std::function<void()> m_commandCallback;
 
   std::thread m_wsThread;

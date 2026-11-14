@@ -14,7 +14,12 @@
 #include <ossia/network/osc/detail/osc_receive.hpp>
 #include <ossia/network/osc/detail/receiver.hpp>
 #include <ossia/network/osc/detail/sender.hpp>
+#include <ossia/detail/flat_set.hpp>
+#include <ossia/network/base/node_attributes.hpp>
+#include <ossia/network/base/node_functions.hpp>
+#include <ossia/network/oscquery/detail/attributes.hpp>
 #include <ossia/network/oscquery/detail/json_parser.hpp>
+#include <ossia/network/oscquery/detail/json_reader_detail.hpp>
 #include <ossia/network/oscquery/detail/json_writer.hpp>
 #include <ossia/network/oscquery/detail/osc_writer.hpp>
 #include <ossia/network/oscquery/detail/outbound_visitor.hpp>
@@ -402,12 +407,166 @@ void oscquery_mirror_protocol::pump_tree_queue()
   }
 }
 
+// A reading applied by a polled mirror, one node per step, on the polling
+// thread: the node's own parameter and its children (found or made), then each
+// child in turn. A path read again keeps the children the server did not give,
+// as zombies, as json_parser::parse_path_added does; the tree read again
+// (replace) removes them, one subtree per step, and the parameter of a node
+// that has none any more.
+struct oscquery_mirror_protocol::tree_job
+{
+  struct item
+  {
+    ossia::net::node_base* node{};
+    const rapidjson::Value* obj{};
+  };
+  std::shared_ptr<rapidjson::Document> doc;
+  bool replace{};
+  std::vector<item> stack;
+  std::vector<ossia::net::node_base*> removals;
+  std::function<void()> done;
+
+  static std::shared_ptr<tree_job> start(
+      ossia::net::node_base& root, const std::string& path,
+      std::shared_ptr<rapidjson::Document> doc, bool replace)
+  {
+    auto j = std::make_shared<tree_job>();
+    j->replace = replace;
+    ossia::net::node_base* node = nullptr;
+    if(replace)
+    {
+      // The tree read again: from its FULL_PATH, the root without one
+      node = &root;
+      auto it = doc->FindMember(detail::attribute_full_path());
+      if(it != doc->MemberEnd() && it->value.IsString())
+        node = ossia::net::find_node(
+            root, std::string_view{it->value.GetString(), it->value.GetStringLength()});
+    }
+    else if(path == "/")
+      node = &root;
+    else
+    {
+      const auto slash = path.rfind('/');
+      const std::string parent_path = slash == 0 ? "/" : path.substr(0, slash);
+      const std::string name = path.substr(slash + 1);
+      if(auto* parent = ossia::net::find_node(root, parent_path))
+      {
+        node = parent->find_child(name);
+        if(!node)
+          node = parent->create_child(name);
+        else
+          ossia::net::set_zombie(*node, false);
+      }
+      else
+        node = &ossia::net::create_node(root, path);
+    }
+    if(!node)
+      return {};
+    j->stack.push_back({node, doc.get()});
+    j->doc = std::move(doc);
+    return j;
+  }
+
+  // One node; true while more is left
+  bool step()
+  {
+    if(!removals.empty())
+    {
+      auto* n = removals.back();
+      removals.pop_back();
+      if(auto* parent = n->get_parent())
+        parent->remove_child(*n);
+      return !stack.empty() || !removals.empty();
+    }
+    if(stack.empty())
+      return false;
+    const item it = stack.back();
+    stack.pop_back();
+    auto& node = *it.node;
+    const auto& obj = *it.obj;
+    if(obj.FindMember(detail::attribute_full_path()) != obj.MemberEnd())
+      detail::json_parser_impl::readParameter(node, obj);
+    else if(replace && node.get_parameter())
+      node.remove_parameter();
+
+    std::vector<item> children;
+    ossia::flat_set<std::string> given;
+    auto contents = obj.FindMember(detail::contents());
+    if(contents != obj.MemberEnd() && contents->value.IsObject())
+    {
+      for(auto c = contents->value.MemberBegin(); c != contents->value.MemberEnd(); ++c)
+      {
+        std::string name{c->name.GetString(), c->name.GetStringLength()};
+        auto* child = node.find_child(name);
+        if(!child)
+          child = node.create_child(name);
+        else
+          ossia::net::set_zombie(*child, false);
+        given.insert(std::move(name));
+        children.push_back({child, &c->value});
+      }
+    }
+    for(auto& child : node.children())
+    {
+      if(given.find(child->get_name()) == given.end())
+      {
+        if(replace)
+          removals.push_back(child.get());
+        else
+          ossia::net::set_zombie(*child, true);
+      }
+    }
+    // In their order
+    for(auto c = children.rbegin(); c != children.rend(); ++c)
+      stack.push_back(*c);
+    return !stack.empty() || !removals.empty();
+  }
+};
+
+bool oscquery_mirror_protocol::run_commands_for(std::chrono::microseconds budget)
+{
+  const auto end = std::chrono::steady_clock::now() + budget;
+  for(;;)
+  {
+    if(!m_jobs.empty())
+    {
+      auto job = m_jobs.front();
+      while(job->step())
+        if(std::chrono::steady_clock::now() >= end)
+          return true;
+      m_jobs.pop_front();
+      if(job->done)
+        job->done();
+    }
+    else
+    {
+      std::function<void()> cmd;
+      if(!m_functionQueue.try_dequeue(cmd))
+        return false;
+      if(cmd)
+        cmd();
+    }
+    if(std::chrono::steady_clock::now() >= end)
+      return !m_jobs.empty() || m_functionQueue.size_approx() > 0;
+  }
+}
+
 void oscquery_mirror_protocol::on_path_read(
     const std::string& path, const std::string& message)
 {
   std::shared_ptr<rapidjson::Document> doc = json_parser::parse(message);
   if(doc->IsNull() || !doc->IsObject())
     return;
+  if(m_polled)
+  {
+    m_functionQueue.enqueue([this, path, doc = std::move(doc)]() mutable {
+      if(auto job = tree_job::start(m_device->get_root_node(), path, std::move(doc), path == "/"))
+        m_jobs.push_back(std::move(job));
+    });
+    if(m_commandCallback)
+      m_commandCallback();
+    return;
+  }
   m_functionQueue.enqueue([this, path, doc = std::move(doc)] {
     auto& root = m_device->get_root_node();
     if(path == "/")
@@ -919,14 +1078,9 @@ void oscquery_mirror_protocol::set_device(net::device_base& dev)
 
 void oscquery_mirror_protocol::run_commands()
 {
-  bool ok = false;
-  std::function<void()> cmd;
-  do
-  {
-    ok = m_functionQueue.try_dequeue(cmd);
-    if(ok && cmd)
-      cmd();
-  } while(ok);
+  // Everything waiting, the readings of a polled mirror whole
+  while(run_commands_for(std::chrono::hours(1)))
+    ;
 }
 
 void oscquery_mirror_protocol::set_command_callback(std::function<void()> cb)
@@ -1256,6 +1410,31 @@ bool oscquery_mirror_protocol::on_WSMessage(
           break;
         }
         case message_type::Namespace: {
+          if(m_polled)
+          {
+            // Applied by the polling thread, which may be walking the tree now
+            m_functionQueue.enqueue([this, data = std::move(data)]() mutable {
+              auto finish = [this] {
+                std::lock_guard lock{m_namespaceMutex};
+                try
+                {
+                  m_namespacePromise.set_value();
+                }
+                catch(const std::future_error&)
+                {
+                  // A namespace nobody waits for any more
+                }
+              };
+              auto job = tree_job::start(m_device->get_root_node(), {}, std::move(data), true);
+              if(!job)
+                return finish();
+              job->done = std::move(finish);
+              m_jobs.push_back(std::move(job));
+            });
+            if(m_commandCallback)
+              m_commandCallback();
+            break;
+          }
           json_parser::parse_namespace(m_device->get_root_node(), *data);
           std::lock_guard lock{m_namespaceMutex};
           try

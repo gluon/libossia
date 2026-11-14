@@ -23,6 +23,9 @@
 #include "client_mirror.hpp"
 #include "LargeTreeCommon.hpp"
 
+#include <ossia/network/oscquery/detail/json_parser.hpp>
+#include <ossia/network/local/local.hpp>
+
 #include <mach/mach.h>
 
 #include <fstream>
@@ -324,8 +327,9 @@ int scenario_burst(const options& o)
       srv.url(), bench_server::free_udp_port());
   auto* mirror = proto.get();
   auto dev = std::make_shared<ossia::net::generic_device>(std::move(proto), "large_tree");
-  ossia::max_binding::polled_oscquery_mirror(*dev);
+  // Read before anything polls it, as oscquery_connect_attempt does
   const bool updated = mirror->update(dev->get_root_node());
+  ossia::max_binding::polled_oscquery_mirror(*dev);
   j.kv("base_tree_read_within_3s", updated ? "true" : "false");
   j.kv("base_leaves_in_mirror", count_leaves(dev->get_root_node()));
   if(!updated)
@@ -402,7 +406,7 @@ int scenario_burst(const options& o)
 void usage()
 {
   std::puts(
-      "ossia_LargeTreeBench tree|read|loop|burst [options]\n"
+      "ossia_LargeTreeBench tree|read|loop|burst|apply [options]\n"
       "  --tracks N           tracks added by the build (64)\n"
       "  --base-tracks N      tracks of the base set (4)\n"
       "  --devices N          devices per track (8)\n"
@@ -413,6 +417,69 @@ void usage()
       "  --retry-ms N         loop: between a failure and the next attempt (1000)\n"
       "  --json FILE          also write the result there");
 }
+}
+
+// What applying a reading costs the thread that applies it, without the
+// network: the tree of the options, read into a device as a mirror does.
+int scenario_apply(const options& o)
+{
+  synthetic_tree tree{o.shape};
+  tree.present = tree.shape.base_tracks + tree.shape.tracks;
+  std::string all, tracks, more;
+  tree.json("/", all);
+  tree.json("/tracks", tracks);
+  ossia::net::generic_device dev{std::make_unique<ossia::net::multiplex_protocol>(), "apply"};
+  auto& root = dev.get_root_node();
+  using ossia::oscquery::json_parser;
+  auto ms = [](clock_type::time_point t0) {
+    return std::chrono::duration<double, std::milli>(clock_type::now() - t0).count();
+  };
+  std::map<std::string, double> out;
+  auto t0 = clock_type::now();
+  auto doc = json_parser::parse(all);
+  out["parse_json_full_tree_ms"] = ms(t0);
+  t0 = clock_type::now();
+  json_parser::parse_namespace(root, *doc);
+  out["namespace_into_empty_ms"] = ms(t0);
+  const long leaves = count_leaves(root);
+  t0 = clock_type::now();
+  json_parser::parse_namespace(root, *doc);
+  out["namespace_again_clear_and_build_ms"] = ms(t0);
+  auto tdoc = json_parser::parse(tracks);
+  t0 = clock_type::now();
+  json_parser::parse_path_added(root, "/tracks", *tdoc);
+  out["tracks_reading_nothing_new_ms"] = ms(t0);
+  tree.present++;
+  tree.json("/tracks", more);
+  auto mdoc = json_parser::parse(more);
+  t0 = clock_type::now();
+  json_parser::parse_path_added(root, "/tracks", *mdoc);
+  out["tracks_reading_one_track_new_ms"] = ms(t0);
+  auto* t = ossia::net::find_node(root, "/tracks");
+  t0 = clock_type::now();
+  ossia::net::node_base* last = nullptr;
+  if(t)
+    for(auto& c : t->children())
+      last = c.get();
+  if(last)
+    t->remove_child(*last);
+  out["one_track_removed_ms"] = ms(t0);
+  t0 = clock_type::now();
+  root.clear_children();
+  out["whole_tree_removed_ms"] = ms(t0);
+
+  std::ostringstream js;
+  js << "{\n  \"scenario\": \"apply\",\n  \"leaves\": " << leaves << ",\n  \"bytes\": " << all.size();
+  for(auto& [k, v] : out)
+  {
+    std::printf("%s: %.1f\n", k.c_str(), v);
+    js << ",\n  \"" << k << "\": " << v;
+  }
+  js << "\n}\n";
+  std::printf("leaves %ld, %.1f MB\n", leaves, all.size() / 1e6);
+  if(!o.json.empty())
+    std::ofstream(o.json) << js.str();
+  return 0;
 }
 
 int main(int argc, char** argv)
@@ -460,6 +527,8 @@ int main(int argc, char** argv)
     return scenario_loop(o);
   if(o.scenario == "burst")
     return scenario_burst(o);
+  if(o.scenario == "apply")
+    return scenario_apply(o);
   usage();
   return 2;
 }
