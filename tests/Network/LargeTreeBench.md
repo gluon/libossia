@@ -47,6 +47,9 @@ established connections to the server's port, twice a second.
   built them in 61.5 s) and sends `PATH_CHANGED /tracks` after each, as
   LiveOSCQuery does.
 
+- `apply`: no network: what applying a reading costs the thread that applies
+  it, the tree of the options read into a device as a mirror does.
+
 `--json FILE` writes the result there too.
 
 ## Reference numbers
@@ -121,3 +124,21 @@ the tree, and the rest (values, `HOST_INFO`, commands). In `loop` and `burst`
 the two at once are the `HOST_INFO` and the tree of the connection; `lsof`,
 sampled twice a second, saw both beside the WebSocket in one `burst` run of
 three (3 connections), at most one of them in the others.
+
+### Applying a reading (`apply`)
+
+At `d290202c9`, Release, on AC power, three runs, the tree of the defaults
+(342,992 leaves, 46.6 MB), without the callbacks ossia-max adds for each node.
+This is what the thread that applies a reading spends on it; a polled mirror
+(ossia-max) applies it on Max's main thread, in slices of 10 ms
+(`run_commands_for`, `main_thread_budget`).
+
+| Step | ms |
+| :- | -: |
+| Parse the JSON of the whole tree (on the HTTP thread) | 96 to 98 |
+| The tree into an empty mirror | 183 to 190 |
+| The tree read again, cleared and built again | 293 to 313 |
+| A reading of `/tracks`, nothing new | 114 to 120 |
+| A reading of `/tracks`, one track new | 108 to 116 |
+| One track removed | 1.2 to 1.5 |
+| The whole tree removed | 112 to 115 |
