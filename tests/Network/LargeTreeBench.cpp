@@ -23,6 +23,8 @@
 #include "client_mirror.hpp"
 #include "LargeTreeCommon.hpp"
 
+#include <mach/mach.h>
+
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -30,6 +32,17 @@
 namespace
 {
 using namespace large_tree;
+
+// The resident memory of this process, MB
+double resident_mb()
+{
+  mach_task_basic_info info{};
+  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+  if(task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &count) != KERN_SUCCESS)
+    return 0;
+  return double(info.resident_size) / 1e6;
+}
+
 double percentile(std::vector<double> v, double p)
 {
   if(v.empty())
@@ -134,6 +147,7 @@ void server_stats(json_out& j, bench_server& srv, sampler& smp, const std::strin
   j.kv("readings_under_way_max", srv.readings_open_max.load());
   j.kv("server_tcp_connections_max", srv.tcp_open_max.load());
   j.kv("server_tcp_connections_total", srv.tcp_total.load());
+  j.kv("server_http_connections_max", srv.http_open_max.load());
   j.kv("client_established_max_lsof", smp.lsof_max);
   j.kv("lsof_samples", smp.lsof_samples);
   j.kv("websockets_opened", int(srv.ws_records.size()));
@@ -169,6 +183,7 @@ int scenario_read(const options& o)
   common(j, o, tree);
   j.kv("leaves_served", tree.leaves());
 
+  const double rss0 = resident_mb();
   const auto t0 = clock_type::now();
   auto proto = std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(
       srv.url(), bench_server::free_udp_port());
@@ -180,6 +195,7 @@ int scenario_read(const options& o)
   const double read_s = seconds_since(t0);
   const bool within_3s = read_s - ws_s <= 3.0;
   const long got = count_leaves(dev->get_root_node());
+  const double rss1 = resident_mb();
   const auto t1 = clock_type::now();
   dev.reset();
   const double destroy_s = seconds_since(t1);
@@ -191,6 +207,8 @@ int scenario_read(const options& o)
   j.kv("tree_read_seconds_after_websocket", read_s - ws_s);
   j.kv("within_update_bound_3s", within_3s ? "true" : "false");
   j.kv("leaves_in_mirror", got);
+  j.kv("client_resident_mb_before", rss0);
+  j.kv("client_resident_mb_with_tree", rss1);
   j.kv("mirror_destroy_seconds", destroy_s);
   server_stats(j, srv, smp);
   write_json(o, j);
@@ -335,8 +353,10 @@ int scenario_burst(const options& o)
     std::this_thread::sleep_for(std::chrono::milliseconds(o.interval_ms));
   }
   const double build_s = seconds_since(b0);
-  // Until every reading asked is answered, two minutes at most
+  // Until no reading is under way and none came for 2 s, two minutes at most
   const auto w0 = clock_type::now();
+  std::size_t last = std::size_t(-1);
+  auto quiet_since = clock_type::now();
   for(;;)
   {
     std::this_thread::sleep_for(200ms);
@@ -345,7 +365,12 @@ int scenario_burst(const options& o)
       std::lock_guard lock{srv.stats_mutex};
       n = srv.readings.size();
     }
-    if((srv.readings_open == 0 && int(n) >= 1 + sent) || seconds_since(w0) > 120)
+    if(n != last || srv.readings_open != 0)
+    {
+      last = n;
+      quiet_since = clock_type::now();
+    }
+    if(seconds_since(quiet_since) >= 2 || seconds_since(w0) > 120)
       break;
   }
   std::this_thread::sleep_for(1s); // the last tree applied by the poller
