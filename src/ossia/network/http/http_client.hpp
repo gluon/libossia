@@ -10,6 +10,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -63,6 +64,24 @@ public:
     m_req.set(http::field::user_agent, "ossia");
     m_req.set(http::field::connection, "close");
   }
+
+  ~http_get_request()
+  {
+    if(m_finished)
+    {
+      try
+      {
+        m_finished();
+      }
+      catch(...)
+      {
+      }
+    }
+  }
+
+  //! Called once the request is over, whatever its outcome (answer, error,
+  //! 204, or its context gone): when the request is destroyed.
+  void on_finished(std::function<void()> f) { m_finished = std::move(f); }
 
   void resolve(const std::string& server, const std::string& port)
   {
@@ -212,6 +231,7 @@ private:
   std::string m_target;
   Fun m_fun;
   Err m_err;
+  std::function<void()> m_finished;
 };
 
 }

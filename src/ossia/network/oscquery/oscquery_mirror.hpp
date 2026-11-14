@@ -169,6 +169,20 @@ private:
   void http_send_message(const std::string& str);
   void http_send_message(const rapidjson::StringBuffer& str);
 
+  // The HTTP requests of the mirror go through two queues, one request at a
+  // time in each, so at most two connections at a time: the readings of the
+  // tree (the namespace, the structure of an address that changed), and the
+  // rest (values, HOST_INFO, commands), in the order they were asked.
+  struct http_queues;
+  std::shared_ptr<http_queues> m_queues;
+  void queue_value_request(std::string target);
+  void pump_value_queue();
+  // A reading of the structure of path (of the namespace when name_space):
+  // not asked if a reading of path or of an ancestor is still to be asked;
+  // if one is under way, asked before this, that one is asked once more.
+  void queue_tree_reading(std::string path, bool name_space);
+  void pump_tree_queue();
+
   void ws_send_message(const std::string& str);
   void ws_send_binary_message(const std::string& str);
   void ws_send_message(const rapidjson::StringBuffer& str);
@@ -204,6 +218,7 @@ private:
   ossia::net::device_base* m_device{};
   std::string m_clientName;
 
+  std::mutex m_namespaceMutex;
   std::promise<void> m_namespacePromise;
 
   struct get_osc_promise
