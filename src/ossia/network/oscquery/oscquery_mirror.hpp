@@ -11,10 +11,13 @@
 #include <chrono>
 #include <deque>
 #include <memory>
+#include <functional>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace osc
 {
@@ -153,6 +156,26 @@ public:
   void refresh_unfollowed(const std::string& address);
   static constexpr std::chrono::milliseconds refresh_interval{100};
 
+  //! Asks the server for the structure of path, values included, without
+  //! waiting: one reading instead of a value read for each parameter under
+  //! it. Not asked if a reading of path or of an ancestor is under way or to
+  //! come, or was answered less than tree_fresh_window ago.
+  void refresh_tree(const std::string& path);
+  //! A value that came with a reading of the tree this recently is not read
+  //! again (refresh_unfollowed, refresh_tree)
+  static constexpr std::chrono::milliseconds tree_fresh_window{1000};
+  //! More parameters than this to read at once: their tree is read instead
+  //! (refresh_followed_values)
+  static constexpr std::size_t bulk_refresh_threshold = 32;
+
+  //! The value reads of this mirror: those waiting to be sent, and since it
+  //! was made those sent, failed, and cancelled because their node was removed
+  struct value_read_stats
+  {
+    std::size_t queued{}, sent{}, failed{}, cancelled{};
+  };
+  value_read_stats get_value_read_stats() const;
+
   void set_zombie_on_remove(bool zombie_on_remove)
   {
     m_zombie_on_remove = zombie_on_remove;
@@ -174,6 +197,8 @@ private:
   friend struct http_path_answer;
   friend struct http_path_error;
   friend struct http_namespace_error;
+  friend struct http_value_answer;
+  friend struct http_value_error;
 
   void init();
   using connection_handler = std::weak_ptr<void>;
@@ -201,6 +226,30 @@ private:
   std::shared_ptr<http_queues> m_queues;
   void queue_value_request(std::string target);
   void pump_value_queue();
+
+  // A read of the value at an address, in the queue of the values: its answer
+  // (the value alone) goes to that address, whatever came before it; who waits
+  // for it (pull_async) is told then, or of the failure
+  struct value_read;
+  void queue_value_read(
+      std::string address, std::optional<std::promise<void>> promise, bool only_if_changed);
+  void on_value_read(const std::shared_ptr<value_read>& r, const std::string& message);
+  void on_value_read_failed(
+      const std::shared_ptr<value_read>& r, unsigned int status, const std::string& error,
+      const std::string& target);
+  void apply_value(const value_read& r, const rapidjson::Value& data);
+  // The errors of value reads: one line, then at most one a second that says
+  // how many failed since
+  void log_value_read_error(const std::string& what);
+  void flush_value_read_errors();
+  // path and what is under it is removed: its value reads still to send are
+  // dropped, and a 404 for one sent is not an error for 10 s
+  void cancel_value_reads(const std::string& path);
+  bool removed_recently(const std::string& address);
+  // A reading of the tree at path was answered: the values under it are fresh
+  // for tree_fresh_window
+  void note_tree_read(const std::string& path);
+  bool fresh_from_tree(const std::string& address);
   // A reading of the structure of path (of the namespace when name_space):
   // not asked if a reading of path or of an ancestor is still to be asked;
   // if one is under way, asked before this, that one is asked once more.
@@ -250,33 +299,6 @@ private:
     std::promise<void> promise;
     ossia::net::parameter_base* address{};
   };
-  struct get_ws_promise
-  {
-    get_ws_promise() = default;
-    get_ws_promise(const get_ws_promise&) = delete;
-    get_ws_promise(get_ws_promise&&) noexcept = default;
-    get_ws_promise& operator=(const get_ws_promise&) = delete;
-    get_ws_promise& operator=(get_ws_promise&&) noexcept = default;
-
-    get_ws_promise(
-        std::promise<void>&& p, const std::string& addr, bool only_changes = false)
-        : promise{std::move(p)}
-        , address{addr}
-        , only_if_changed{only_changes}
-        , asked{only_changes ? std::chrono::steady_clock::now()
-                             : std::chrono::steady_clock::time_point{}}
-    {
-    }
-    std::promise<void> promise;
-    std::string address{};
-    // Read again after a crossing: the same value is not a new one
-    bool only_if_changed{};
-    // When a read of our own was asked: a value this client writes after
-    // is newer than the answer
-    std::chrono::steady_clock::time_point asked{};
-  };
-
-  ossia::spsc_queue<get_ws_promise> m_getWSPromises;
   // The reads of a parameter nothing follows, by address: the last request
   // and its answer to come
   struct unfollowed_read
@@ -291,7 +313,35 @@ private:
   // answer comes (or for 1 s): one read at a time for an address.
   std::mutex m_attributeReadsMutex;
   std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_attributeReads;
-  ossia::spsc_queue<std::function<void()>> m_functionQueue;
+  // The changes of the tree and what comes of them, put by the WebSocket
+  // thread, the HTTP thread and the client's own, applied by run_commands in
+  // the order they came: a single-producer queue is not made for several
+  // threads, and the multi-producer one keeps the order of each thread only.
+  struct command_queue
+  {
+    std::mutex mutex;
+    std::deque<std::function<void()>> commands;
+    void enqueue(std::function<void()> f)
+    {
+      std::lock_guard lock{mutex};
+      commands.push_back(std::move(f));
+    }
+    bool try_dequeue(std::function<void()>& f)
+    {
+      std::lock_guard lock{mutex};
+      if(commands.empty())
+        return false;
+      f = std::move(commands.front());
+      commands.pop_front();
+      return true;
+    }
+    std::size_t size_approx()
+    {
+      std::lock_guard lock{mutex};
+      return commands.size();
+    }
+  };
+  command_queue m_functionQueue;
   // A reading being applied in slices, then the next ones: the polling thread only
   struct tree_job;
   std::deque<std::shared_ptr<tree_job>> m_jobs;
@@ -323,6 +373,13 @@ private:
 //! value, put a callback on the parameter (ossia.remote, Ossia.Remote): the
 //! server then sends each value as it changes.
 OSSIA_EXPORT ossia::value read_followed_value(ossia::net::parameter_base& param);
+
+//! read_followed_value for many parameters, without the values: for each
+//! mirror, more than bulk_refresh_threshold to ask for, the tree under the
+//! deepest node that holds them all is read once instead (refresh_tree). For a
+//! namespace or a search.
+OSSIA_EXPORT void
+refresh_followed_values(const std::vector<ossia::net::parameter_base*>& params);
 
 OSSIA_EXPORT void load_oscquery_device(ossia::net::device_base& dev, std::string json);
 }

@@ -93,6 +93,35 @@ struct http_error
   }
 };
 
+// The answer to a value read: the value alone, for the address it was asked for
+struct http_value_answer
+{
+  static constexpr auto reserve_expect = 65536;
+  oscquery_mirror_protocol& self;
+  std::shared_ptr<oscquery_mirror_protocol::value_read> read;
+
+  template <typename T, typename S>
+  void operator()(T& req, const S& str)
+  {
+    self.on_value_read(read, str);
+  }
+};
+
+// The mirror writes these errors itself, at most one line a second
+struct http_value_error
+{
+  static constexpr bool quiet = true;
+  oscquery_mirror_protocol& self;
+  std::shared_ptr<oscquery_mirror_protocol::value_read> read;
+
+  template <typename T>
+  void operator()(T& req)
+  {
+    req.close();
+    self.on_value_read_failed(read, req.status(), req.error(), req.target());
+  }
+};
+
 using http_request = ossia::net::http_get_request<http_answer, http_error>;
 
 struct http_client_context
@@ -119,14 +148,66 @@ struct oscquery_mirror_protocol::crossing_state
   // By address, the reading to come
   std::unordered_map<std::string, std::unique_ptr<boost::asio::steady_timer>> rereads;
 };
+struct oscquery_mirror_protocol::value_read
+{
+  std::string address;
+  std::optional<std::promise<void>> promise;
+  // Read again after a crossing: the same value is not a new one
+  bool only_if_changed{};
+  // When a read of our own was asked: a value this client writes after is
+  // newer than the answer
+  std::chrono::steady_clock::time_point asked{};
+
+  void fulfil()
+  {
+    if(promise)
+      try
+      {
+        promise->set_value();
+      }
+      catch(const std::future_error&)
+      {
+      }
+  }
+  void fail(const std::string& why)
+  {
+    if(promise)
+      try
+      {
+        promise->set_exception(std::make_exception_ptr(ossia::connection_error{why}));
+      }
+      catch(const std::future_error&)
+      {
+      }
+  }
+};
+
 struct oscquery_mirror_protocol::http_queues
 {
   std::mutex mutex;
   bool alive{true};
 
-  // Values, HOST_INFO, commands: in order, one at a time
+  // Values, HOST_INFO, commands: in order, one at a time. A value read has
+  // its read; the others not.
   bool value_busy{};
-  std::deque<std::string> values;
+  struct queued
+  {
+    std::string target;
+    std::shared_ptr<value_read> read;
+  };
+  std::deque<queued> values;
+  std::size_t reads_sent{}, reads_failed{}, reads_cancelled{};
+
+  // The errors of value reads not written yet, and when the last line was
+  std::chrono::steady_clock::time_point last_error_line{};
+  std::size_t errors_since{};
+  std::string first_error;
+  std::unique_ptr<boost::asio::steady_timer> error_timer;
+
+  // Paths removed, and when: a value read sent before is not an error
+  std::deque<std::pair<std::string, std::chrono::steady_clock::time_point>> removed;
+  // Readings of the tree answered, by path, and when
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> tree_reads;
 
   // The tree: the reading under way, and those to come
   struct tree_reading
@@ -270,6 +351,10 @@ void oscquery_mirror_protocol::cleanup_connections()
   {
     logger().error("Error when stopping HTTP thread");
   }
+  {
+    std::lock_guard lock{m_queues->mutex};
+    m_queues->error_timer.reset();
+  }
 }
 
 void oscquery_mirror_protocol::http_send_message(const std::string& str)
@@ -288,7 +373,26 @@ void oscquery_mirror_protocol::queue_value_request(std::string target)
     std::lock_guard lock{m_queues->mutex};
     if(!m_queues->alive)
       return;
-    m_queues->values.push_back(std::move(target));
+    m_queues->values.push_back({std::move(target), nullptr});
+  }
+  pump_value_queue();
+}
+
+void oscquery_mirror_protocol::queue_value_read(
+    std::string address, std::optional<std::promise<void>> promise, bool only_if_changed)
+{
+  auto r = std::make_shared<value_read>();
+  r->promise = std::move(promise);
+  r->only_if_changed = only_if_changed;
+  if(only_if_changed)
+    r->asked = std::chrono::steady_clock::now();
+  std::string target = address + std::string{detail::query_value()};
+  r->address = std::move(address);
+  {
+    std::lock_guard lock{m_queues->mutex};
+    if(!m_queues->alive)
+      return;
+    m_queues->values.push_back({std::move(target), std::move(r)});
   }
   pump_value_queue();
 }
@@ -296,19 +400,19 @@ void oscquery_mirror_protocol::queue_value_request(std::string target)
 void oscquery_mirror_protocol::pump_value_queue()
 {
   auto queues = m_queues;
-  std::string target;
+  http_queues::queued next;
   {
     std::lock_guard lock{queues->mutex};
     if(!queues->alive || queues->value_busy || queues->values.empty())
       return;
     queues->value_busy = true;
-    target = std::move(queues->values.front());
+    next = std::move(queues->values.front());
     queues->values.pop_front();
+    if(next.read)
+      queues->reads_sent++;
   }
-  auto hrq = std::make_shared<http_request>(
-      http_answer{*this}, http_error{}, m_http->context, m_httpHost, target);
   // Once the connections are gone (alive false), this is not touched again
-  hrq->on_finished([this, weak = std::weak_ptr<http_queues>{queues}] {
+  auto finished = [this, weak = std::weak_ptr<http_queues>{queues}] {
     auto q = weak.lock();
     if(!q)
       return;
@@ -319,8 +423,225 @@ void oscquery_mirror_protocol::pump_value_queue()
       q->value_busy = false;
     }
     pump_value_queue();
+  };
+  if(next.read)
+  {
+    using request = ossia::net::http_get_request<http_value_answer, http_value_error>;
+    auto hrq = std::make_shared<request>(
+        http_value_answer{*this, next.read}, http_value_error{*this, next.read},
+        m_http->context, m_httpHost, next.target);
+    hrq->on_finished(std::move(finished));
+    hrq->resolve(m_httpHost, m_queryPort);
+  }
+  else
+  {
+    auto hrq = std::make_shared<http_request>(
+        http_answer{*this}, http_error{}, m_http->context, m_httpHost, next.target);
+    hrq->on_finished(std::move(finished));
+    hrq->resolve(m_httpHost, m_queryPort);
+  }
+}
+
+void oscquery_mirror_protocol::on_value_read(
+    const std::shared_ptr<value_read>& r, const std::string& message)
+{
+  std::shared_ptr<rapidjson::Document> doc;
+  try
+  {
+    doc = json_parser::parse(message);
+  }
+  catch(...)
+  {
+  }
+  if(!doc || doc->HasParseError())
+  {
+    r->fail("unreadable value");
+    return;
+  }
+  auto apply = [this, r, doc] {
+    try
+    {
+      apply_value(*r, *doc);
+    }
+    catch(...)
+    {
+    }
+    r->fulfil();
+  };
+  // A polled mirror's tree is the polling thread's only
+  if(m_polled)
+  {
+    m_functionQueue.enqueue(std::move(apply));
+    if(m_commandCallback)
+      m_commandCallback();
+  }
+  else
+    apply();
+}
+
+void oscquery_mirror_protocol::apply_value(const value_read& r, const rapidjson::Value& data)
+{
+  const rapidjson::Value* obj_value = &data;
+  if(obj_value->IsObject())
+    if(auto it = obj_value->FindMember("VALUE"); it != obj_value->MemberEnd())
+      obj_value = &it->value;
+
+  auto node = ossia::net::find_node(m_device->get_root_node(), r.address);
+  if(!node)
+  {
+    // Removed while the read was on its way
+    if(!removed_recently(r.address))
+      m_device->on_unhandled_message(r.address, detail::ReadValue(*obj_value));
+    return;
+  }
+  if(auto addr = node->get_parameter())
+  {
+    // An answer older than a write of this client would bring back the value
+    // the write replaced
+    const bool stale = r.asked != std::chrono::steady_clock::time_point{}
+                       && written_since(r.address, r.asked);
+    if(!stale && (!r.only_if_changed || json_parser::value_differs(*addr, *obj_value)))
+    {
+      json_parser::parse_value(*addr, *obj_value);
+      m_device->on_message(*addr);
+    }
+  }
+  else
+  {
+    m_device->on_unhandled_message(r.address, detail::ReadValue(*obj_value));
+  }
+}
+
+void oscquery_mirror_protocol::on_value_read_failed(
+    const std::shared_ptr<value_read>& r, unsigned int status, const std::string& error,
+    const std::string& target)
+{
+  {
+    std::lock_guard lock{m_queues->mutex};
+    m_queues->reads_failed++;
+  }
+  r->fail(error);
+  if(status == 404 && removed_recently(r->address))
+  {
+    logger().debug("HTTP Error: {}: {} (removed meanwhile)", target, error);
+    return;
+  }
+  log_value_read_error(target + ": " + error);
+}
+
+void oscquery_mirror_protocol::log_value_read_error(const std::string& what)
+{
+  using namespace std::chrono;
+  auto& q = *m_queues;
+  {
+    std::lock_guard lock{q.mutex};
+    if(!q.alive)
+      return;
+    const auto now = steady_clock::now();
+    if(q.errors_since == 0 && now - q.last_error_line >= seconds(1))
+    {
+      q.last_error_line = now;
+    }
+    else
+    {
+      if(q.errors_since++ == 0)
+        q.first_error = what;
+      if(!q.error_timer)
+      {
+        q.error_timer = std::make_unique<boost::asio::steady_timer>(m_http->context);
+        q.error_timer->expires_at(q.last_error_line + seconds(1));
+        q.error_timer->async_wait(
+            [this, weak = std::weak_ptr<http_queues>{m_queues}](
+                const boost::system::error_code& ec) {
+          if(ec)
+            return;
+          if(auto q = weak.lock())
+            flush_value_read_errors();
+        });
+      }
+      return;
+    }
+  }
+  logger().error("HTTP Error: {}", what);
+}
+
+void oscquery_mirror_protocol::flush_value_read_errors()
+{
+  // On the HTTP thread, from the timer
+  std::size_t n{};
+  std::string first;
+  {
+    std::lock_guard lock{m_queues->mutex};
+    auto& q = *m_queues;
+    if(!q.alive)
+      return;
+    n = q.errors_since;
+    first = std::move(q.first_error);
+    q.errors_since = 0;
+    q.first_error.clear();
+    q.last_error_line = std::chrono::steady_clock::now();
+    q.error_timer.reset();
+  }
+  if(n == 1)
+    logger().error("HTTP Error: {}", first);
+  else if(n > 1)
+    logger().error("HTTP Error: {} value reads failed in the last second; the first: {}", n, first);
+}
+
+void oscquery_mirror_protocol::cancel_value_reads(const std::string& path)
+{
+  std::vector<std::shared_ptr<value_read>> dropped;
+  {
+    std::lock_guard lock{m_queues->mutex};
+    auto& q = *m_queues;
+    std::erase_if(q.values, [&](http_queues::queued& e) {
+      if(e.read && covers(path, e.read->address))
+      {
+        dropped.push_back(std::move(e.read));
+        return true;
+      }
+      return false;
+    });
+    q.reads_cancelled += dropped.size();
+    const auto now = std::chrono::steady_clock::now();
+    while(!q.removed.empty() && now - q.removed.front().second > std::chrono::seconds(10))
+      q.removed.pop_front();
+    q.removed.emplace_back(path, now);
+  }
+  for(auto& r : dropped)
+    r->fail("removed");
+  std::lock_guard lock{m_unfollowedMutex};
+  std::erase_if(m_unfollowed, [&](const auto& e) { return covers(path, e.first); });
+}
+
+bool oscquery_mirror_protocol::removed_recently(const std::string& address)
+{
+  std::lock_guard lock{m_queues->mutex};
+  const auto now = std::chrono::steady_clock::now();
+  for(const auto& [path, when] : m_queues->removed)
+    if(now - when <= std::chrono::seconds(10) && covers(path, address))
+      return true;
+  return false;
+}
+
+void oscquery_mirror_protocol::note_tree_read(const std::string& path)
+{
+  std::lock_guard lock{m_queues->mutex};
+  const auto now = std::chrono::steady_clock::now();
+  std::erase_if(m_queues->tree_reads, [&](const auto& e) {
+    return now - e.second > tree_fresh_window;
   });
-  hrq->resolve(m_httpHost, m_queryPort);
+  m_queues->tree_reads[path] = now;
+}
+
+bool oscquery_mirror_protocol::fresh_from_tree(const std::string& address)
+{
+  std::lock_guard lock{m_queues->mutex};
+  const auto now = std::chrono::steady_clock::now();
+  for(const auto& [path, when] : m_queues->tree_reads)
+    if(now - when < tree_fresh_window && covers(path, address))
+      return true;
+  return false;
 }
 
 void oscquery_mirror_protocol::read_path(const std::string& path)
@@ -420,17 +741,31 @@ struct oscquery_mirror_protocol::tree_job
     ossia::net::node_base* node{};
     const rapidjson::Value* obj{};
   };
+  oscquery_mirror_protocol* owner{};
   std::shared_ptr<rapidjson::Document> doc;
   bool replace{};
   std::vector<item> stack;
+  // Subtrees to remove, one node per step, the deepest first
   std::vector<ossia::net::node_base*> removals;
   std::function<void()> done;
 
+  // A node and what is under it removed (PATH_REMOVED, a reading gone)
+  static std::shared_ptr<tree_job>
+  removal(oscquery_mirror_protocol& owner, ossia::net::node_base& node)
+  {
+    auto j = std::make_shared<tree_job>();
+    j->owner = &owner;
+    owner.cancel_value_reads(node.osc_address());
+    j->removals.push_back(&node);
+    return j;
+  }
+
   static std::shared_ptr<tree_job> start(
-      ossia::net::node_base& root, const std::string& path,
+      oscquery_mirror_protocol& owner, ossia::net::node_base& root, const std::string& path,
       std::shared_ptr<rapidjson::Document> doc, bool replace)
   {
     auto j = std::make_shared<tree_job>();
+    j->owner = &owner;
     j->replace = replace;
     ossia::net::node_base* node = nullptr;
     if(replace)
@@ -472,8 +807,18 @@ struct oscquery_mirror_protocol::tree_job
   {
     if(!removals.empty())
     {
-      auto* n = removals.back();
-      removals.pop_back();
+      // The deepest first, as clear_children removes: a leaf of the subtree
+      auto* top = removals.back();
+      auto* n = top;
+      for(;;)
+      {
+        auto children = n->children();
+        if(children.empty())
+          break;
+        n = children.front().get();
+      }
+      if(n == top)
+        removals.pop_back();
       if(auto* parent = n->get_parent())
         parent->remove_child(*n);
       return !stack.empty() || !removals.empty();
@@ -511,7 +856,10 @@ struct oscquery_mirror_protocol::tree_job
       if(given.find(child->get_name()) == given.end())
       {
         if(replace)
+        {
+          owner->cancel_value_reads(child->osc_address());
           removals.push_back(child.get());
+        }
         else
           ossia::net::set_zombie(*child, true);
       }
@@ -557,10 +905,11 @@ void oscquery_mirror_protocol::on_path_read(
   std::shared_ptr<rapidjson::Document> doc = json_parser::parse(message);
   if(doc->IsNull() || !doc->IsObject())
     return;
+  note_tree_read(path);
   if(m_polled)
   {
     m_functionQueue.enqueue([this, path, doc = std::move(doc)]() mutable {
-      if(auto job = tree_job::start(m_device->get_root_node(), path, std::move(doc), path == "/"))
+      if(auto job = tree_job::start(*this, m_device->get_root_node(), path, std::move(doc), path == "/"))
         m_jobs.push_back(std::move(job));
     });
     if(m_commandCallback)
@@ -602,8 +951,13 @@ void oscquery_mirror_protocol::on_path_gone(const std::string& path)
     {
       if(m_zombie_on_remove)
         ossia::net::set_zombie(*node, true);
+      else if(m_polled && node->get_parent())
+        m_jobs.push_back(tree_job::removal(*this, *node));
       else if(auto parent = node->get_parent())
+      {
+        cancel_value_reads(path);
         parent->remove_child(*node);
+      }
     }
   });
   if(m_commandCallback)
@@ -656,6 +1010,17 @@ bool oscquery_mirror_protocol::pull(net::parameter_base& address)
 #endif
   auto fut = pull_async(address);
   auto status = fut.wait_for(std::chrono::milliseconds(3000));
+  bool ok = status == std::future_status::ready;
+  if(ok)
+    try
+    {
+      fut.get();
+    }
+    catch(...)
+    {
+      // The read failed, or the node was removed
+      ok = false;
+    }
 
 #if defined(OSSIA_BENCHMARK)
   auto t2 = std::chrono::high_resolution_clock::now();
@@ -663,31 +1028,20 @@ bool oscquery_mirror_protocol::pull(net::parameter_base& address)
       "Time taken: {}",
       std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count());
 #endif
-  return status == std::future_status::ready;
+  return ok;
 }
 
 std::future<void> oscquery_mirror_protocol::pull_async(net::parameter_base& address)
 {
   std::promise<void> promise;
   auto fut = promise.get_future();
-  auto text = address.get_node().osc_address();
-  m_getWSPromises.enqueue(get_ws_promise{std::move(promise), text});
-  /*
-  m_getOSCPromises.insert(
-        std::make_pair(
-          address.get_node().osc_address(),
-          get_promise{std::move(promise), &address}));
-  */
-  text += detail::query_value();
-  http_send_message(text);
+  queue_value_read(address.get_node().osc_address(), std::move(promise), false);
   return fut;
 }
 
 void oscquery_mirror_protocol::request(net::parameter_base& address)
 {
-  auto text = address.get_node().osc_address();
-  text += detail::query_value();
-  http_send_message(text);
+  queue_value_read(address.get_node().osc_address(), std::nullopt, false);
 }
 
 void oscquery_mirror_protocol::set_feedback(bool b)
@@ -1295,10 +1649,7 @@ void oscquery_mirror_protocol::check_crossing(std::string_view address)
     auto node = ossia::net::find_node(m_device->get_root_node(), path);
     if(auto param = node ? node->get_parameter() : nullptr)
     {
-      auto text = param->get_node().osc_address();
-      m_getWSPromises.enqueue(get_ws_promise{std::promise<void>{}, text, true});
-      text += detail::query_value();
-      http_send_message(text);
+      queue_value_read(param->get_node().osc_address(), std::nullopt, true);
     }
   });
 }
@@ -1410,6 +1761,8 @@ bool oscquery_mirror_protocol::on_WSMessage(
           break;
         }
         case message_type::Namespace: {
+          // Its values are fresh: not read one by one now
+          note_tree_read("/");
           if(m_polled)
           {
             // Applied by the polling thread, which may be walking the tree now
@@ -1425,7 +1778,7 @@ bool oscquery_mirror_protocol::on_WSMessage(
                   // A namespace nobody waits for any more
                 }
               };
-              auto job = tree_job::start(m_device->get_root_node(), {}, std::move(data), true);
+              auto job = tree_job::start(*this, m_device->get_root_node(), {}, std::move(data), true);
               if(!job)
                 return finish();
               job->done = std::move(finish);
@@ -1448,70 +1801,23 @@ bool oscquery_mirror_protocol::on_WSMessage(
           break;
         }
         case message_type::Value: {
-          // TODO instead just put full path in reply ?
-          get_ws_promise p;
-          if(m_getWSPromises.try_dequeue(p))
-          {
-            auto node = ossia::net::find_node(m_device->get_root_node(), p.address);
-
-            const rapidjson::Value* obj_value = data.get();
-            if(obj_value->IsObject())
-            {
-              if(auto it = obj_value->FindMember("VALUE"); it != obj_value->MemberEnd())
-              {
-                obj_value = &it->value;
-              }
-            }
-
-            if(node)
-            {
-              auto addr = node->get_parameter();
-              if(addr)
-              {
-                // An answer older than a write of this client would bring
-                // back the value the write replaced
-                const bool stale = p.asked != std::chrono::steady_clock::time_point{}
-                                   && written_since(p.address, p.asked);
-                if(!stale
-                   && (!p.only_if_changed || json_parser::value_differs(*addr, *obj_value)))
-                {
-                  json_parser::parse_value(*addr, *obj_value);
-                  m_device->on_message(*addr);
-                }
-              }
-              else
-              {
-                m_device->on_unhandled_message(p.address, detail::ReadValue(*obj_value));
-              }
-            }
-            else
-            {
-              m_device->on_unhandled_message(
-                  p.address, oscquery::detail::ReadValue(*obj_value));
-            }
-
-            p.promise.set_value();
-          }
-
-          else // if update from critical param
+          // Values the server sends over the WebSocket, by address (critical
+          // parameters). The answers to value reads come with their request.
           {
             for(auto it = data->MemberBegin(), end = data->MemberEnd(); it != end; ++it)
             {
               auto path = get_string_view(it->name);
-              if(!path.empty() && path[0] == '/')
+              if(path.empty() || path[0] != '/')
+                continue;
+              auto node = ossia::net::find_node(m_device->get_root_node(), path);
+              if(node)
               {
-                auto node = ossia::net::find_node(m_device->get_root_node(), path);
-                if(node)
+                auto addr = node->get_parameter();
+                if(addr)
                 {
-                  auto addr = node->get_parameter();
-                  if(addr)
-                  {
-                    auto val = addr->value();
-                    json_parser::parse_value(*addr, it->value);
-                    // val.apply(detail::json_to_value_unchecked{it->value});
-                    m_device->on_message(*addr);
-                    continue;
-                  }
+                  json_parser::parse_value(*addr, it->value);
+                  m_device->on_message(*addr);
+                  continue;
                 }
               }
 
@@ -1562,6 +1868,23 @@ bool oscquery_mirror_protocol::on_WSMessage(
 
         case message_type::PathRemoved: {
           m_functionQueue.enqueue([this, doc = std::move(data)] {
+            auto dat_it = doc->FindMember(detail::data());
+            if(dat_it == doc->MemberEnd() || !dat_it->value.IsString())
+              return;
+            const std::string path{get_string_view(dat_it->value)};
+            if(!m_zombie_on_remove)
+            {
+              auto node = ossia::net::find_node(m_device->get_root_node(), path);
+              if(!node || !node->get_parent())
+                return;
+              // A polled mirror removes in slices, on the polling thread
+              if(m_polled)
+              {
+                m_jobs.push_back(tree_job::removal(*this, *node));
+                return;
+              }
+              cancel_value_reads(path);
+            }
             json_parser::parse_path_removed(
                 m_device->get_root_node(), *doc, m_zombie_on_remove);
           });
@@ -1598,8 +1921,7 @@ bool oscquery_mirror_protocol::on_WSMessage(
               }
               if(read)
               {
-                m_getWSPromises.enqueue(get_ws_promise{std::promise<void>{}, address, !first});
-                http_send_message(address + std::string{detail::query_value()});
+                queue_value_read(address, std::nullopt, !first);
               }
             }
           });
@@ -1647,9 +1969,16 @@ bool oscquery_mirror_protocol::on_BinaryWSMessage(
 void oscquery_mirror_protocol::refresh_unfollowed(const std::string& address)
 {
   using namespace std::chrono;
+  // Its value came with a reading of the tree a moment ago
+  if(fresh_from_tree(address))
+    return;
   const auto now = steady_clock::now();
+  std::promise<void> promise;
   {
     std::lock_guard lock{m_unfollowedMutex};
+    // The addresses read long ago are forgotten
+    if(m_unfollowed.size() > 4096)
+      std::erase_if(m_unfollowed, [&](const auto& e) { return now - e.second.asked > seconds(10); });
     auto& r = m_unfollowed[address];
     // An answer that never comes does not hold the address for good
     const bool in_flight = r.answer.valid()
@@ -1657,14 +1986,12 @@ void oscquery_mirror_protocol::refresh_unfollowed(const std::string& address)
                            && now - r.asked < seconds(1);
     if(in_flight || now - r.asked < refresh_interval)
       return;
-    std::promise<void> promise;
     r.answer = promise.get_future();
     r.asked = now;
-    // A callback added while the request is in flight (a Remote that binds
-    // reads the value, then follows it) gets the answer only if it differs
-    m_getWSPromises.enqueue(get_ws_promise{std::move(promise), address, true});
   }
-  http_send_message(address + std::string{detail::query_value()});
+  // A callback added while the request is in flight (a Remote that binds
+  // reads the value, then follows it) gets the answer only if it differs
+  queue_value_read(address, std::move(promise), true);
 }
 
 ossia::value read_followed_value(ossia::net::parameter_base& param)
@@ -1677,6 +2004,96 @@ ossia::value read_followed_value(ossia::net::parameter_base& param)
      && !mirror->written_recently(param.get_node().osc_address()))
     mirror->refresh_unfollowed(param.get_node().osc_address());
   return param.value();
+}
+
+namespace
+{
+// The deepest path that holds a and b: "/" at least
+std::string common_parent(std::string_view a, std::string_view b)
+{
+  std::size_t end = 0;
+  for(std::size_t i = 1;; i++)
+  {
+    const bool a_end = i >= a.size() || a[i] == '/';
+    const bool b_end = i >= b.size() || b[i] == '/';
+    if(a_end && b_end)
+    {
+      end = i;
+      if(i >= a.size() || i >= b.size())
+        break;
+      continue;
+    }
+    if(a_end != b_end || a[i] != b[i])
+      break;
+  }
+  return end == 0 ? std::string{"/"} : std::string{a.substr(0, end)};
+}
+}
+
+void refresh_followed_values(const std::vector<ossia::net::parameter_base*>& params)
+{
+  struct group
+  {
+    std::vector<std::string> addresses;
+    std::string parent;
+  };
+  std::unordered_map<oscquery_mirror_protocol*, group> groups;
+  for(auto* p : params)
+  {
+    if(!p || p->callback_count() != 0 || p->get_access() == ossia::access_mode::SET)
+      continue;
+    auto* mirror = dynamic_cast<oscquery_mirror_protocol*>(
+        &p->get_node().get_device().get_protocol());
+    if(!mirror)
+      continue;
+    const auto& address = p->get_node().osc_address();
+    // What this client has just written may not have reached the server yet
+    if(mirror->written_recently(address))
+      continue;
+    auto& g = groups[mirror];
+    g.parent = g.addresses.empty() ? address : common_parent(g.parent, address);
+    g.addresses.push_back(address);
+  }
+  for(auto& [mirror, g] : groups)
+  {
+    if(g.addresses.size() > oscquery_mirror_protocol::bulk_refresh_threshold)
+      mirror->refresh_tree(g.parent);
+    else
+      for(const auto& a : g.addresses)
+        mirror->refresh_unfollowed(a);
+  }
+}
+
+void oscquery_mirror_protocol::refresh_tree(const std::string& path)
+{
+  if(fresh_from_tree(path))
+    return;
+  {
+    std::lock_guard lock{m_queues->mutex};
+    auto& q = *m_queues;
+    if(!q.alive)
+      return;
+    if(q.tree_current && covers(q.tree_current->path, path))
+      return;
+    for(const auto& r : q.tree_pending)
+      if(covers(r.path, path))
+        return;
+  }
+  queue_tree_reading(path, false);
+}
+
+oscquery_mirror_protocol::value_read_stats
+oscquery_mirror_protocol::get_value_read_stats() const
+{
+  std::lock_guard lock{m_queues->mutex};
+  value_read_stats st;
+  for(const auto& e : m_queues->values)
+    if(e.read)
+      st.queued++;
+  st.sent = m_queues->reads_sent;
+  st.failed = m_queues->reads_failed;
+  st.cancelled = m_queues->reads_cancelled;
+  return st;
 }
 
 void load_oscquery_device(net::device_base& dev, std::string json)

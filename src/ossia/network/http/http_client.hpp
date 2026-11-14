@@ -28,7 +28,9 @@ namespace ossia::net
 ///     load-bearing — Beast manages its own buffer — but kept for ABI
 ///     compatibility)
 ///   - Fun(*this, body): success callback, body is passed as std::string
-///   - Err(*this): error callback
+///   - Err(*this): error callback; error() then says what failed. An Err
+///     with a static member `quiet` writes the error itself (the mirror's
+///     value reads, at most one line a second): the request does not.
 ///
 /// Typical use:
 ///   auto req = std::make_shared<http_get_request<F, E>>(
@@ -110,6 +112,11 @@ public:
     return m_parser.is_header_done() ? m_parser.get().result_int() : 0;
   }
 
+  //! What failed, for Err: the network error, or "status code N"
+  const std::string& error() const noexcept { return m_error; }
+  //! host:port and path
+  const std::string& target() const noexcept { return m_target; }
+
 private:
   static std::string percent_encode_spaces(const std::string& path)
   {
@@ -127,14 +134,21 @@ private:
     return out;
   }
 
+  void fail(std::string what)
+  {
+    m_error = std::move(what);
+    if constexpr(!requires { Err::quiet; })
+      ossia::logger().error("HTTP Error: {}: {}", m_target, m_error);
+    m_err(*this);
+  }
+
   void on_resolve(
       const boost::beast::error_code& ec,
       const boost::asio::ip::tcp::resolver::results_type& results)
   {
     if(ec)
     {
-      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
-      m_err(*this);
+      fail(ec.message());
       return;
     }
     m_stream.expires_after(std::chrono::seconds(30));
@@ -151,8 +165,7 @@ private:
   {
     if(ec)
     {
-      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
-      m_err(*this);
+      fail(ec.message());
       return;
     }
     m_stream.expires_after(std::chrono::seconds(30));
@@ -168,8 +181,7 @@ private:
   {
     if(ec)
     {
-      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
-      m_err(*this);
+      fail(ec.message());
       return;
     }
     m_stream.expires_after(std::chrono::seconds(30));
@@ -189,8 +201,7 @@ private:
     if(ec && ec != boost::beast::http::error::end_of_stream
        && ec != boost::asio::error::eof)
     {
-      ossia::logger().error("HTTP Error: {}: {}", m_target, ec.message());
-      m_err(*this);
+      fail(ec.message());
       return;
     }
 
@@ -204,8 +215,7 @@ private:
     }
     if(status != 200)
     {
-      ossia::logger().error("HTTP Error: {}: status code {}", m_target, (int)status);
-      m_err(*this);
+      fail("status code " + std::to_string(status));
       close();
       return;
     }
@@ -231,6 +241,7 @@ private:
   std::string m_target;
   Fun m_fun;
   Err m_err;
+  std::string m_error;
   std::function<void()> m_finished;
 };
 
