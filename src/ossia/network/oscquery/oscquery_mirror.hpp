@@ -100,7 +100,7 @@ public:
   void set_command_callback(std::function<void()>);
 
   /**
-   * @brief For a device read and changed by the one thread that polls it
+   * For a device read and changed by the one thread that polls it
    * (ossia-max): every change of the tree, the tree read again by update()
    * and update_async() included, is applied only by run_commands() or
    * run_commands_for(), on that thread, never on a network thread. Set it
@@ -113,7 +113,7 @@ public:
   bool polled() const noexcept { return m_polled; }
 
   /**
-   * @brief run_commands() for about `budget`: a large reading is applied node
+   * run_commands() for about `budget`: a large reading is applied node
    * by node across calls, each change in its order. True when more waits.
    */
   bool run_commands_for(std::chrono::microseconds budget);
