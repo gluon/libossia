@@ -152,6 +152,7 @@ private:
   friend struct http_answer;
   friend struct http_path_answer;
   friend struct http_path_error;
+  friend struct http_namespace_error;
 
   void init();
   using connection_handler = std::weak_ptr<void>;
@@ -160,6 +161,8 @@ private:
   void read_path(const std::string& path);
   void on_path_read(const std::string& path, const std::string& message);
   void on_path_gone(const std::string& path);
+  // The namespace could not be read: update_async's future gets the error
+  void on_namespace_failed(unsigned int status);
   bool on_BinaryWSMessage(connection_handler hdl, const std::string& message);
   void
   on_OSCMessage(const oscpack::ReceivedMessage& m, const oscpack::IpEndpointName& ip);

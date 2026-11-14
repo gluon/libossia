@@ -56,7 +56,8 @@ bool oscquery_server_reachable(std::string_view ws_url, int timeout_ms);
 
 // One attempt to connect a client to an OSCQuery server by URL, on a thread of
 // its own: building the mirror waits for the WebSocket (up to 1.5 s), reading
-// the tree waits for the server's answer (up to 3 s). Done on the main thread
+// the tree waits for the server's answer (up to tree_timeout, a reading that
+// fails ending it at once). Done on the main thread
 // of Max, these waits freeze Max, and a server of the same Max (an
 // ossia.device, whose network context the main thread polls) cannot answer
 // at all. The host checks done() from the main thread and takes the device.
@@ -71,6 +72,15 @@ public:
   ~oscquery_connect_attempt();
   oscquery_connect_attempt(const oscquery_connect_attempt&) = delete;
   oscquery_connect_attempt& operator=(const oscquery_connect_attempt&) = delete;
+
+  // How long the tree is waited for. The bound of update() (3 s) is too short
+  // for a large device: Live serves a set of 64 tracks (47 MB) in 3 s, and
+  // a mirror whose tree came too late was destroyed, then built again a
+  // second later, without end. The HTTP client gives up a reading after
+  // 30 s at each step; the attempt waits a little longer, so that the client's
+  // own error ends it. Waiting does not freeze Max: the attempt has its own
+  // thread.
+  static constexpr std::chrono::seconds tree_timeout{35};
 
   bool done() const { return m_done; }
   // After done(): the device, connected and its tree read, or nullptr.

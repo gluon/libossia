@@ -66,6 +66,19 @@ struct http_path_error
   }
 };
 
+// The namespace could not be read: whoever waits for it knows at once
+struct http_namespace_error
+{
+  oscquery_mirror_protocol& self;
+
+  template <typename T>
+  void operator()(T& req)
+  {
+    req.close();
+    self.on_namespace_failed(req.status());
+  }
+};
+
 struct http_error
 {
   template <typename T>
@@ -371,9 +384,10 @@ void oscquery_mirror_protocol::pump_tree_queue()
   };
   if(next.name_space)
   {
-    using request = ossia::net::http_get_request<http_answer, http_error>;
+    using request = ossia::net::http_get_request<http_answer, http_namespace_error>;
     auto hrq = std::make_shared<request>(
-        http_answer{*this}, http_error{}, m_http->context, m_httpHost, next.path);
+        http_answer{*this}, http_namespace_error{*this}, m_http->context, m_httpHost,
+        next.path);
     hrq->on_finished(std::move(finished));
     hrq->resolve(m_httpHost, m_queryPort);
   }
@@ -403,6 +417,23 @@ void oscquery_mirror_protocol::on_path_read(
   });
   if(m_commandCallback)
     m_commandCallback();
+}
+
+void oscquery_mirror_protocol::on_namespace_failed(unsigned int status)
+{
+  std::string what = "the tree of " + m_queryHost + " could not be read";
+  if(status)
+    what += ": status " + std::to_string(status);
+  std::lock_guard lock{m_namespaceMutex};
+  try
+  {
+    m_namespacePromise.set_exception(
+        std::make_exception_ptr(ossia::connection_error{what}));
+  }
+  catch(const std::future_error&)
+  {
+    // A namespace nobody waits for any more
+  }
 }
 
 void oscquery_mirror_protocol::on_path_gone(const std::string& path)
@@ -809,8 +840,18 @@ bool oscquery_mirror_protocol::observe_quietly(net::parameter_base& address, boo
 bool oscquery_mirror_protocol::update(net::node_base& b)
 {
   auto fut = update_async(b);
-  auto status = fut.wait_for(std::chrono::seconds(3));
-  return status == std::future_status::ready;
+  if(fut.wait_for(std::chrono::seconds(3)) != std::future_status::ready)
+    return false;
+  try
+  {
+    fut.get();
+    return true;
+  }
+  catch(...)
+  {
+    // The namespace could not be read
+    return false;
+  }
 }
 
 std::future<void> oscquery_mirror_protocol::update_async(net::node_base& b)

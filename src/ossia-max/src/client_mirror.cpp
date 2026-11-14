@@ -94,11 +94,16 @@ oscquery_connect_attempt::oscquery_connect_attempt(
     {
       auto mirror = std::make_unique<ossia::oscquery::oscquery_mirror_protocol>(url);
       mirror->set_client_name(std::move(client));
+      auto* proto = mirror.get();
       auto dev = std::make_shared<ossia::net::generic_device>(std::move(mirror), name);
-      if(dev->get_protocol().update(dev->get_root_node()))
-        m_device = std::move(dev);
-      else
+      auto tree = proto->update_async(dev->get_root_node());
+      if(tree.wait_for(tree_timeout) != std::future_status::ready)
         m_error = "no answer to the tree request of " + url;
+      else
+      {
+        tree.get(); // the reading failed: throws why
+        m_device = std::move(dev);
+      }
     }
     catch(const std::exception& e)
     {
