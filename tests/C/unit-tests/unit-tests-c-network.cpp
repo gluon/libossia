@@ -1732,13 +1732,18 @@ TEST_CASE("C API: attribute queries agree with the tree", "[network_c]")
   REQUIRE(http_get(s.ws, "/f?TYPE&ACCESS") == "{\"TYPE\":\"f\",\"ACCESS\":3}");
 }
 
-TEST_CASE("C API: an unknown attribute is 204 without a body", "[network_c]")
+TEST_CASE("C API: an unknown attribute is 400, an unserved one of the proposal 204", "[network_c]")
 {
   server s{"c_attr_unknown_server"};
   float_parameter(s.dev, "/ctn/sub");
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   for(const char* query : {"/ctn/sub?BOGUS", "/ctn?BOGUS", "/?BOGUS", "/ctn/sub?BOGUS=1"})
+  {
+    INFO(query);
+    REQUIRE(http_status(s.ws, query) == 400);
+  }
+  for(const char* query : {"/ctn/sub?OVERLOADS", "/ctn?OVERLOADS"})
   {
     INFO(query);
     REQUIRE(http_status(s.ws, query) == 204);

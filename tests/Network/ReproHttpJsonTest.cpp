@@ -34,25 +34,60 @@ void show(const char* test, const std::string& target, const http_reply& r)
 }
 }
 
-// Proposal, line 72: 404 for a path that does not exist. An attribute the
-// server does not know answers 204, as line 64 says of a query for an
-// attribute the server does not support. Line 71 gives 400 for the same case,
-// among its examples of errors; line 64 is the rule of the query part of a
-// URL, and lines 97 and 98 also answer 204, so 204 it is.
-TEST_CASE("HTTP: 404 for a missing path, 204 for an unknown attribute", "[http-status]")
+// Proposal, line 72: 404 for a path that does not exist. Line 71: 400 for an
+// unrecognized attribute; line 64: 204 for an attribute the server does not
+// support. An attribute outside the proposal and outside what the server
+// serves or declares in EXTENSIONS is unrecognized: 400, even beside a served
+// one. A node attribute of the proposal (lines 79 to 81, 96 to 114) the server
+// does not serve: 204. A served attribute the node does not have: {}. On both
+// servers: the one of the C API, and the asio one of an ossia.device in Max.
+TEST_CASE("HTTP: 404 for a missing path, 400 for an unknown attribute", "[http-status]")
 {
-  api_server s;
-  add_float(s.root(), "/f", 0.5f);
-  auto missing = http_get(s.ws, "/nothing");
-  auto missing_attr = http_get(s.ws, "/nothing?TYPE");
-  auto bad_attr = http_get(s.ws, "/f?BOGUS");
-  show("http-status", "/nothing", missing);
-  show("http-status", "/nothing?TYPE", missing_attr);
-  show("http-status", "/f?BOGUS", bad_attr);
-  CHECK(missing.status == 404);
-  CHECK(missing_attr.status == 404);
-  CHECK(bad_attr.status == 204);
-  CHECK(bad_attr.body.empty());
+  const bool use_asio = GENERATE(false, true);
+  std::unique_ptr<api_server> api;
+  std::unique_ptr<asio_server> asio;
+  uint16_t ws{};
+  if(use_asio)
+  {
+    asio = std::make_unique<asio_server>();
+    add_float(asio->root(), "/f", 0.5f);
+    asio->start();
+    ws = asio->ws;
+  }
+  else
+  {
+    api = std::make_unique<api_server>();
+    add_float(api->root(), "/f", 0.5f);
+    ws = api->ws;
+  }
+  const std::string name = use_asio ? "asio server" : "C API server";
+  auto get = [&](const std::string& target) {
+    auto r = http_get(ws, target);
+    show(("http-status: " + name).c_str(), target, r);
+    return r;
+  };
+
+  CHECK(get("/nothing").status == 404);
+  CHECK(get("/nothing?TYPE").status == 404);
+  CHECK(get("/nothing?BOGUS").status == 404);
+
+  for(const char* target : {"/f?BOGUS", "/f?BOGUS=1", "/?BOGUS", "/f?VALUE&BOGUS"})
+  {
+    INFO(name << " " << target);
+    CHECK(get(target).status == 400);
+  }
+
+  // A node attribute of the proposal this server does not serve
+  auto overloads = get("/f?OVERLOADS");
+  CHECK(overloads.status == 204);
+  CHECK(overloads.body.empty());
+
+  // Served, absent from the node: a float without a unit
+  auto unit = get("/f?UNIT");
+  CHECK(unit.status == 200);
+  CHECK(unit.body == "{}");
+
+  CHECK(get("/f?VALUE").status == 200);
 }
 
 // Proposal, line 65: the fragment of the URL is not part of the path.

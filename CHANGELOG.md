@@ -21,7 +21,7 @@ to fail.
   to be written again for it.
 - OSCQuery server: the HTTP status of an error (404 for an address that does not
   exist, 400 for a bad request, 500 left for the rest) and the 204 of an
-  attribute the server does not know are written on the beast connection. A
+  attribute the server does not serve are written on the beast connection. A
   WebSocket or socket.io query answers nothing for that 204, as for any empty
   answer.
 - OSCQuery server: `expose oscquery <osc port> <ws port> [<address>]` and
@@ -49,9 +49,23 @@ to fail.
   32 failures in a row with no connection accepted, the error is logged and the
   next connection taken 50 ms later.
 
+### Behavior changes
+
+- OSCQuery server, both of them (the one of the C API, and the one of
+  `ossia.device` and Unity): a query for an attribute outside the OSCQuery
+  proposal and outside what the server serves or declares in the `EXTENSIONS` of
+  `HOST_INFO` answers 400 (bad request, line 71 of the proposal); it answered
+  204, without a body. A node attribute of the proposal the server does not
+  serve (`OVERLOADS`) still answers 204 (line 64), and an attribute it serves
+  that the node does not have still answers `{}`. One unknown attribute makes
+  the whole query a 400: `/f?VALUE&BOGUS` answered the value. What stops
+  working: a client that adds to its queries a key the server does not know,
+  and reads what comes back. `[http-status]` of `tests/Network/ReproHttpJsonTest.cpp`
+  checks both servers.
+
 ### Added
 
-- Tests: `tests/Network/Repro*Test.cpp` check what the OSCQuery servers, the mirror and the multiplex do, against the OSCQuery proposal: the HTTP answers and the JSON of the tree, `LISTEN` and `IGNORE`, `ACCESS`, a client's own values and crossing writes, bundles, a server stopped with a client connected, and the mDNS announcements (`ReproMdnsTest`, built with `OSSIA_DNSSD`). An attribute the server does not know answers 204, as line 64 of the proposal says (line 71 says 400 for the same case). Two cases are expected to fail (`[!shouldfail]`): the server of `ossia_protocol_oscquery_server_create`, on WebSocket++, still sends a client's values back to it and keeps two values after crossing writes; `ossia.device` and the `Controller` of Unity use the other server, which does neither.
+- Tests: `tests/Network/Repro*Test.cpp` check what the OSCQuery servers, the mirror and the multiplex do, against the OSCQuery proposal: the HTTP answers and the JSON of the tree, `LISTEN` and `IGNORE`, `ACCESS`, a client's own values and crossing writes, bundles, a server stopped with a client connected, and the mDNS announcements (`ReproMdnsTest`, built with `OSSIA_DNSSD`). An attribute the server does not know answers 400, as line 71 of the proposal says, and a node attribute of the proposal it does not serve 204, as line 64 says (see Behavior changes). Two cases are expected to fail (`[!shouldfail]`): the server of `ossia_protocol_oscquery_server_create`, on WebSocket++, still sends a client's values back to it and keeps two values after crossing writes; `ossia.device` and the `Controller` of Unity use the other server, which does neither.
 - Tests: `tests/Network/ZeroconfMinuitListenerTest.cpp` compiles the Minuit listener of ossia-max as it is, against a stand-in for the Max API (`tests/Network/max_listener_stub`) and with the function that builds its devices (`client_mirror.cpp`), and checks that a device leaving the network does not make the listener wait for itself. Holding the listener's lock while it handles the events makes both cases fail.
 - Tools: `tools/check_unity_package.sh` checks a Unity package before a Release: a `.meta` for every file and folder Unity imports, and a version Unity accepts (semver, no leading `v`).
 - Tools: `tools/check_unity_scripts.sh` compiles the scripts of the Unity package (its `.tgz`, or the sources the install takes) with the C# compiler and the UnityEngine assemblies of a Unity editor, without opening it.
