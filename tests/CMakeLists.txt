@@ -168,6 +168,10 @@ if(OSSIA_PROTOCOL_OSCQUERY)
   ossia_add_test(V8ConnectorTest
       "${CMAKE_CURRENT_SOURCE_DIR}/Network/V8ConnectorTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/v8connector_branch.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/device_bundles.cpp")
   target_include_directories(ossia_V8ConnectorTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
+  # The client against a slow server: a burst of PATH_CHANGED, a large tree
+  ossia_add_test(ReproLargeTreeTest
+      "${CMAKE_CURRENT_SOURCE_DIR}/Network/ReproLargeTreeTest.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp")
+  target_include_directories(ossia_ReproLargeTreeTest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src")
   # The client against a large tree: a bench run by hand, not a ctest test
   add_executable(ossia_LargeTreeBench
       "${CMAKE_CURRENT_SOURCE_DIR}/Network/LargeTreeBench.cpp;${CMAKE_CURRENT_SOURCE_DIR}/../src/ossia-max/src/client_mirror.cpp")
