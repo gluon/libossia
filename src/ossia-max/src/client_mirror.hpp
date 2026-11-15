@@ -80,7 +80,9 @@ public:
   // device's name when empty.
   oscquery_connect_attempt(
       std::string ws_url, std::string device_name, std::string client_name = {});
-  // Waits for the thread: at most the time of one attempt.
+  // Gives the build up and waits for its thread at most abandon_after; a
+  // build still running then (a server that accepts the WebSocket and never
+  // answers the tree request) is left to end on its own, without a word.
   ~oscquery_connect_attempt();
   oscquery_connect_attempt(const oscquery_connect_attempt&) = delete;
   oscquery_connect_attempt& operator=(const oscquery_connect_attempt&) = delete;
@@ -93,17 +95,35 @@ public:
   // own error ends it. Waiting does not freeze Max: the attempt has its own
   // thread.
   static constexpr std::chrono::seconds tree_timeout{35};
+  // How long the end of a build is waited for when it is given up (Max quits,
+  // the client is freed): before, up to tree_timeout, Max frozen meanwhile.
+  static constexpr std::chrono::milliseconds abandon_after{2000};
 
-  bool done() const { return m_done; }
+  bool done() const { return m_state->done; }
+  // The build stops at its next step (it waits for the tree in steps of
+  // 20 ms; building the mirror itself waits for the WebSocket, 1.5 s at
+  // most), and its mirror is destroyed on its thread before any answer is
+  // read or logged.
+  void cancel() { m_state->cancelled = true; }
+  // Waits until done() or the deadline; true when done.
+  bool wait_until(std::chrono::steady_clock::time_point deadline) const;
+  // Given up: cancelled, its thread joined if done, else left to end on its
+  // own (it holds what it writes, not this object).
+  void abandon();
   // After done(): the device, connected and its tree read, or nullptr.
   std::shared_ptr<ossia::net::generic_device> take();
   // After done(), when take() gives nullptr: why.
-  const std::string& error() const { return m_error; }
+  const std::string& error() const { return m_state->error; }
 
 private:
-  std::shared_ptr<ossia::net::generic_device> m_device;
-  std::string m_error;
-  std::atomic_bool m_done{false};
+  struct state
+  {
+    std::atomic_bool done{false};
+    std::atomic_bool cancelled{false};
+    std::shared_ptr<ossia::net::generic_device> device;
+    std::string error;
+  };
+  std::shared_ptr<state> m_state{std::make_shared<state>()};
   std::thread m_thread;
 };
 
@@ -152,8 +172,8 @@ public:
   std::optional<std::string> announced_name(int ws_port) const;
 
   // Max quits: every mirror stops its network threads now, while what they
-  // use is still there, and the builds in progress are waited for (each at
-  // most one attempt). Left to exit(), a mirror's HTTP thread ran a request's
+  // use is still there, and the builds in progress are given up (waited for
+  // abandon_after at most, all together). Left to exit(), a mirror's HTTP thread ran a request's
   // handler while the statics of the library were destroyed, and Max
   // crashed. Afterwards poll does nothing; find and devices still answer,
   // with stopped devices. Any thread.

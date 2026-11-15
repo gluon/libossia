@@ -88,7 +88,9 @@ bool oscquery_server_reachable(std::string_view ws_url, int timeout_ms)
 oscquery_connect_attempt::oscquery_connect_attempt(
     std::string ws_url, std::string device_name, std::string client_name)
 {
-  m_thread = std::thread([this, url = std::move(ws_url), name = std::move(device_name),
+  // The thread holds the state, not this object: a build given up can end
+  // after the attempt is gone
+  m_thread = std::thread([st = m_state, url = std::move(ws_url), name = std::move(device_name),
                           client = std::move(client_name)]() mutable {
     try
     {
@@ -96,40 +98,76 @@ oscquery_connect_attempt::oscquery_connect_attempt(
       mirror->set_client_name(std::move(client));
       auto* proto = mirror.get();
       auto dev = std::make_shared<ossia::net::generic_device>(std::move(mirror), name);
-      auto tree = proto->update_async(dev->get_root_node());
-      if(tree.wait_for(tree_timeout) != std::future_status::ready)
-        m_error = "no answer to the tree request of " + url;
-      else
+      if(!st->cancelled)
       {
-        tree.get(); // the reading failed: throws why
-        m_device = std::move(dev);
+        auto tree = proto->update_async(dev->get_root_node());
+        const auto end = std::chrono::steady_clock::now() + tree_timeout;
+        bool ready = false;
+        while(!st->cancelled && std::chrono::steady_clock::now() < end)
+          if(tree.wait_for(std::chrono::milliseconds(20)) == std::future_status::ready)
+          {
+            ready = true;
+            break;
+          }
+        if(st->cancelled)
+          st->error = "given up";
+        else if(!ready)
+          st->error = "no answer to the tree request of " + url;
+        else
+        {
+          tree.get(); // the reading failed: throws why
+          st->device = std::move(dev);
+        }
       }
+      // Given up: the mirror is destroyed here, its HTTP requests dropped
+      // unanswered (its network context stops before any handler runs)
     }
     catch(const std::exception& e)
     {
-      m_error = e.what();
+      st->error = st->cancelled ? std::string{"given up"} : e.what();
     }
     catch(...)
     {
-      m_error = "could not connect to " + url;
+      st->error = st->cancelled ? "given up" : "could not connect to " + url;
     }
-    m_done = true;
+    st->done = true;
   });
+}
+
+bool oscquery_connect_attempt::wait_until(std::chrono::steady_clock::time_point deadline) const
+{
+  while(!m_state->done && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  return m_state->done;
+}
+
+void oscquery_connect_attempt::abandon()
+{
+  m_state->cancelled = true;
+  if(!m_thread.joinable())
+    return;
+  if(m_state->done)
+    m_thread.join();
+  else
+    m_thread.detach();
 }
 
 oscquery_connect_attempt::~oscquery_connect_attempt()
 {
-  if(m_thread.joinable())
-    m_thread.join();
+  if(!m_thread.joinable())
+    return;
+  cancel();
+  wait_until(std::chrono::steady_clock::now() + abandon_after);
+  abandon();
 }
 
 std::shared_ptr<ossia::net::generic_device> oscquery_connect_attempt::take()
 {
-  if(!m_done)
+  if(!m_state->done)
     return {};
   if(m_thread.joinable())
     m_thread.join();
-  return std::move(m_device);
+  return std::move(m_state->device);
 }
 
 struct oscquery_directory::impl final : servus::Listener
@@ -340,10 +378,20 @@ void oscquery_directory::shutdown()
       attempts.push_back(std::move(a.second));
     d.abandoned.clear();
   }
+  // The builds stop while the devices do; given up after abandon_after
+  // together, not each in turn
+  for(auto& a : attempts)
+    a->cancel();
   // A client connected by name shares the device: stopped for it too
   for(auto& dev : devices)
     dev->get_protocol().stop();
-  // Each waits for its thread; the device it built, if any, stops with it
+  const auto deadline
+      = std::chrono::steady_clock::now() + oscquery_connect_attempt::abandon_after;
+  for(auto& a : attempts)
+  {
+    a->wait_until(deadline);
+    a->abandon();
+  }
   attempts.clear();
 }
 

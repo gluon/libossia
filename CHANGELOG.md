@@ -125,6 +125,11 @@ to fail.
   logger that no longer existed. A quit task of Max now stops the network
   threads of every mirror (those found over mDNS, the builds in progress, and
   the clients' devices) before `exit()`.
+- Max: quitting Max, or freeing an `ossia.client`, while a mirror was being
+  built on a server that accepts the WebSocket and never answers the tree
+  request waited for that build until it timed out (30 s, Max frozen), then
+  wrote two HTTP errors in the console. The build is now given up: it stops at
+  its next step, is waited for 2 s at most, and writes nothing.
 - Max: Max's main thread was held for seconds, then minutes, after a large tree
   change of a device (a Live set of 64 tracks, 47 MB): `ossia.client` sent a
   message for each node created or removed, each with a symbol of the full
