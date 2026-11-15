@@ -146,6 +146,9 @@ public:
 
   // static void register_nodes(ossia_max* x);
   static void discover_network_devices(ossia_max* x);
+  // Max quits (quittask): the network threads stop before exit() destroys
+  // the statics of the library
+  static void quit(ossia_max* x);
 
   template <typename T>
   t_class* get_class()

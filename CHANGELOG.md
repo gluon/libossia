@@ -116,6 +116,14 @@ to fail.
 
 ### Fixed
 
+- Max: Max could crash when it quit while an `ossia.client` was reading from an
+  OSCQuery server (`EXC_BAD_ACCESS` on the thread `ossia oscq http`). The
+  mirrors of the devices found over mDNS are statics of the library: they
+  stopped only in `exit()`, while the other statics were being destroyed, and
+  their HTTP thread could still run a request's handler. A quit task of Max now
+  stops the network threads of every mirror (those found over mDNS and those of
+  the clients) before `exit()`. Reproduced automatically in Max (a Max quit
+  during value reads and tree changes, 10 times), red before, green after.
 - Max: Max's main thread was held for seconds, then minutes, after a large tree
   change of a device (a Live set of 64 tracks, 47 MB): `ossia.client` sent a
   message for each node created or removed, each with a symbol of the full

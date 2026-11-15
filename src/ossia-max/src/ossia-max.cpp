@@ -132,6 +132,7 @@ ossia_max::ossia_max()
 
   s_browse_clock = clock_new(this, (method)ossia_max::discover_network_devices);
   clock_delay(ossia_max::s_browse_clock, 100.);
+  quittask_install((method)ossia_max::quit, this);
 
   ossia_patcher_listener_class = class_new(
       "ossia.patcher_listener", (method)patcher_listener_new,
@@ -380,6 +381,20 @@ std::vector<object_base*> find_children_to_register(
   }
 
   return found;
+}
+
+void ossia_max::quit(ossia_max* x)
+{
+  // The mirrors of the mDNS directory are statics: left to exit(), their HTTP
+  // thread ran a request's handler while the statics of the library were
+  // destroyed, and Max crashed (EXC_BAD_ACCESS on "ossia oscq http"). They
+  // stop now, and so do the devices of the clients: a client connected by
+  // name shares the directory's.
+  clock_unset(s_browse_clock);
+  s_zeroconf_oscq_listener.shutdown();
+  for(auto* c : x->clients.reference())
+    if(c->m_device)
+      c->m_device->get_protocol().stop();
 }
 
 void ossia_max::discover_network_devices(ossia_max*)

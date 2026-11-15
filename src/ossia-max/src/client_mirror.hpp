@@ -151,6 +151,14 @@ public:
   // nullopt until the announcement is seen.
   std::optional<std::string> announced_name(int ws_port) const;
 
+  // Max quits: every mirror stops its network threads now, while what they
+  // use is still there, and the builds in progress are waited for (each at
+  // most one attempt). Left to exit(), a mirror's HTTP thread ran a request's
+  // handler while the statics of the library were destroyed, and Max
+  // crashed. Afterwards poll does nothing; find and devices still answer,
+  // with stopped devices. Any thread.
+  void shutdown();
+
   static constexpr int retry_ms = 1000;
 
 private:

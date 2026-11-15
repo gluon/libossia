@@ -164,6 +164,8 @@ struct oscquery_directory::impl final : servus::Listener
   // Builds that ended their use (device removed or announced elsewhere):
   // released once their thread is done.
   std::vector<std::pair<std::string, std::unique_ptr<oscquery_connect_attempt>>> abandoned;
+  // Set by shutdown: no build starts or ends any more.
+  bool stopped{};
 
   impl()
   {
@@ -239,6 +241,8 @@ oscquery_directory::changes oscquery_directory::poll()
 
   const auto now = impl::clock::now();
   std::lock_guard lock{d.mutex};
+  if(d.stopped)
+    return out;
   for(const auto& [added, name, given_host, given_port] : events)
   {
     if(added)
@@ -313,6 +317,34 @@ oscquery_directory::changes oscquery_directory::poll()
 
   std::erase_if(d.abandoned, [](const auto& a) { return a.second->done(); });
   return out;
+}
+
+void oscquery_directory::shutdown()
+{
+  auto& d = *m_impl;
+  std::vector<std::unique_ptr<oscquery_connect_attempt>> attempts;
+  std::vector<std::shared_ptr<ossia::net::generic_device>> devices;
+  {
+    std::lock_guard lock{d.mutex};
+    if(d.stopped)
+      return;
+    d.stopped = true;
+    for(auto& [name, e] : d.entries)
+    {
+      if(e.attempt)
+        attempts.push_back(std::move(e.attempt));
+      if(e.device)
+        devices.push_back(e.device);
+    }
+    for(auto& a : d.abandoned)
+      attempts.push_back(std::move(a.second));
+    d.abandoned.clear();
+  }
+  // A client connected by name shares the device: stopped for it too
+  for(auto& dev : devices)
+    dev->get_protocol().stop();
+  // Each waits for its thread; the device it built, if any, stops with it
+  attempts.clear();
 }
 
 void oscquery_directory::inject(bool added, std::string name, std::string host, std::string port)

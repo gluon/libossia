@@ -31,6 +31,9 @@ public:
 
   void browse();
 
+  // Max quits: the mirrors stop their network threads (oscquery_directory::shutdown).
+  static void shutdown();
+
 private:
   // The clients connected by name to `name` let go of their device, and try
   // again in one second if their @reconnect is on. `lost`: the device is

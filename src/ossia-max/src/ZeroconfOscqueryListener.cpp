@@ -35,6 +35,12 @@ ZeroconfOscqueryListener::get_devices()
   return s_directory ? s_directory->devices() : std::vector<std::shared_ptr<ossia::net::generic_device>>{};
 }
 
+void ZeroconfOscqueryListener::shutdown()
+{
+  if(s_directory)
+    s_directory->shutdown();
+}
+
 void ZeroconfOscqueryListener::browse()
 {
   if(!s_directory)
