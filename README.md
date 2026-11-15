@@ -300,10 +300,11 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.14` add to ossia 2.1.0, one line per 
 | `namespace` and the explorer read the value of a parameter nothing follows from the server, without waiting | `node_base.cpp`, `search_filter.cpp`, `read_followed_value` | .12 | CHANGELOG, Behavior changes | `C API: reading a mirrored parameter nothing follows asks the server` |
 | A client that leaves as soon as it connects to an `ossia.device` puts no red line in the console | `ossia.device`, `expose oscquery`, `websocket_server_beast.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` and `[2.1.0+prism.14]` | `C API: asio server: a client that leaves as it connects is no error`, `tests/Max/check_console.py` |
 | An `ossia.client` whose server is closing the connection disconnects at once, with no red line | `ossia.client`, `disconnect`, `websocket_client_beast.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: a mirror stopped as its server closes is no error`, `tests/Max/check_console.py` |
-| `get protocols` lists the OSCQuery server of an `ossia.device`, and `get oscquery_clients` its clients | `ossia.device`, `device_protocols.cpp` | .14 | CHANGELOG, `[Unreleased]` | `tests/Network/DeviceProtocolsTest.cpp`; not run in Max |
+| `get protocols` lists the OSCQuery server of an `ossia.device`, and `get oscquery_clients` its clients | `ossia.device`, `device_protocols.cpp` | .14 | CHANGELOG, `[2.1.0+prism.14]` | `tests/Network/DeviceProtocolsTest.cpp`; not run in Max |
 | One `namespace_changed` for a batch of tree changes, the changes themselves when few; `@notify` | `ossia.client`, `ossia.device`: `@notify`, `namespace_changed`; `change_batch.cpp` | .14 | [Large trees](#large-trees); reference of `ossia.client`; reference of `ossia.device` | `[change-batch]` of `tests/Network/ReproMirrorReadsTest.cpp`; in Max, the trial of `gros-arbre` |
 | `namespace` reads the values of many parameters nothing follows as one tree | `node_base.cpp`, `search_filter.cpp`, `refresh_followed_values` | .14 | [Large trees](#large-trees); reference of `ossia.client` | `[bulk-refresh]` |
 | The value reads of a client, counted | `ossia.client`: `stats` | .14 | [Large trees](#large-trees); reference of `ossia.client` | `[value-reads-cancelled]`, `[value-read-errors]` (the counters); not run in Max |
+| Max quits without a crash while an `ossia.client` reads from a server, and a mirror still being built is given up within 2 s | `ossia_max::quit` (quit task), `client_mirror.cpp`: `oscquery_directory::shutdown` | .14 | CHANGELOG, `[2.1.0+prism.14]` | `[directory-shutdown]` and `[silent-build]` of `tests/Network/ReproMirrorReadsTest.cpp`; in Max, 40 quits of 40 without a crash (3 crashes in 31 before) |
 
 #### Unity package
 
@@ -382,14 +383,15 @@ Everything `2.1.0+prism.1` to `2.1.0+prism.14` add to ossia 2.1.0, one line per 
 | A polled mirror removes in slices, the deepest first | `oscquery_mirror.cpp`, `tree_job::removal` | .14 | [Large trees](#large-trees) | `[sliced-removal]` |
 | The tree changes of the WebSocket and HTTP threads applied in the order they came | `oscquery_mirror.hpp`, `command_queue` | .14 | CHANGELOG, `[2.1.0+prism.14]` | `[command-order]` (red under ThreadSanitizer) |
 | The server follows the proposal where it did not: `DATA` of `LISTEN`, 404 and 400, valid JSON, `ECHO` and `EXTENDED_TYPE` declared, UDP senders by address and port, one `ATTRIBUTES_CHANGED` per new parameter, attribute queries, URL fragments | `json_query_parser.hpp`, `websocket_server_beast.cpp`, `json.hpp`, `json_writer_detail.cpp`, `get_query_parser.hpp`, `node.cpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | the tests named in each commit of `prism/consolidation-12` |
+| An attribute the server neither serves nor declares in `EXTENSIONS` answers 400, a node attribute of the proposal it does not serve 204 | `get_query_parser.hpp`, both servers | .14 | CHANGELOG, `[2.1.0+prism.14]`, Behavior changes | `[http-status]` of `tests/Network/ReproHttpJsonTest.cpp` |
 | An HTTP error names the host, the port and the request | `http_client.hpp` | .12 | CHANGELOG, `[2.1.0+prism.12]` | `C API: an HTTP error names the host and the request` |
 
 
 ### Differences from ossia 2.1.0
 
-State on 2026-11-13, `2.1.0+prism.14`; the changes of the Unity package and of the C API are in the [CHANGELOG](CHANGELOG.md). "Fixed" means fixed in ossia-prism, not in ossia.
+State on 2026-11-15, `2.1.0+prism.14`; the changes of the Unity package and of the C API are in the [CHANGELOG](CHANGELOG.md). "Fixed" means fixed in ossia-prism, not in ossia.
 
-Since `2.1.0+prism.14` the base is not ossia 2.1.0 as released but its pull request [ossia#876](https://github.com/ossia/libossia/pull/876): the WebSocket server and client are Boost.Beast, `websocket_server.hpp` and `websocket_client.hpp` are gone, and the sockets speak IPv6. Every difference below is a difference from ossia, not from that branch, and each one is on it with its test; the CHANGELOG, `[2.1.0+prism.14]`, says which of them had to be written again for it.
+Since `2.1.0+prism.14` the base is not ossia 2.1.0 as released but its pull request [ossia#876](https://github.com/ossia/libossia/pull/876): the WebSocket server and client are Boost.Beast, `websocket_server.hpp` and `websocket_client.hpp` are gone, and the sockets speak IPv6, except the OSCQuery server, which listens on IPv4 as in ossia 2.1.0 (a client that came over IPv6 got no values, the OSC side being IPv4; the dual stack stays behind `set_dual_stack`, which nothing of the packages sets). Every difference below is a difference from ossia, not from that branch, and each one is on it with its test; the CHANGELOG, `[2.1.0+prism.14]`, says which of them had to be written again for it.
 
 Changed in `2.1.0+prism.12` (details, measures and what stops working: the CHANGELOG, `[2.1.0+prism.12]`; tests: the table above):
 

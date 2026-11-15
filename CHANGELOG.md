@@ -4,7 +4,7 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [2.1.0+prism.14] - 2026-11-13
+## [2.1.0+prism.14] - 2026-11-15
 
 The packages are built on the WebSocket server and client of the pull request
 [ossia#876](https://github.com/ossia/libossia/pull/876) (Boost.Beast in place of
@@ -16,8 +16,8 @@ to fail.
 ### Base
 
 - The WebSocket server and client are Boost.Beast: `websocket_server.hpp` and
-  `websocket_client.hpp` are gone, and the sockets speak IPv6. None of this is
-  PRISM's work. What follows is what our corrections became on it, and what had
+  `websocket_client.hpp` are gone, and the sockets speak IPv6 (the OSCQuery
+  server listens on IPv4 by default, see below). None of this is PRISM's work. What follows is what our corrections became on it, and what had
   to be written again for it.
 - OSCQuery server: the HTTP status of an error (404 for an address that does not
   exist, 400 for a bad request, 500 left for the rest) and the 204 of an
@@ -29,6 +29,16 @@ to fail.
   through `websocket_server_interface::listen(address, port)`, which the beast
   server serves on that address alone, without the dual stack, and which refuses
   an address it cannot bind instead of taking every interface.
+- OSCQuery server: `listen(port)`, which `expose oscquery` and the Controller of
+  Unity use, listens on IPv4 only, as in ossia 2.1.0, and no longer on IPv6 with
+  the dual stack, as in ossia#876. A client that reached a dual-stack server by a
+  name, which resolves `::1` or a link-local address before an IPv4 one, came
+  over IPv6, while the OSC side of OSCQuery is IPv4: it read the tree, wrote to
+  the server, and never got a value. Over IPv4 such a client falls back to IPv4
+  and is served (`[mirror-ipv6]` of `tests/Network/ReproWebSocketTest.cpp`).
+  `websocket_server_beast::set_dual_stack(true)`, before `listen`, gives the dual
+  stack back; nothing of ossia-max or Unity sets it. `listen` on one address is
+  unchanged: that address decides the family.
 - OSCQuery server: the TCP port of a client, which `?PEERS` and
   `?PRISM_CONNECTIONS` give, comes from the remote endpoint of its connection,
   the raw socket of WebSocket++ being gone.
@@ -106,7 +116,7 @@ to fail.
   they came, whichever thread brought them (`[command-order]`), and what
   ossia-max makes of a batch of changes (`[change-batch]`).
 
-- Tests: `tests/Network/Repro*Test.cpp` check what the OSCQuery servers, the mirror and the multiplex do, against the OSCQuery proposal: the HTTP answers and the JSON of the tree, `LISTEN` and `IGNORE`, `ACCESS`, a client's own values and crossing writes, bundles, a server stopped with a client connected, and the mDNS announcements (`ReproMdnsTest`, built with `OSSIA_DNSSD`). An attribute the server does not know answers 400, as line 71 of the proposal says, and a node attribute of the proposal it does not serve 204, as line 64 says (see Behavior changes). Two cases are expected to fail (`[!shouldfail]`): the server of `ossia_protocol_oscquery_server_create`, on WebSocket++, still sends a client's values back to it and keeps two values after crossing writes; `ossia.device` and the `Controller` of Unity use the other server, which does neither.
+- Tests: `tests/Network/Repro*Test.cpp` check what the OSCQuery servers, the mirror and the multiplex do, against the OSCQuery proposal: the HTTP answers and the JSON of the tree, `LISTEN` and `IGNORE`, `ACCESS`, a client's own values and crossing writes, bundles, a server stopped with a client connected, and the mDNS announcements (`ReproMdnsTest`, built with `OSSIA_DNSSD`). An attribute the server does not know answers 400, as line 71 of the proposal says, and a node attribute of the proposal it does not serve 204, as line 64 says (see Behavior changes). None is expected to fail: on this base the server of `ossia_protocol_oscquery_server_create` no longer sends a client's values back to it and arbitrates crossing writes, as the server of `ossia.device` and of the `Controller` of Unity does (`[echo-sender]` and `[crossing]`, both servers).
 - Tests: `tests/Network/ZeroconfMinuitListenerTest.cpp` compiles the Minuit listener of ossia-max as it is, against a stand-in for the Max API (`tests/Network/max_listener_stub`) and with the function that builds its devices (`client_mirror.cpp`), and checks that a device leaving the network does not make the listener wait for itself. Holding the listener's lock while it handles the events makes both cases fail.
 - Tools: `tools/check_unity_package.sh` checks a Unity package before a Release: a `.meta` for every file and folder Unity imports, and a version Unity accepts (semver, no leading `v`).
 - Tools: `tools/check_unity_scripts.sh` compiles the scripts of the Unity package (its `.tgz`, or the sources the install takes) with the C# compiler and the UnityEngine assemblies of a Unity editor, without opening it.
@@ -183,7 +193,7 @@ to fail.
 
 ### Changed
 
-- Unity: the example `CustomDevice.cs` serves its device with the OSCQuery server the Controller uses, on a network context of its own, which `OnApplicationQuit` frees before the reset of the library: the server that does not send a client's own values back to it and arbitrates crossing writes (`ReproWebSocketTest`). It used `new Ossia.OSCQuery (osc, ws)`, the other server, which does neither. Its scripts compile (`tools/check_unity_scripts.sh`), and `PlayCycleTests.StopWithCustomDeviceAndAClient` passes with it (a new project, Unity 6000.3, batchmode: EditMode 26 of 26, PlayMode 37 of 37).
+- Unity: the example `CustomDevice.cs` serves its device with the OSCQuery server the Controller uses, on a network context of its own, which `OnApplicationQuit` frees before the reset of the library: the server that does not send a client's own values back to it and arbitrates crossing writes (`ReproWebSocketTest`). It used `new Ossia.OSCQuery (osc, ws)`, the server of the C API, which in `2.1.0+prism.12` did neither (on this base it does both, see Added). Its scripts compile (`tools/check_unity_scripts.sh`), and `PlayCycleTests.StopWithCustomDeviceAndAClient` passes with it (a new project, Unity 6000.3, batchmode: EditMode 26 of 26, PlayMode 37 of 37).
 
 ## [2.1.0+prism.12] - 2026-11-11
 
