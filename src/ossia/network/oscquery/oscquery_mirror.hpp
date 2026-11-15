@@ -153,7 +153,12 @@ public:
   //! Asks the server for the value of a parameter nothing follows, without
   //! waiting for it: at most one request in flight for an address, and one
   //! per refresh_interval. A reader gets the last value known meanwhile.
-  void refresh_unfollowed(const std::string& address);
+  //! unless_fresh_tree: not asked either if a reading of the tree brought the
+  //! value less than tree_fresh_window ago; for a bulk refresh only
+  //! (refresh_followed_values), never for an explicit read, which may come
+  //! after a change the server did not send (one it made before it applied
+  //! the LISTEN of the reader).
+  void refresh_unfollowed(const std::string& address, bool unless_fresh_tree = false);
   static constexpr std::chrono::milliseconds refresh_interval{100};
 
   //! Asks the server for the structure of path, values included, without
@@ -162,7 +167,7 @@ public:
   //! come, or was answered less than tree_fresh_window ago.
   void refresh_tree(const std::string& path);
   //! A value that came with a reading of the tree this recently is not read
-  //! again (refresh_unfollowed, refresh_tree)
+  //! again by a bulk refresh (refresh_followed_values, refresh_tree)
   static constexpr std::chrono::milliseconds tree_fresh_window{1000};
   //! More parameters than this to read at once: their tree is read instead
   //! (refresh_followed_values)

@@ -1966,11 +1966,12 @@ bool oscquery_mirror_protocol::on_BinaryWSMessage(
   return {};
 }
 
-void oscquery_mirror_protocol::refresh_unfollowed(const std::string& address)
+void oscquery_mirror_protocol::refresh_unfollowed(
+    const std::string& address, bool unless_fresh_tree)
 {
   using namespace std::chrono;
-  // Its value came with a reading of the tree a moment ago
-  if(fresh_from_tree(address))
+  // A bulk refresh: its value came with a reading of the tree a moment ago
+  if(unless_fresh_tree && fresh_from_tree(address))
     return;
   const auto now = steady_clock::now();
   std::promise<void> promise;
@@ -2060,7 +2061,7 @@ void refresh_followed_values(const std::vector<ossia::net::parameter_base*>& par
       mirror->refresh_tree(g.parent);
     else
       for(const auto& a : g.addresses)
-        mirror->refresh_unfollowed(a);
+        mirror->refresh_unfollowed(a, true);
   }
 }
 

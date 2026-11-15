@@ -383,14 +383,23 @@ TEST_CASE("Mirror: many parameters nothing follows are read as one tree", "[bulk
     REQUIRE(c.poll_until(
         [&] { return fut.wait_for(std::chrono::seconds(0)) == std::future_status::ready; },
         5000));
+    // A bulk refresh does not read again a value a reading of the tree just
+    // brought; an explicit read does (the server may have changed the value
+    // before it applied a LISTEN, and not sent it)
+    std::vector<ossia::net::parameter_base*> one{all.front()};
     const auto t0 = clock_type::now();
-    c.mirror->refresh_unfollowed(value_address(0, 0, 0));
+    ossia::oscquery::refresh_followed_values(one);
     c.poll_for(300);
     CHECK(s.count_if(is_value_read, t0) == 0);
-    std::this_thread::sleep_for(1100ms);
-    c.mirror->refresh_unfollowed(value_address(0, 0, 0));
+    const auto t1 = clock_type::now();
+    ossia::oscquery::read_followed_value(*all.front());
     c.poll_for(300);
-    CHECK(s.count_if(is_value_read, t0) == 1);
+    CHECK(s.count_if(is_value_read, t1) == 1);
+    std::this_thread::sleep_for(1100ms);
+    const auto t2 = clock_type::now();
+    ossia::oscquery::refresh_followed_values(one);
+    c.poll_for(300);
+    CHECK(s.count_if(is_value_read, t2) == 1);
   }
 }
 
