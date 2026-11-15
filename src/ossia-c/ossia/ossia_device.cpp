@@ -83,6 +83,11 @@ void ossia_device_free(ossia_device_t device)
       auto it = devs.devices.find(device->device->get_name());
       if(it != devs.devices.end())
       {
+        // A mirror applies the answers of its value reads on its HTTP
+        // thread: stopped (its threads joined) before its nodes go
+        if(auto mirror = dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(
+               &device->device->get_protocol()))
+          mirror->stop();
         device->device->get_root_node().clear_children();
         devs.devices.erase(it);
       }
