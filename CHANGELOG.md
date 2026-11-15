@@ -4,6 +4,30 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
+## [Unreleased]
+
+### Fixed
+
+- OSCQuery client: an explicit read of a parameter nothing follows
+  (`ossia_parameter_get_value` of the C API, `Parameter.GetValue` of Unity)
+  less than a second after a reading of the tree gave the value of that reading
+  without asking the server: `tree_fresh_window` applied to it as to
+  `namespace`. A change the server made before it applied the `LISTEN` of a
+  client that had just started to follow the parameter never reached that
+  client: `Ossia.Remote` binds, reads the value, then listens; a value the
+  server pushed right then was lost (`ClientTests.TreeReadAndValuesBothWays` of
+  the Unity package, PlayMode: 0.3 kept instead of 0.8). The window now applies
+  only to the bulk refresh of ossia-max (`refresh_followed_values`,
+  `namespace`); an explicit read asks the server, at most once every 100 ms as
+  before (`[unity-client]` of `tests/C/unit-tests/unit-tests-c-network.cpp`,
+  red on `2.1.0+prism.14`; `[bulk-refresh]`). **The packages tagged
+  `v2.1.0+prism.14` have this defect**; `2.1.0+prism.12` does not.
+- C API: `ossia_device_free` of a mirror removed its nodes while its HTTP thread
+  could still apply the answer of a value read to one of them (ThreadSanitizer,
+  5 runs of 5 in `C API: an answer older than a write of this client does not
+  undo it`, once the read is sent again). The mirror is now stopped, its
+  threads joined, before its nodes go.
+
 ## [2.1.0+prism.14] - 2026-11-15
 
 The packages are built on the WebSocket server and client of the pull request
