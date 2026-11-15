@@ -415,6 +415,65 @@ TEST_CASE("Mirror: the tree changes are applied in the order they came", "[comma
   CHECK(wrong == 0);
 }
 
+// Max quits: the mirrors of the mDNS directory are statics of ossia-max, and
+// left to exit() their HTTP thread ran a request's handler while the statics
+// were destroyed (Max-2026-11-15-094903.ips). shutdown, called by Max's quit
+// task, stops them first: the WebSocket closes, no request starts any more,
+// and the directory, still there, builds nothing again.
+TEST_CASE("ossia-max: the directory stops its mirrors when Max quits", "[directory-shutdown]")
+{
+  tree_shape sh;
+  sh.base_tracks = 4;
+  sh.tracks = 0;
+  sh.devices = 2;
+  sh.parameters = 48;
+  synthetic_tree tree{sh};
+  bench_server s{tree, 0};
+  s.value_ms = 20;
+  ossia::max_binding::oscquery_directory d;
+  d.inject(true, "judge", "127.0.0.1", std::to_string(s.port));
+  std::shared_ptr<ossia::net::generic_device> dev;
+  for(int i = 0; i < 400 && !dev; i++)
+  {
+    d.poll();
+    dev = d.find("judge");
+    std::this_thread::sleep_for(25ms);
+  }
+  REQUIRE(dev);
+  auto* mirror = dynamic_cast<ossia::oscquery::oscquery_mirror_protocol*>(&dev->get_protocol());
+  REQUIRE(mirror);
+  REQUIRE(s.ws_open == 1);
+  std::this_thread::sleep_for(1100ms);
+
+  // Value reads in flight, 20 ms each on the server
+  int queued = 0;
+  for(auto* n : ossia::net::list_all_children(&dev->get_root_node()))
+    if(n->get_parameter() && queued < 200)
+    {
+      mirror->refresh_unfollowed(n->osc_address());
+      queued++;
+    }
+  std::this_thread::sleep_for(100ms);
+  REQUIRE(s.readings_open > 0);
+
+  d.shutdown();
+  const auto t_stop = clock_type::now();
+  std::this_thread::sleep_for(300ms);
+  const int after_stop = s.count_if([&](const reading&) { return true; }, t_stop);
+  std::this_thread::sleep_for(700ms);
+  const int later = s.count_if([&](const reading&) { return true; }, t_stop);
+  d.poll();
+  CHECK(s.ws_open == 0);
+  CHECK(!mirror->connected());
+  CHECK(after_stop == later);
+  CHECK(later == 0);
+  // The client connected by name keeps the device: stopped, the same one
+  CHECK(d.find("judge") == dev);
+  std::printf("directory-shutdown: %d value reads queued, WebSocket open %d, requests begun after "
+              "the shutdown %d\n", queued, int(s.ws_open), later);
+}
+
+
 // ossia.client and ossia.device: one namespace_changed for the tree changes
 // between two flushes, with the paths that cover them (at most 16, a common
 // parent when more places changed), and each change as before while there
