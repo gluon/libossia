@@ -661,6 +661,45 @@ TEST_CASE("C API: an added parameter read then followed gets its value once", "[
   REQUIRE(std::count(got.begin(), got.end(), 0.7f) == 1);
 }
 
+// What Ossia.Client and Ossia.Remote of Unity do, frame by frame
+// (PlayMode ClientTests.TreeReadAndValuesBothWays): the Remote reads the
+// value once, then the client registers the parameter in its message queue,
+// and each frame runs the commands, pops the queue and reads the value of
+// what came. A value the server pushes then reaches the field.
+TEST_CASE("C API: a value pushed by the server reaches a queued parameter", "[network_c][unity-client]")
+{
+  server s{"c_unity_client_server"};
+  auto level = float_parameter(s.dev, "/level");
+  ossia_parameter_push_f(level, 0.3f);
+  mirror m{s.url(), "c_unity_client_mirror"};
+  auto remote = find_parameter(m.dev, "/level");
+  REQUIRE(remote);
+  auto mq = ossia_mq_create(m.dev);
+  float field = value_of(remote);
+  ossia_mq_register(mq, remote);
+  auto frames = [&](float until, int ms) {
+    for(int t = 0; t < ms && field != until; t += 16)
+    {
+      ossia_device_run_commands(m.dev);
+      ossia_parameter_t p{};
+      ossia_value_t v{};
+      while(ossia_mq_pop(mq, &p, &v))
+      {
+        ossia_value_free(v);
+        if(p == remote)
+          field = value_of(remote);
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+  };
+  frames(0.3f, 2000);
+  REQUIRE(field == 0.3f);
+  ossia_parameter_push_f(level, 0.8f);
+  frames(0.8f, 2000);
+  ossia_mq_free(mq);
+  CHECK(field == 0.8f);
+}
+
 TEST_CASE("C API: ossia_device_push_bundle from a server", "[network_c]")
 {
   const int n = 40;
@@ -2667,9 +2706,7 @@ TEST_CASE("C API: an answer older than a write of this client does not undo it",
   auto f = find_parameter(m.dev, "/f");
   REQUIRE(f);
   settle();
-  // Past the values the tree read at the connection brought: a value read in a
-  // tree less than tree_fresh_window ago is not read again
-  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
   d.value = 0.3f;
   d.value_delay_ms = 300;
