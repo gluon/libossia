@@ -125,6 +125,91 @@ struct slow_listener
       ;
   }
 };
+
+// A server that accepts the WebSocket and never answers an HTTP request: a
+// build of a mirror on it waits for its tree until tree_timeout (35 s)
+struct silent_server
+{
+  asio::io_context ioc;
+  asio::ip::tcp::acceptor acceptor{ioc};
+  uint16_t port{};
+  std::atomic<int> http_requests{0}, websockets{0};
+  std::vector<std::shared_ptr<void>> held;
+  std::thread net;
+
+  silent_server()
+  {
+    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
+    acceptor.open(ep.protocol());
+    acceptor.set_option(asio::socket_base::reuse_address(true));
+    acceptor.bind(ep);
+    acceptor.listen();
+    port = acceptor.local_endpoint().port();
+    accept();
+    net = std::thread([this] { ioc.run(); });
+  }
+  ~silent_server()
+  {
+    ioc.stop();
+    net.join();
+  }
+  std::string url() const { return "ws://127.0.0.1:" + std::to_string(port); }
+
+  struct conn : std::enable_shared_from_this<conn>
+  {
+    silent_server& srv;
+    beast::tcp_stream stream;
+    beast::flat_buffer buffer;
+    http::request<http::string_body> req;
+    std::unique_ptr<beast::websocket::stream<beast::tcp_stream>> ws;
+    conn(silent_server& s, asio::ip::tcp::socket sock)
+        : srv{s}
+        , stream{std::move(sock)}
+    {
+    }
+    void start()
+    {
+      http::async_read(stream, buffer, req, [self = shared_from_this()](beast::error_code ec, std::size_t) {
+        if(ec)
+          return;
+        if(beast::websocket::is_upgrade(self->req))
+        {
+          ++self->srv.websockets;
+          self->ws = std::make_unique<beast::websocket::stream<beast::tcp_stream>>(std::move(self->stream));
+          self->ws->async_accept(self->req, [self](beast::error_code ec) {
+            if(!ec)
+              self->read_ws();
+          });
+        }
+        else
+        {
+          // Held open, never answered
+          ++self->srv.http_requests;
+          self->srv.held.push_back(self);
+        }
+      });
+    }
+    void read_ws()
+    {
+      ws->async_read(buffer, [self = shared_from_this()](beast::error_code ec, std::size_t) {
+        if(ec)
+          return;
+        self->buffer.consume(self->buffer.size());
+        self->read_ws();
+      });
+    }
+  };
+
+  void accept()
+  {
+    acceptor.async_accept([this](beast::error_code ec, asio::ip::tcp::socket sock) {
+      if(ec)
+        return;
+      std::make_shared<conn>(*this, std::move(sock))->start();
+      accept();
+    });
+  }
+};
 }
 
 // Proposal, VALUE: a value read answers with the value only, without its
@@ -471,6 +556,71 @@ TEST_CASE("ossia-max: the directory stops its mirrors when Max quits", "[directo
   CHECK(d.find("judge") == dev);
   std::printf("directory-shutdown: %d value reads queued, WebSocket open %d, requests begun after "
               "the shutdown %d\n", queued, int(s.ws_open), later);
+}
+
+
+// Max quits, or a patch with a client is closed, while a mirror is being built
+// on a server that accepts the WebSocket and never answers the tree request:
+// the build is given up after about 2 s (abandon_after), not waited for until
+// tree_timeout (35 s), and without a line in Max's console.
+TEST_CASE("ossia-max: a mirror build is given up at quit, silently", "[silent-build]")
+{
+  using namespace std::chrono;
+  auto sink = std::make_shared<captured_log>();
+  auto& sinks = ossia::logger().sinks();
+  sinks.push_back(sink);
+  silent_server srv;
+  auto wait_requests = [&](int n) {
+    for(int i = 0; i < 1000 && srv.http_requests < n; i++)
+      std::this_thread::sleep_for(5ms);
+    return srv.http_requests >= n;
+  };
+
+  double attempt_s = 0, shutdown_s = 0, directory_s = 0;
+  {
+    // A client's build, ended when the client is freed
+    auto a = std::make_unique<ossia::max_binding::oscquery_connect_attempt>(srv.url(), "silent");
+    REQUIRE(wait_requests(1));
+    std::this_thread::sleep_for(200ms);
+    CHECK(!a->done());
+    const auto t0 = clock_type::now();
+    a.reset();
+    attempt_s = seconds_since(t0);
+  }
+  {
+    // The directory's build, ended by the quit task
+    auto d = std::make_unique<ossia::max_binding::oscquery_directory>();
+    d->inject(true, "silent", "127.0.0.1", std::to_string(srv.port));
+    const int before = srv.http_requests;
+    for(int i = 0; i < 400 && srv.http_requests <= before; i++)
+    {
+      d->poll();
+      std::this_thread::sleep_for(5ms);
+    }
+    REQUIRE(srv.http_requests > before);
+    std::this_thread::sleep_for(200ms);
+    auto t0 = clock_type::now();
+    d->shutdown();
+    shutdown_s = seconds_since(t0);
+    t0 = clock_type::now();
+    d.reset();
+    directory_s = seconds_since(t0);
+  }
+  // What a build given up does after: nothing written either
+  std::this_thread::sleep_for(500ms);
+  const auto lines = sink->take();
+  sinks.erase(std::remove(sinks.begin(), sinks.end(), sink), sinks.end());
+  std::printf("silent-build: client's build given up in %.2f s, directory shutdown %.2f s, directory "
+              "destroyed %.2f s, %zu lines written, %d HTTP requests held\n",
+              attempt_s, shutdown_s, directory_s, lines.size(), int(srv.http_requests));
+  for(auto& l : lines)
+    std::printf("  %s\n", l.c_str());
+  // Given up, a build waiting for its tree ends at its next step (20 ms):
+  // well under abandon_after, which bounds what cannot stop sooner
+  CHECK(attempt_s < 1.0);
+  CHECK(shutdown_s < 1.0);
+  CHECK(directory_s < 0.5);
+  CHECK(lines.empty());
 }
 
 
