@@ -156,6 +156,27 @@ namespace Ossia.Tests
       return r;
     }
 
+    // The entry of this client in ?PRISM_CONNECTIONS once the server applied
+    // the LISTEN of /level, or after 3 s. A value the server changes before it
+    // applied the LISTEN of a client is not sent to that client (README, Known
+    // limits): a test that pushes right after a Remote binds waits for it.
+    string listenEntry = "";
+    IEnumerator UntilServerHasListen ()
+    {
+      var name = "\"NAME\":\"unity_client_" + client.GetInstanceID () + "_1\"";
+      listenEntry = "";
+      float end = Time.realtimeSinceStartup + 3;
+      while (!listenEntry.Contains ("\"LISTEN\":[\"/level\"]") && Time.realtimeSinceStartup < end) {
+        string connections;
+        using (var web = new WebClient ())
+          connections = web.DownloadString ("http://127.0.0.1:" + server.WsPort + "/?PRISM_CONNECTIONS");
+        var at = connections.IndexOf (name, StringComparison.Ordinal);
+        listenEntry = at < 0 ? "" : connections.Substring (at, connections.IndexOf ('}', at) - at);
+        if (!listenEntry.Contains ("\"LISTEN\":[\"/level\"]"))
+          yield return new WaitForSecondsRealtime (0.1f);
+      }
+    }
+
     static IEnumerator Until (Func<bool> done, float seconds)
     {
       float end = Time.realtimeSinceStartup + seconds;
@@ -173,7 +194,9 @@ namespace Ossia.Tests
       yield return Until (() => fields.level == 0.3f, 2);
       Assert.AreEqual (0.3f, fields.level, "value of the server on connection");
 
-      // Server -> field
+      // Server -> field, once the server sends /level to this client
+      yield return UntilServerHasListen ();
+      StringAssert.Contains ("\"LISTEN\":[\"/level\"]", listenEntry, "the server has the LISTEN of /level");
       server.Level.PushValue (0.8f);
       yield return Until (() => fields.level == 0.8f, 2);
       Assert.AreEqual (0.8f, fields.level, "value of the server applied");
@@ -355,19 +378,9 @@ namespace Ossia.Tests
     {
       yield return Connect (null, 7);
       yield return Until (() => fields.level == 0.3f, 2);
-      var name = "\"NAME\":\"unity_client_" + client.GetInstanceID () + "_1\"";
-      string entry = "";
-      float end = Time.realtimeSinceStartup + 3;
-      while (!entry.Contains ("\"LISTEN\":[\"/level\"]") && Time.realtimeSinceStartup < end) {
-        string connections;
-        using (var web = new WebClient ())
-          connections = web.DownloadString ("http://127.0.0.1:" + server.WsPort + "/?PRISM_CONNECTIONS");
-        var at = connections.IndexOf (name, StringComparison.Ordinal);
-        entry = at < 0 ? "" : connections.Substring (at, connections.IndexOf ('}', at) - at);
-        yield return new WaitForSecondsRealtime (0.1f);
-      }
-      Debug.Log ("CLIENT listens: " + entry);
-      StringAssert.Contains ("\"LISTEN\":[\"/level\"]", entry, "the client listens to /level only");
+      yield return UntilServerHasListen ();
+      Debug.Log ("CLIENT listens: " + listenEntry);
+      StringAssert.Contains ("\"LISTEN\":[\"/level\"]", listenEntry, "the client listens to /level only");
 
       server.P[0].PushValue (0.5f);
       server.Level.PushValue (0.8f);

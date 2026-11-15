@@ -4,30 +4,6 @@ All notable changes to **ossia-prism**, the Max package built from this reposito
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/) as `UPSTREAM+prism.N`: the ossia version the package is built from, then the number of the ossia-prism release on top of it.
 
-## [Unreleased]
-
-### Fixed
-
-- OSCQuery client: an explicit read of a parameter nothing follows
-  (`ossia_parameter_get_value` of the C API, `Parameter.GetValue` of Unity)
-  less than a second after a reading of the tree gave the value of that reading
-  without asking the server: `tree_fresh_window` applied to it as to
-  `namespace`. A change the server made before it applied the `LISTEN` of a
-  client that had just started to follow the parameter never reached that
-  client: `Ossia.Remote` binds, reads the value, then listens; a value the
-  server pushed right then was lost (`ClientTests.TreeReadAndValuesBothWays` of
-  the Unity package, PlayMode: 0.3 kept instead of 0.8). The window now applies
-  only to the bulk refresh of ossia-max (`refresh_followed_values`,
-  `namespace`); an explicit read asks the server, at most once every 100 ms as
-  before (`[unity-client]` of `tests/C/unit-tests/unit-tests-c-network.cpp`,
-  red on `2.1.0+prism.14`; `[bulk-refresh]`). **The packages tagged
-  `v2.1.0+prism.14` have this defect**; `2.1.0+prism.12` does not.
-- C API: `ossia_device_free` of a mirror removed its nodes while its HTTP thread
-  could still apply the answer of a value read to one of them (ThreadSanitizer,
-  5 runs of 5 in `C API: an answer older than a write of this client does not
-  undo it`, once the read is sent again). The mirror is now stopped, its
-  threads joined, before its nodes go.
-
 ## [2.1.0+prism.14] - 2026-11-15
 
 The packages are built on the WebSocket server and client of the pull request
@@ -106,9 +82,9 @@ to fail.
   `namespace`.
 - OSCQuery client: a parameter nothing follows, read less than a second after a
   reading of its tree (`tree_fresh_window`), is not read again from the server:
-  its value came with that reading. `ossia_parameter_get_value` of the C API and
-  `namespace` follow this rule; before, the first read after a connection
-  always sent a request.
+  its value came with that reading. `namespace` follows this rule; an explicit
+  read (`ossia_parameter_get_value` of the C API, `Parameter.GetValue` of Unity)
+  still asks the server (see Fixed).
 
 - OSCQuery server, both of them (the one of the C API, and the one of
   `ossia.device` and Unity): a query for an attribute outside the OSCQuery
@@ -150,6 +126,25 @@ to fail.
 
 ### Fixed
 
+- OSCQuery client: an explicit read of a parameter nothing follows
+  (`ossia_parameter_get_value` of the C API, `Parameter.GetValue` of Unity)
+  less than a second after a reading of the tree gave the value of that reading
+  without asking the server: `tree_fresh_window` applied to it as to
+  `namespace`. A change the server made before it applied the `LISTEN` of a
+  client that had just started to follow the parameter never reached that
+  client: `Ossia.Remote` binds, reads the value, then listens; a value the
+  server pushed right then was lost (`ClientTests.TreeReadAndValuesBothWays` of
+  the Unity package, PlayMode: 0.3 kept instead of 0.8). The window now applies
+  only to the bulk refresh of ossia-max (`refresh_followed_values`,
+  `namespace`); an explicit read asks the server, at most once every 100 ms as
+  before (`[unity-client]` of `tests/C/unit-tests/unit-tests-c-network.cpp`,
+  red before the correction; `[bulk-refresh]`). Found by the PlayMode tests of
+  the Unity package before this Release; `2.1.0+prism.12` does not have it.
+- C API: `ossia_device_free` of a mirror removed its nodes while its HTTP thread
+  could still apply the answer of a value read to one of them (ThreadSanitizer,
+  5 runs of 5 in `C API: an answer older than a write of this client does not
+  undo it`, once the read is sent again). The mirror is now stopped, its
+  threads joined, before its nodes go.
 - Max: Max could crash when it quit while an `ossia.client` was reading from an
   OSCQuery server (`EXC_BAD_ACCESS` on the thread `ossia oscq http`). The
   mirrors of the devices found over mDNS are statics of the library: they
@@ -217,6 +212,10 @@ to fail.
 
 ### Changed
 
+- Tests: `ClientTests.TreeReadAndValuesBothWays` of the Unity package (PlayMode)
+  waits for the server to list the `LISTEN` of `/level` before it pushes a
+  value: a value changed before the server applied the `LISTEN` does not reach
+  the client (README, Known limits).
 - Unity: the example `CustomDevice.cs` serves its device with the OSCQuery server the Controller uses, on a network context of its own, which `OnApplicationQuit` frees before the reset of the library: the server that does not send a client's own values back to it and arbitrates crossing writes (`ReproWebSocketTest`). It used `new Ossia.OSCQuery (osc, ws)`, the server of the C API, which in `2.1.0+prism.12` did neither (on this base it does both, see Added). Its scripts compile (`tools/check_unity_scripts.sh`), and `PlayCycleTests.StopWithCustomDeviceAndAClient` passes with it (a new project, Unity 6000.3, batchmode: EditMode 26 of 26, PlayMode 37 of 37).
 
 ## [2.1.0+prism.12] - 2026-11-11
