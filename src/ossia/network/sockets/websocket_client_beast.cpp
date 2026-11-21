@@ -232,7 +232,8 @@ void websocket_client_beast::on_connect(
   // peer disconnected meanwhile; this runs inside an io_context handler, where
   // an exception would propagate out of run() and stop all networking, so use
   // the non-throwing overload.
-  auto host = m_host;
+  // An IPv6 address goes between brackets (RFC 7230, 5.4)
+  auto host = m_host.find(':') != std::string::npos ? "[" + m_host + "]" : m_host;
   {
     boost::beast::error_code ep_ec;
     auto ep = boost::beast::get_lowest_layer(*m_ws).socket().remote_endpoint(ep_ec);
