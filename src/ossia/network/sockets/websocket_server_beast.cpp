@@ -317,6 +317,7 @@ websocket_server_beast::websocket_server_beast(ossia::net::network_context_ptr c
     : m_context{std::move(ctx)}
     , m_life{std::make_shared<detail::beast_server_life>()}
     , m_acceptor{boost::asio::make_strand(m_context->context)}
+    , m_accept_retry{boost::asio::make_strand(m_context->context)}
 {
   m_life->server = this;
 }
@@ -383,6 +384,9 @@ void websocket_server_beast::stop()
   boost::beast::error_code ec;
   if(m_acceptor.is_open())
     m_acceptor.close(ec);
+  // A retry waiting to take the next connection reaches no server either,
+  // but it has nothing left to wait for
+  m_accept_retry.cancel();
 
   std::lock_guard lock{m_connections_mutex};
   for(auto& conn : m_connections)
@@ -507,29 +511,56 @@ void websocket_server_beast::do_accept()
   });
 }
 
+// An acceptor that fails on every connection would spin on do_accept(): the
+// next one is taken a little later. A stopped server takes none.
+void websocket_server_beast::retry_accept_later()
+{
+  m_accept_retry.expires_after(std::chrono::milliseconds(50));
+  m_accept_retry.async_wait([life = m_life](const boost::system::error_code& ec) {
+    if(ec)
+      return;
+    std::lock_guard lock{life->mutex};
+    if(auto* server = life->server)
+      server->do_accept();
+  });
+}
+
 void websocket_server_beast::on_accept(
     boost::beast::error_code ec, boost::asio::ip::tcp::socket socket)
 {
   if(ec)
   {
-    // The acceptor was closed: stop the loop. Any other (transient) error
-    // must not kill the listener — keep accepting.
+    // The acceptor was closed: stop the loop. Any other error must not kill
+    // the listener — keep accepting.
     if(ec == boost::asio::error::operation_aborted)
       return;
-    // A client that left before it was accepted (a mirror stopped as it
-    // connects, a port scan) is no error: on macOS its reset shows as
-    // EINVAL, when the accepted socket is set up
-    if(ec == boost::asio::error::connection_aborted
-       || ec == boost::asio::error::connection_reset
-       || ec == boost::asio::error::invalid_argument)
+    // A client gone before it was accepted (a mirror stopped as it connects,
+    // a port scan) is no error. On macOS accept(2) succeeds for it, and asio
+    // reports EINVAL while it sets up a socket whose peer has already left:
+    // measured here, of 200 clients that connect and reset, accept(2) never
+    // failed while asio gave EINVAL for 43 to 68 of them.
+    const bool client_gone = ec == boost::asio::error::connection_aborted
+                             || ec == boost::asio::error::connection_reset
+                             || ec == boost::asio::error::invalid_argument;
+    // EINVAL also comes from an acceptor that can accept nothing at all, one
+    // that never listened for instance, and neither the acceptor nor the
+    // socket handed back tells the two apart. What tells them apart is the
+    // count: clients gone fail at most once each, so no more in a row than
+    // the listen backlog holds, where an acceptor that accepts nothing fails
+    // without end. Beyond that count the error is logged, and the next
+    // connection taken later, so it cannot spin unseen.
+    if(client_gone && ++m_accept_failures_in_a_row <= max_accept_failures_in_a_row)
     {
       do_accept();
       return;
     }
     ossia::logger().error("WS accept error: {}", ec.message());
-    do_accept();
+    m_accept_failures_in_a_row = 0;
+    retry_accept_later();
     return;
   }
+
+  m_accept_failures_in_a_row = 0;
 
   // Create connection and start reading
   auto conn = std::make_shared<beast_ws_connection>(std::move(socket), m_life);
