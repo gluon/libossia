@@ -57,7 +57,11 @@ public:
     m_req.method(v);
     m_req.version(11);
     m_req.target(percent_encode_spaces(path));
-    m_req.set(http::field::host, server);
+    // An IPv6 address goes between brackets (RFC 7230, 5.4 and RFC 3986, 3.2.2)
+    m_req.set(
+        http::field::host, server.find(':') != std::string::npos && server.front() != '['
+                               ? "[" + server + "]"
+                               : server);
     m_req.set(http::field::accept, "*/*");
     m_req.set(http::field::user_agent, "ossia");
     m_req.set(http::field::connection, "close");

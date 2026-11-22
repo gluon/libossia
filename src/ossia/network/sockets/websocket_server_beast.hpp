@@ -4,6 +4,7 @@
 #include <ossia/network/sockets/websocket_server_interface.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -21,6 +22,21 @@ namespace ossia::net
 
 class websocket_server_beast;
 
+namespace detail
+{
+// The server as its connections and its acceptor see it. They outlive it:
+// their pending operations hold them, and a connection whose closing
+// completes after stop() still calls back. stop() and the destructor set
+// server to null under the mutex; a callback that comes later reaches no
+// server and runs no handler, and stop() waits for a handler running on
+// another thread. Recursive, since a handler may stop the server.
+struct beast_server_life
+{
+  std::recursive_mutex mutex;
+  websocket_server_beast* server{};
+};
+}
+
 /// A single WebSocket connection managed by the beast server.
 class beast_ws_connection : public std::enable_shared_from_this<beast_ws_connection>
 {
@@ -28,7 +44,8 @@ class beast_ws_connection : public std::enable_shared_from_this<beast_ws_connect
 
 public:
   explicit beast_ws_connection(
-      boost::asio::ip::tcp::socket&& socket, websocket_server_beast& server);
+      boost::asio::ip::tcp::socket&& socket,
+      std::shared_ptr<detail::beast_server_life> life);
 
   ~beast_ws_connection();
 
@@ -56,7 +73,7 @@ private:
   boost::beast::websocket::stream<boost::beast::tcp_stream> m_ws;
   boost::beast::flat_buffer m_buffer;
   boost::beast::http::request<boost::beast::http::string_body> m_http_req;
-  websocket_server_beast& m_server;
+  std::shared_ptr<detail::beast_server_life> m_life;
   bool m_is_websocket{false};
 
   // Outbound queue, only touched on the strand. {is_text, payload}.
@@ -73,6 +90,12 @@ public:
   ~websocket_server_beast() override;
 
   void listen(uint16_t port) override;
+  //! Whether listen(port) takes IPv6 as well, off by default: a client that
+  //! reaches a dual-stack server by a name arrives over IPv6, and the OSC
+  //! side of OSCQuery is IPv4, so its values would go to an address it cannot
+  //! receive on. Set it before listen().
+  void set_dual_stack(bool dual_stack) noexcept { m_dual_stack = dual_stack; }
+  bool dual_stack() const noexcept { return m_dual_stack; }
   void run() override;
   void stop() override;
   void close(ws_connection_handle hdl) override;
@@ -94,13 +117,25 @@ public:
 private:
   void do_accept();
   void on_accept(boost::beast::error_code ec, boost::asio::ip::tcp::socket socket);
+  void retry_accept_later();
+  //! Accept failures in a row, none of them letting a connection through,
+  //! that are taken for clients gone before they were accepted: beyond that,
+  //! the error is logged. Each client that left gives at most one failure,
+  //! so a burst of them gives no more than the listen backlog holds; an
+  //! acceptor that can accept nothing gives them without end.
+  static constexpr int max_accept_failures_in_a_row
+      = boost::asio::socket_base::max_listen_connections;
   void add_connection(std::shared_ptr<beast_ws_connection> conn);
   void remove_connection(std::shared_ptr<beast_ws_connection> conn);
 
   std::shared_ptr<beast_ws_connection> find_connection(const ws_connection_handle& hdl);
 
   ossia::net::network_context_ptr m_context;
+  std::shared_ptr<detail::beast_server_life> m_life;
   boost::asio::ip::tcp::acceptor m_acceptor;
+  boost::asio::steady_timer m_accept_retry;
+  int m_accept_failures_in_a_row{};
+  bool m_dual_stack{};
   std::set<std::shared_ptr<beast_ws_connection>> m_connections;
   std::mutex m_connections_mutex;
 

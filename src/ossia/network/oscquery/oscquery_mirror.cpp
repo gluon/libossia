@@ -17,9 +17,12 @@
 #include <ossia/network/oscquery/detail/outbound_visitor.hpp>
 #include <ossia/network/oscquery/detail/value_to_json.hpp>
 #include <ossia/network/sockets/websocket_client_beast.hpp>
+#include <ossia/network/sockets/websocket_common.hpp>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/erase.hpp>
+
+#include <algorithm>
 namespace ossia::oscquery
 {
 struct http_answer
@@ -82,20 +85,11 @@ oscquery_mirror_protocol::oscquery_mirror_protocol(
     , m_http{std::make_unique<http_client_context>()}
     , m_id{*this, {}}
 {
-  auto port_idx = m_queryHost.find_last_of(':');
-  if(port_idx != std::string::npos)
-    m_queryPort = m_queryHost.substr(port_idx + 1);
-  else
-    m_queryPort = "80";
-
-  // for http, host should be only the name, e.g. example.com instead of
-  // http://example.com:1234
-  if(port_idx != std::string::npos)
-    m_httpHost.erase(m_httpHost.begin() + port_idx, m_httpHost.end());
-  if(boost::starts_with(m_httpHost, "http://"))
-    m_httpHost.erase(m_httpHost.begin(), m_httpHost.begin() + 7);
-  else if(boost::starts_with(m_httpHost, "ws://"))
-    m_httpHost.erase(m_httpHost.begin(), m_httpHost.begin() + 5);
+  // For HTTP, the host alone, e.g. example.com for ws://example.com:1234, and
+  // ::1 for ws://[::1]:1234: an IPv6 address is written between brackets
+  const auto url = ossia::net::parse_websocket_uri(m_queryHost);
+  m_httpHost = url.host;
+  m_queryPort = url.port;
 }
 
 void oscquery_mirror_protocol::stop()
@@ -676,16 +670,25 @@ void oscquery_mirror_protocol::on_OSCMessage(
 #endif
 }
 
+// The address alone of a URL, an address:port or an address: 192.0.2.1 for
+// ws://192.0.2.1:1234, ::1 for ws://[::1]:1234, [::1]:1234, [::1] or ::1
 std::string to_ip(std::string uri)
 {
   uri = boost::algorithm::ierase_first_copy(uri, "http://");
   uri = boost::algorithm::ierase_first_copy(uri, "https://");
   uri = boost::algorithm::ierase_first_copy(uri, "ws://");
   uri = boost::algorithm::ierase_first_copy(uri, "wss://");
+  if(auto path = uri.find('/'); path != std::string::npos)
+    uri.erase(path);
 
-  auto pos = uri.find_last_of(':');
-  if(pos != std::string::npos)
-    uri.erase(pos, uri.size());
+  if(!uri.empty() && uri.front() == '[')
+  {
+    auto close = uri.find(']');
+    return close == std::string::npos ? uri.substr(1) : uri.substr(1, close - 1);
+  }
+  // An IPv6 address without brackets has no port
+  if(std::count(uri.begin(), uri.end(), ':') == 1)
+    uri.erase(uri.find(':'));
 
   return uri;
 }
@@ -727,10 +730,15 @@ bool oscquery_mirror_protocol::on_WSMessage(
             if(!m_host_info.osc_port)
               m_host_info.osc_port = std::stoi(m_queryPort);
           }
-          if(m_host_info.osc_transport == host_info::UDP)
+          // The UDP sockets of OSC are IPv4 only: with a server at an IPv6
+          // address, the values go over the WebSocket, both ways (without
+          // START_OSC_STREAMING, the server sends them there)
+          const auto osc_ip = to_ip(*m_host_info.osc_ip);
+          if(m_host_info.osc_transport == host_info::UDP
+             && osc_ip.find(':') == std::string::npos)
           {
             m_oscSender = std::make_unique<osc::sender<oscquery::osc_outbound_visitor>>(
-                m_logger, to_ip(*m_host_info.osc_ip), *m_host_info.osc_port);
+                m_logger, osc_ip, *m_host_info.osc_port);
 
             // Send to the server the local receiver port
             if(m_host_info.extensions["OSC_STREAMING"])
