@@ -7,6 +7,9 @@
 
 #include <boost/asio.hpp>
 
+#include <atomic>
+#include <chrono>
+
 #include <utility>
 #include <vector>
 
@@ -26,6 +29,52 @@ inline bool http_verb_is(std::string_view verb, std::string_view upper) noexcept
       return false;
   return true;
 }
+
+
+// CI probe: requests in flight and the state at each error, through the
+// logger only (a shared build has one copy of these counters per module).
+struct http_client_probe
+{
+  static inline std::atomic<int> in_flight{0};
+  static inline std::atomic<int> max_in_flight{0};
+  static inline std::atomic<int> started{0};
+  static long long now_ms()
+  {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+  }
+  static void start()
+  {
+    const int st = ++started;
+    const int k = ++in_flight;
+    int m = max_in_flight.load();
+    while(k > m && !max_in_flight.compare_exchange_weak(m, k))
+      ;
+    if(k > m && k % 50 == 0)
+      ossia::logger().info(
+          "HTTP probe: in_flight={} started={} now={}", k, st, now_ms());
+  }
+  static void end()
+  {
+    if(--in_flight == 0)
+    {
+      // only after a burst: sequential requests would log at each one
+      if(const int peak = max_in_flight.exchange(0); peak >= 50)
+        ossia::logger().info(
+            "HTTP probe: idle after a peak of {} started={} now={}", peak,
+            started.load(), now_ms());
+    }
+  }
+  static void error(const char* stage, const boost::system::error_code& e)
+  {
+    ossia::logger().error(
+        "HTTP Error: {} [probe stage={} code={} cat={} in_flight={} started={} "
+        "now={}]",
+        e.message(), stage, e.value(), e.category().name(), in_flight.load(),
+        started.load(), now_ms());
+  }
+};
 
 // Full HTTP client supporting all methods, custom headers, request body.
 // Success callback receives (request, status_code, response_body).
@@ -51,6 +100,7 @@ public:
       , m_fun{std::move(f)}
       , m_err{std::move(err)}
   {
+    http_client_probe::start();
     m_request.reserve(256 + host.size() + path.size() + body.size());
     m_response.prepare(Fun::reserve_expect);
 
@@ -110,6 +160,8 @@ public:
       fmt::format_to(fmt::appender(m_request), "{}", body);
   }
 
+  ~http_client_request() { http_client_probe::end(); }
+
   void resolve(const std::string& server, const std::string& port)
   {
     m_resolver.async_resolve(
@@ -139,7 +191,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      http_client_probe::error("resolve", err);
       m_err(*this, err.message());
     }
   }
@@ -158,7 +210,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      http_client_probe::error("connect", err);
       m_err(*this, err.message());
     }
   }
@@ -176,7 +228,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      http_client_probe::error("write", err);
       m_err(*this, err.message());
     }
   }
@@ -203,7 +255,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      http_client_probe::error("status", err);
       m_err(*this, err.message());
     }
   }
@@ -225,7 +277,7 @@ private:
   {
     if(err && err != boost::asio::error::eof)
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      http_client_probe::error("header", err);
       m_err(*this, err.message());
       return;
     }
@@ -336,7 +388,7 @@ private:
     }
     else
     {
-      ossia::logger().error("HTTP Error: {}", err.message());
+      http_client_probe::error("content", err);
       m_err(*this, err.message());
     }
   }

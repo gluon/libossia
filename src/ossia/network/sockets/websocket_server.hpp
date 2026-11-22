@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdlib>
 #include <ossia/detail/config.hpp>
 
 #include <ossia/detail/json.hpp>
@@ -180,6 +181,12 @@ public:
 
   void listen(uint16_t port = 9002)
   {
+    // CI probe: listen backlog from the environment, the default otherwise
+    if(const char* b = std::getenv("OSSIA_CI_LISTEN_BACKLOG"); b && *b)
+    {
+      m_server->set_listen_backlog(std::atoi(b));
+      ossia::logger().info("HTTP probe: listen backlog {}", std::atoi(b));
+    }
     m_server->listen(boost::asio::ip::tcp::v4(), port);
 
     boost::system::error_code ec;
