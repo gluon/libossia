@@ -396,11 +396,21 @@ std::string websocket_server_beast::get_remote_endpoint(const ws_connection_hand
 
 std::string websocket_server_beast::get_local_ip(const ws_connection_handle& hdl)
 {
-  if(auto conn = find_connection(hdl))
+  // A plain HTTP request (?HOST_INFO) is answered on a connection that never
+  // became a WebSocket, so is not registered: its handle is its own
+  auto conn = find_connection(hdl);
+  if(!conn)
+    conn = std::static_pointer_cast<beast_ws_connection>(hdl.lock());
+  if(conn)
   {
     try
     {
-      return conn->tcp_socket().local_endpoint().address().to_string();
+      auto addr = conn->tcp_socket().local_endpoint().address();
+      // A dual-stack server reached over IPv4 sees a mapped address
+      // (::ffff:a.b.c.d): a client needs the IPv4 one
+      if(addr.is_v6() && addr.to_v6().is_v4_mapped())
+        addr = boost::asio::ip::make_address_v4(boost::asio::ip::v4_mapped, addr.to_v6());
+      return addr.to_string();
     }
     catch(...)
     {

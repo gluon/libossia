@@ -550,8 +550,13 @@ json_writer::string_t json_writer::query_host_info(
   wr.Key("NAME");
   write_json(wr, name);
 
-  wr.Key("WS_IP");
-  write_json(wr, local_ip);
+  // An empty address is no address: a client that takes it would never
+  // subscribe. Without WS_IP, a client keeps the one it reached the server on
+  if(!local_ip.empty())
+  {
+    wr.Key("WS_IP");
+    write_json(wr, local_ip);
+  }
   wr.Key("WS_PORT");
   wr.Int(ws_port);
 
