@@ -194,6 +194,32 @@ OSSIA_EXPORT
 ossia_protocol_t ossia_protocol_oscquery_mirror_create(const char* host);
 
 /**
+ * @brief List the OSCQuery devices announced over mDNS (_oscjson._tcp).
+ * @param timeout_ms how long to browse, in milliseconds
+ * @param names receives the instance names the devices are announced under
+ * @param hosts receives the hosts they are announced on, e.g. "machine.local."
+ * @param ports receives their WebSocket ports
+ * @param size receives the number of devices
+ *
+ * The three arrays have *size elements. Free them with
+ * ossia_oscquery_devices_free. Without mDNS support, *size is 0.
+ *
+ * @note This function blocks for timeout_ms, while it browses: the devices
+ * announced after it are not listed.
+ * @see ossia::net::list_oscquery_devices
+ * @note Multithread guarantees: MT-safe
+ */
+OSSIA_EXPORT
+void ossia_oscquery_list_devices(
+    int timeout_ms, char*** names, char*** hosts, int** ports, size_t* size);
+
+/**
+ * @brief Free the arrays of ossia_oscquery_list_devices.
+ */
+OSSIA_EXPORT
+void ossia_oscquery_devices_free(char** names, char** hosts, int* ports, size_t size);
+
+/**
  * @brief Free the memory associated to a protocol.
  * @note Multithread guarantees: MT-safe
  */
@@ -382,8 +408,7 @@ typedef enum
   IMPULSE_T,
   BOOL_T,
   STRING_T,
-  LIST_T,
-  CHAR_T
+  LIST_T
 } ossia_type;
 
 /**
@@ -689,12 +714,6 @@ void ossia_parameter_push_3f(ossia_parameter_t param, float v1, float v2, float 
 OSSIA_EXPORT
 void ossia_parameter_push_4f(
     ossia_parameter_t param, float v1, float v2, float v3, float v4);
-/**
- * @see ossia::net::parameter_base::push_value
- * @note Multithread guarantees: Data-Safe.
- */
-OSSIA_EXPORT
-void ossia_parameter_push_c(ossia_parameter_t param, char value);
 /**
  * @see ossia::net::parameter_base::push_value
  * @note Multithread guarantees: Data-Safe.
@@ -1363,13 +1382,6 @@ ossia_value_t ossia_value_create_4f(float v1, float v2, float v3, float v4);
 OSSIA_EXPORT
 ossia_value_t ossia_value_create_bool(int value);
 /**
- * @brief Create a value of type char
- * @note Multithread guarantees: Data-Safe.
- * @see ossia::value
- */
-OSSIA_EXPORT
-ossia_value_t ossia_value_create_char(char value);
-/**
  * @brief Create a value of type string
  * @note Multithread guarantees: Data-Safe.
  * @see ossia::value
@@ -1562,15 +1574,6 @@ float ossia_value_convert_float(ossia_value_t val);
  */
 OSSIA_EXPORT
 int ossia_value_convert_bool(ossia_value_t val);
-/**
- * @brief Get the value as a char
- *
- * This function will do a best-effort conversion.
- *
- * @note Multithread guarantees: Data-Safe.
- */
-OSSIA_EXPORT
-char ossia_value_convert_char(ossia_value_t val);
 /**
  * @brief Get the value as a byte array
  *
