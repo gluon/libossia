@@ -253,6 +253,26 @@ OSSIA_EXPORT
 int ossia_device_update_namespace(ossia_device_t device);
 
 /**
+ * @brief Whether ossia_parameter_get_value asks the server for a parameter
+ * nothing follows, on a device of ossia_protocol_oscquery_mirror_create.
+ * @param device A device whose protocol is an OSCQuery mirror.
+ * @param enable 1 to ask, 0 to read the local value (the default).
+ *
+ * The server sends only the values of what a client listens to, and a
+ * parameter with no callback is not listened to: its local value may be out
+ * of date. With this on, ossia_parameter_get_value on such a parameter asks
+ * the server without waiting, at most every 100 ms, and returns the last
+ * value known. For a binding that reads values every frame instead of
+ * following them; to follow a value, add a callback
+ * (ossia_parameter_add_callback).
+ *
+ * @see ossia::oscquery::oscquery_mirror_protocol::set_read_unfollowed
+ * @note Multithread guarantees: MT-Safe
+ */
+OSSIA_EXPORT
+void ossia_device_set_read_unfollowed(ossia_device_t device, int enable);
+
+/**
  * @brief Get the root node of a device
  *
  * @note Never null.
@@ -382,8 +402,7 @@ typedef enum
   IMPULSE_T,
   BOOL_T,
   STRING_T,
-  LIST_T,
-  CHAR_T
+  LIST_T
 } ossia_type;
 
 /**
@@ -689,12 +708,6 @@ void ossia_parameter_push_3f(ossia_parameter_t param, float v1, float v2, float 
 OSSIA_EXPORT
 void ossia_parameter_push_4f(
     ossia_parameter_t param, float v1, float v2, float v3, float v4);
-/**
- * @see ossia::net::parameter_base::push_value
- * @note Multithread guarantees: Data-Safe.
- */
-OSSIA_EXPORT
-void ossia_parameter_push_c(ossia_parameter_t param, char value);
 /**
  * @see ossia::net::parameter_base::push_value
  * @note Multithread guarantees: Data-Safe.
@@ -1363,13 +1376,6 @@ ossia_value_t ossia_value_create_4f(float v1, float v2, float v3, float v4);
 OSSIA_EXPORT
 ossia_value_t ossia_value_create_bool(int value);
 /**
- * @brief Create a value of type char
- * @note Multithread guarantees: Data-Safe.
- * @see ossia::value
- */
-OSSIA_EXPORT
-ossia_value_t ossia_value_create_char(char value);
-/**
  * @brief Create a value of type string
  * @note Multithread guarantees: Data-Safe.
  * @see ossia::value
@@ -1562,15 +1568,6 @@ float ossia_value_convert_float(ossia_value_t val);
  */
 OSSIA_EXPORT
 int ossia_value_convert_bool(ossia_value_t val);
-/**
- * @brief Get the value as a char
- *
- * This function will do a best-effort conversion.
- *
- * @note Multithread guarantees: Data-Safe.
- */
-OSSIA_EXPORT
-char ossia_value_convert_char(ossia_value_t val);
 /**
  * @brief Get the value as a byte array
  *
